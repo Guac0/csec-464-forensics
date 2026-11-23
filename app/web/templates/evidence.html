@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ ev.rel_path }}{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a> / <span class="mono">{{ ev.rel_path }}</span>{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2 class="mono">{{ ev.rel_path }}</h2>
+  <dl class="meta">
+    <dt>Size</dt><dd>{{ ev.size_bytes | humansize }} ({{ ev.size_bytes }} bytes)</dd>
+    <dt>SHA-256</dt><dd class="mono">{{ ev.sha256 or "not hashed" }}{% if ev.hashed_at %} <span class="muted">({{ ev.hashed_at | dt }})</span>{% endif %}</dd>
+    <dt>OS info</dt><dd>{{ ev.os_info | os_info }}</dd>
+    <dt>Registered</dt><dd>{{ ev.created_at | dt }}</dd>
+    {% if ev.description %}<dt>Description</dt><dd class="prewrap">{{ ev.description }}</dd>{% endif %}
+  </dl>
+</section>
+
+<div class="columns">
+  <div class="col-main">
+    <section class="panel" id="query">
+      <div class="panel-head">
+        <h2>Run a query</h2>
+        <form method="post" action="/ui/evidence/{{ ev.id }}/auto"
+              hx-post="/ui/evidence/{{ ev.id }}/auto" hx-target="#runs" hx-swap="outerHTML">
+          <button type="submit">Auto-enumerate</button>
+        </form>
+      </div>
+      <form method="get" action="/evidence/{{ ev.id }}#query" class="plugin-picker">
+        <label for="plugin-select">Plugin</label>
+        <select id="plugin-select" name="plugin"
+                hx-get="/ui/evidence/{{ ev.id }}/plugin-form" hx-target="#plugin-form"
+                hx-swap="outerHTML" hx-trigger="change">
+          <option value="">— choose a plugin —</option>
+          {% for p in plugins %}
+          <option value="{{ p.name }}" {% if selected_plugin and selected_plugin.name == p.name %}selected{% endif %}>
+            {{ p.name }}{% if p.description %} — {{ p.description }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        <noscript><button type="submit">Load</button></noscript>
+      </form>
+      <div id="run-form-errors">{% if run_error %}{% include "_run_error.html" with context %}{% endif %}</div>
+      {% include "_plugin_form.html" %}
+    </section>
+
+    <section class="panel">
+      <h2>Runs</h2>
+      {% include "_runs.html" %}
+    </section>
+  </div>
+
+  <div class="col-side">
+    <section class="panel ai-panel" id="ai">
+      <h2>AI assistant</h2>
+      {% include "_ai_history.html" %}
+      <form class="ask" method="post" action="/ui/evidence/{{ ev.id }}/ai/ask"
+            hx-post="/ui/evidence/{{ ev.id }}/ai/ask" hx-target="#ai-history" hx-swap="outerHTML"
+            hx-indicator="#ai-spinner" hx-disabled-elt="find button"
+            hx-on::after-request="if(event.detail.successful) this.reset()">
+        <textarea name="question" rows="3" placeholder="Ask about this evidence…" required></textarea>
+        <label class="small-label">Restrict context to run ids (optional, e.g. 12, 13)
+          <input type="text" name="run_ids" inputmode="numeric" placeholder="all runs">
+        </label>
+        <button type="submit">Ask</button>
+        <span id="ai-spinner" class="htmx-indicator spinner">Asking AI...</span>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Notes</h2>
+      {% include "_notes.html" %}
+    </section>
+  </div>
+</div>
+{% endblock %}

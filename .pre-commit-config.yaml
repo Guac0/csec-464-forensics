@@ -1,0 +1,41 @@
+# Install once per clone:   pip install -e .[dev] && pre-commit install
+# Run on everything:        pre-commit run --all-files
+# Bump hook versions:       pre-commit autoupdate
+# CI (.github/workflows/ci.yml, job `lint`) runs exactly this config.
+minimum_pre_commit_version: "3.7.0"
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.2
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: forbid-memory-images
+        name: forbid memory images / evidence files
+        description: RAM images must never be committed; put them in ./evidence (git-ignored).
+        language: fail
+        entry: "Memory images / evidence files must not be committed (see evidence/README.md):"
+        files: '(?i)\.(raw|mem|vmem|dmp|lime|img|bin|vmsn|vmss|e01|aff4)$'

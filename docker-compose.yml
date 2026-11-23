@@ -1,0 +1,49 @@
+# Forensics Tool - local single-user PoC.
+#
+#   cp .env.example .env        # optional: AI provider settings etc.
+#   docker compose up --build   # then open http://127.0.0.1:8000
+#
+# Why no database container: the app is single-user and keeps its state in one SQLite file
+# (/data/forensics.db) on the `forensics-data` volume. No server, no credentials, trivial
+# backup (copy the volume). Revisit only if this ever becomes multi-user.
+
+name: forensics-tool
+
+services:
+  app:
+    build: .
+    image: forensics-tool:dev
+    # Localhost only: the app has NO authentication. Never bind this to 0.0.0.0.
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Evidence is mounted READ-ONLY. volatility3 and the app can read RAM images but can
+      # never modify, delete or add to them, which protects evidence integrity (hashes stay
+      # valid). Put images into ./evidence on the host; keep this folder inside the WSL2
+      # filesystem on Windows (see README).
+      - ./evidence:/evidence:ro
+      # SQLite DB, raw tool output, dumped files.
+      - forensics-data:/data
+      # volatility3 symbol cache (Windows PDB-derived ISF downloads). Persisting it avoids
+      # re-downloading symbols for every run/container.
+      - vol-symbols:/symbols
+    env_file:
+      # Optional: works without a .env file (compose >= 2.24). All settings have defaults.
+      - path: .env
+        required: false
+    environment:
+      # The container paths are fixed by the volume layout above; don't let .env override them.
+      FT_EVIDENCE_DIR: /evidence
+      FT_DATA_DIR: /data
+      FT_SYMBOLS_DIR: /symbols
+    # volatility3 is memory hungry; cap the container so a runaway plugin can't take down
+    # the workstation. Override with FT_MEM_LIMIT in your shell or .env (e.g. 12g).
+    mem_limit: ${FT_MEM_LIMIT:-8g}
+    # Proper PID 1 (tini): forwards signals and reaps volatility subprocesses.
+    init: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+volumes:
+  forensics-data:
+  vol-symbols:

@@ -1,0 +1,33 @@
+<div id="runs"{% if polling %} hx-get="/ui/evidence/{{ evidence_id }}/runs" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+  {% if message %}<p class="flash">{{ message }}</p>{% endif %}
+  {% if runs %}
+  <table class="data">
+    <thead><tr><th>#</th><th>Status</th><th>Plugin</th><th>Args</th><th>Origin</th><th>Rows</th><th>Created (UTC)</th><th></th></tr></thead>
+    <tbody>
+    {% for run in runs %}
+      <tr>
+        <td><a href="/runs/{{ run.id }}">{{ run.id }}</a></td>
+        <td><span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span></td>
+        <td class="mono"><a href="/runs/{{ run.id }}">{{ run.plugin }}</a></td>
+        <td class="mono small-text">{{ run.args | args }}</td>
+        <td>{{ run.origin.value }}</td>
+        <td class="num">{{ run.row_count }}</td>
+        <td class="mono small-text">{{ run.created_at | dt }}</td>
+        <td>
+          {% if run.status.value in ("queued", "running") %}
+          <form class="inline" method="post" action="/ui/runs/{{ run.id }}/cancel"
+                hx-post="/ui/runs/{{ run.id }}/cancel" hx-target="#runs" hx-swap="outerHTML">
+            <button type="submit" class="small danger">Cancel</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No runs yet.</p>
+  {% endif %}
+</div>
+{% if clear_errors %}<div id="run-form-errors" hx-swap-oob="true"></div>{% endif %}

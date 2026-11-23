@@ -1,0 +1,36 @@
+<div id="rows">
+  <div class="pager">
+    {% if total %}Rows {{ offset + 1 }}–{{ [offset + limit, total] | min }} of {{ total }}{% else %}No rows{% endif %}{% if q %} matching “{{ q }}”{% endif %}
+    {% if prev_offset is not none %}
+      <a href="{{ page_url(run.id, prev_offset, q, limit) }}"
+         hx-get="/ui/runs/{{ run.id }}/rows?offset={{ prev_offset }}&limit={{ limit }}&q={{ q | urlencode }}"
+         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, prev_offset, q, limit) }}">&larr; Prev</a>
+    {% endif %}
+    {% if next_offset is not none %}
+      <a href="{{ page_url(run.id, next_offset, q, limit) }}"
+         hx-get="/ui/runs/{{ run.id }}/rows?offset={{ next_offset }}&limit={{ limit }}&q={{ q | urlencode }}"
+         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, next_offset, q, limit) }}">Next &rarr;</a>
+    {% endif %}
+  </div>
+  {% if rows %}
+  <div class="table-wrap">
+  <table class="data results">
+    <thead><tr><th>Cite</th>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr id="row-{{ run.id }}-{{ r.row_idx }}"{% if highlight is not none and r.row_idx == highlight %} class="highlight"{% endif %}>
+        <td class="mono cite-key"><a href="/runs/{{ run.id }}?row={{ r.row_idx }}#row-{{ run.id }}-{{ r.row_idx }}">R{{ run.id }}:{{ r.row_idx }}</a></td>
+        {% for c in columns %}
+        {% if loop.first and r.depth %}
+        <td style="padding-left: {{ 0.5 + (r.depth | int) * 1.25 }}em"><span class="tree">└</span> {{ r.data.get(c) | cell }}</td>
+        {% else %}
+        <td>{{ r.data.get(c) | cell }}</td>
+        {% endif %}
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</div>

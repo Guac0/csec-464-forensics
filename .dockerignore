@@ -1,0 +1,12 @@
+# Allowlist: only what the image needs. Keeps evidence, data, secrets and .git out of the
+# build context (multi-GB RAM images in ./evidence would otherwise be sent to the daemon).
+*
+!pyproject.toml
+!app/
+
+# Re-exclude junk inside the allowlisted tree.
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info

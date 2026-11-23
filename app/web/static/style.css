@@ -1,0 +1,118 @@
+/* Temporary PoC stylesheet. No external fonts/CDNs: the app must work offline. */
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --text: #1d232b;
+  --muted: #667085;
+  --border: #d9dde3;
+  --accent: #2557a7;
+  --danger: #b42318;
+  --ai-bg: #f4efff;
+  --ai-border: #8a63d2;
+  --hl: #fff3c4;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--accent); }
+h2 { font-size: 1.1rem; margin: 0 0 .6rem; }
+pre, .mono, code { font-family: var(--mono); font-size: 12.5px; }
+pre { background: #f0f2f5; padding: .5rem; overflow: auto; margin: .25rem 0; white-space: pre-wrap; word-break: break-word; }
+
+.poc-banner {
+  background: #fdb022; color: #3d2700; text-align: center; font-weight: 600;
+  padding: .3rem; font-size: 13px;
+}
+.topbar { display: flex; gap: 1rem; align-items: center; padding: .6rem 1.2rem; background: #1d232b; color: #c9d1db; }
+.topbar a { color: #fff; }
+.brand { font-weight: 700; text-decoration: none; }
+main { padding: 1rem 1.2rem; max-width: 1600px; margin: 0 auto; }
+
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: .9rem 1rem; margin-bottom: 1rem; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.columns { display: grid; grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); gap: 1rem; }
+@media (max-width: 1000px) { .columns { grid-template-columns: 1fr; } }
+
+.muted { color: var(--muted); }
+.small-text { font-size: 12px; }
+.small-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: .5rem; display: block; }
+.prewrap { white-space: pre-wrap; word-break: break-word; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.req, .error-text { color: var(--danger); }
+
+button {
+  font: inherit; padding: .35rem .8rem; border-radius: 4px; border: 1px solid var(--accent);
+  background: var(--accent); color: #fff; cursor: pointer;
+}
+button.small { padding: .15rem .5rem; font-size: 12px; }
+button.danger { background: #fff; color: var(--danger); border-color: var(--danger); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+form.inline { display: inline; }
+input[type=text], input[type=number], input[type=search], select, textarea {
+  font: inherit; padding: .3rem .45rem; border: 1px solid var(--border); border-radius: 4px; width: 100%;
+}
+select { max-width: 100%; }
+textarea { resize: vertical; }
+
+dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1rem; margin: 0; }
+dl.meta dt { color: var(--muted); }
+dl.meta dd { margin: 0; word-break: break-all; }
+
+table.data { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.data th, table.data td { border-bottom: 1px solid var(--border); padding: .3rem .5rem; text-align: left; vertical-align: top; }
+table.data th { background: #eef1f5; position: sticky; top: 0; }
+table.results td { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.table-wrap { overflow: auto; max-height: 75vh; }
+tr.highlight td, tr:target td { background: var(--hl); }
+.cite-key { white-space: nowrap; }
+.tree { color: var(--muted); }
+.hash { word-break: break-all; }
+
+.badge { display: inline-block; padding: 0 .45rem; border-radius: 10px; font-size: 12px; font-weight: 600; background: #e4e7ec; }
+.status-queued { background: #e4e7ec; color: #344054; }
+.status-running { background: #d1e9ff; color: #1849a9; }
+.status-succeeded { background: #d1fadf; color: #05603a; }
+.status-failed { background: #fee4e2; color: #912018; }
+.status-cancelled { background: #fef0c7; color: #93370d; }
+
+.flash { padding: .4rem .6rem; background: #eef4ff; border-left: 3px solid var(--accent); margin: .4rem 0; }
+.flash.error { background: #fef3f2; border-color: var(--danger); color: var(--danger); }
+.error-block { background: #fef3f2; color: #7a271a; }
+
+.field { margin: .5rem 0; }
+.field label { display: block; }
+.presets { margin: .5rem 0; display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+.plugin-picker { display: flex; gap: .5rem; align-items: center; }
+.plugin-picker label { white-space: nowrap; }
+
+.notes .note { border-bottom: 1px solid var(--border); padding: .4rem 0; }
+.note-body { white-space: pre-wrap; word-break: break-word; }
+.note-meta { font-size: 12px; }
+.note-edit { display: inline-block; margin-right: .5rem; }
+.note-edit summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+.note-add { margin-top: .6rem; display: grid; gap: .4rem; justify-items: start; }
+
+.ai-history { max-height: 70vh; overflow: auto; margin-bottom: .6rem; }
+.chat-user { background: #f0f2f5; border-radius: 6px; padding: .5rem; margin: .5rem 0; }
+.chat-label, .ai-label { font-size: 12px; font-weight: 600; margin-bottom: .25rem; }
+.ai-message { background: var(--ai-bg); border: 1px dashed var(--ai-border); border-radius: 6px; padding: .5rem; margin: .5rem 0; }
+.ai-label { color: #5b3aa6; text-transform: uppercase; letter-spacing: .03em; }
+.ai-content { white-space: pre-wrap; word-break: break-word; }
+a.cite { font-family: var(--mono); font-size: 12px; }
+.cite-invalid { color: var(--danger); text-decoration: line-through; font-family: var(--mono); font-size: 12px; }
+.suggestions { margin-top: .5rem; display: grid; gap: .4rem; }
+.suggestion { background: #fff; border: 1px solid var(--border); border-radius: 4px; padding: .4rem; }
+.suggestion.invalid { opacity: .75; }
+.provenance summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: .4rem; }
+.ask { display: grid; gap: .4rem; justify-items: start; }
+.ask textarea, .ask input { width: 100%; }
+
+.pager { display: flex; gap: 1rem; align-items: center; margin: .4rem 0; }
+.filter { display: flex; gap: .4rem; }
+
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline; }
+.spinner { color: #5b3aa6; font-style: italic; }

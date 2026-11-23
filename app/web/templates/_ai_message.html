@@ -1,0 +1,54 @@
+{% if msg.role == "user" %}
+<div class="chat-user" id="ai-msg-{{ msg.id }}">
+  <div class="chat-label">Analyst question <span class="muted">{{ msg.created_at | dt }}</span></div>
+  <div class="prewrap">{{ msg.content }}</div>
+</div>
+{% else %}
+{% set ev_id = msg.evidence_id or evidence_id %}
+<div class="ai-message" id="ai-msg-{{ msg.id }}">
+  <div class="ai-label">AI-generated lead — not evidence <span class="muted">{{ msg.created_at | dt }}</span></div>
+  {% if msg.error %}<p class="flash error">AI error: {{ msg.error }}</p>{% endif %}
+  {% if msg.content %}<div class="ai-content">{{ msg.content | ai_content(msg.citations) }}</div>{% endif %}
+
+  {% if msg.suggestions %}
+  <div class="suggestions">
+    <div class="small-label">Suggested queries</div>
+    {% for s in msg.suggestions %}
+    <div class="suggestion{% if not s.valid %} invalid{% endif %}">
+      <div><span class="mono">{{ s.plugin }}</span> <span class="mono small-text">{{ s.get("normalized_args", s.args) | args }}</span></div>
+      {% if s.reason %}<div class="prewrap small-text">{{ s.reason }}</div>{% endif %}
+      {% if s.valid and ev_id %}
+      <form class="inline" method="post" action="/ui/evidence/{{ ev_id }}/runs"
+            {% if runs_panel %}hx-post="/ui/evidence/{{ ev_id }}/runs" hx-target="#runs" hx-swap="outerHTML"{% endif %}>
+        <input type="hidden" name="plugin" value="{{ s.plugin }}">
+        <input type="hidden" name="tool" value="{{ s.tool or 'volatility3' }}">
+        <input type="hidden" name="origin" value="ai">
+        <input type="hidden" name="args_json" value='{{ s.get("normalized_args", s.args) | tojson }}'>
+        <button type="submit" class="small">Run</button>
+      </form>
+      {% else %}
+      <button type="button" class="small" disabled>Run</button>
+      <span class="error-text small-text">{{ s.error or "not runnable" }}</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <details class="provenance">
+    <summary>Provenance</summary>
+    <dl class="meta">
+      <dt>Model requested</dt><dd class="mono">{{ msg.model_requested or "—" }}</dd>
+      <dt>Model returned</dt><dd class="mono">{{ msg.model_returned or "—" }}</dd>
+      <dt>Provider</dt><dd class="mono">{{ msg.provider_base_url or "—" }}</dd>
+      <dt>Created</dt><dd class="mono">{{ msg.created_at | dt }}</dd>
+      <dt>Params</dt><dd><pre>{{ msg.params | pretty }}</pre></dd>
+      <dt>Usage</dt><dd><pre>{{ msg.usage | pretty }}</pre></dd>
+      <dt>Context refs</dt><dd><pre>{{ msg.context_refs | pretty }}</pre></dd>
+      <dt>Citations</dt><dd><pre>{{ msg.citations | pretty }}</pre></dd>
+    </dl>
+    <div class="small-label">Exact request messages</div>
+    <pre class="request-messages">{{ msg.request_messages | pretty }}</pre>
+  </details>
+</div>
+{% endif %}

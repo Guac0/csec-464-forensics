@@ -1,0 +1,31 @@
+<div id="notes" class="notes">
+  {% for note in notes %}
+  <div class="note" id="note-{{ note.id }}">
+    <div class="note-body">{{ note.body }}</div>
+    <div class="note-meta muted">
+      {{ note.created_at | dt }}{% if note.updated_at and note.updated_at != note.created_at %} · edited {{ note.updated_at | dt }}{% endif %}
+    </div>
+    <details class="note-edit">
+      <summary>Edit</summary>
+      <form method="post" action="/ui/notes/{{ note.id }}/edit"
+            hx-post="/ui/notes/{{ note.id }}/edit" hx-target="#notes" hx-swap="outerHTML">
+        <textarea name="body" rows="3" required>{{ note.body }}</textarea>
+        <button type="submit" class="small">Save</button>
+      </form>
+    </details>
+    <form class="inline" method="post" action="/ui/notes/{{ note.id }}/delete"
+          hx-post="/ui/notes/{{ note.id }}/delete" hx-target="#notes" hx-swap="outerHTML"
+          hx-confirm="Delete this note?">
+      <button type="submit" class="small danger">Delete</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="muted">No notes yet.</p>
+  {% endfor %}
+  <form class="note-add" method="post" action="/ui/notes"
+        hx-post="/ui/notes" hx-target="#notes" hx-swap="outerHTML">
+    {% if evidence_id %}<input type="hidden" name="evidence_id" value="{{ evidence_id }}">{% endif %}
+    <textarea name="body" rows="3" placeholder="Add a note…" required></textarea>
+    <button type="submit">Add note</button>
+  </form>
+</div>
