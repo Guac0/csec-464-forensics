@@ -1,0 +1,56 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do **not** attach memory images, dumps, `.env` files or API keys. Describe the image instead
+        (OS/version, size, where the public sample came from).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. docker compose up --build
+        2. Open http://127.0.0.1:8000, select evidence ...
+        3. Run plugin ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Web UI
+        - API / backend
+        - Job worker / volatility execution
+        - Plugin catalog / parsing (forensics)
+        - AI assistant
+        - Docker / CI / setup
+    validations:
+      required: true
+  - type: input
+    id: plugin
+    attributes:
+      label: volatility3 plugin (if relevant)
+      placeholder: windows.pslist.PsList
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`docker compose logs app`, run stderr, browser console. Redact secrets."
+      render: text
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: Windows 11 + Docker Desktop 4.x (WSL2), commit abc1234
