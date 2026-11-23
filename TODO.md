@@ -33,8 +33,10 @@ Checklist of what is left after the infrastructure scaffold. Tick items off as t
       what they need).
 - [ ] **Security settings:** enable secret scanning + push protection and Dependabot alerts if your
       plan offers them (free on public repos).
-- [ ] **Dependabot version updates:** `.github/dependabot.yml` is included; delete or disable it
-      if the PRs are too noisy during the project week.
+- [ ] **Dependabot: alerts only, no PRs.** Delete `.github/dependabot.yml` after unzipping (it
+      only configures routine version-update PRs). In Settings → Code security, turn on
+      *Dependency graph* and *Dependabot alerts*, and leave *Dependabot security updates* **off**
+      (that setting is what opens security-fix PRs).
 - [ ] **Optional:** create a Projects board, labels (`volatility`, `ai`, `ui`, `infra`) and a
       milestone for the demo date.
 - [ ] **Integration workflow:** pick a small public Windows memory sample, record its URL and
