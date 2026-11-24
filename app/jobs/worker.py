@@ -44,12 +44,20 @@ def execute(
     timeout: float,
     cancel_event: threading.Event,
     on_heartbeat: Callable[[], None] | None = None,
+    max_output_bytes: int | None = None,
 ) -> ExecutionResult:
     """Indirection over app.tools.executor.execute (lazy import; monkeypatched in tests)."""
     from app.tools import executor
 
     return executor.execute(
-        runner, evidence_path, request, run_dir, timeout, cancel_event, on_heartbeat=on_heartbeat
+        runner,
+        evidence_path,
+        request,
+        run_dir,
+        timeout,
+        cancel_event,
+        on_heartbeat=on_heartbeat,
+        max_output_bytes=max_output_bytes,
     )
 
 
@@ -358,6 +366,7 @@ class Worker:
             settings.run_timeout_seconds,
             cancel_event,
             on_heartbeat=self._heartbeat_callback(run_id),
+            max_output_bytes=settings.max_artifact_bytes,
         )
 
         # Persist execution provenance before parsing, so it survives a parse failure.
@@ -369,6 +378,18 @@ class Worker:
         run.stdout_sha256 = result.stdout_sha256
         s.commit()
 
+        # Files the tool wrote (e.g. --dump) are registered whatever the outcome, so partial
+        # output is hashed and accounted for. Successful runs register after their rows are
+        # stored (below) so files can be linked to the rows that name them.
+        succeeded = (
+            result.returncode == 0
+            and not (result.cancelled or cancel_event.is_set())
+            and not result.timed_out
+            and not result.output_limit_exceeded
+        )
+        if not succeeded:
+            self._register_artifacts(s, run, run_dir)
+
         if result.cancelled or cancel_event.is_set():
             reason = "cancelled: worker shutting down" if self._stop.is_set() else "cancelled"
             self._finish(
@@ -377,6 +398,16 @@ class Worker:
             return
         if result.timed_out:
             msg = f"timed out after {settings.run_timeout_seconds}s"
+            self._finish(
+                s, run_id, RunStatus.FAILED, _with_tail(msg, _stderr_tail(result.stderr_path))
+            )
+            return
+        if result.output_limit_exceeded:
+            msg = (
+                f"stopped: files written by the tool exceeded the per-run limit of "
+                f"{settings.max_artifact_bytes} bytes (FT_MAX_ARTIFACT_BYTES); files written so "
+                "far were kept"
+            )
             self._finish(
                 s, run_id, RunStatus.FAILED, _with_tail(msg, _stderr_tail(result.stderr_path))
             )
@@ -393,13 +424,28 @@ class Worker:
         except Exception as exc:
             logger.warning("run %s: output parse failed", run_id, exc_info=True)
             s.rollback()  # discard any rows inserted so far
+            self._register_artifacts(s, run, run_dir)
             self._finish(s, run_id, RunStatus.FAILED, f"output parse failed: {exc}", row_count=0)
             return
+        self._register_artifacts(s, run, run_dir)
         self._finish(s, run_id, RunStatus.SUCCEEDED, None, row_count=count, phase="post-processing")
         logger.info("run %s: succeeded with %d rows", run_id, count)
         run_post_hooks(s, run_id)
         s.execute(update(Run).where(Run.id == run_id).values(phase=None))
         s.commit()
+
+    @staticmethod
+    def _register_artifacts(s: Session, run: Run, run_dir: Path) -> None:
+        """Hash/record files in the run's output dir. Never fails the run: errors are logged and
+        only this step is rolled back (savepoint), keeping e.g. freshly inserted rows."""
+        from app.services import artifacts
+        from app.tools.executor import OUTPUT_DIR_NAME
+
+        try:
+            with s.begin_nested():
+                artifacts.register_run_outputs(s, run, run_dir / OUTPUT_DIR_NAME)
+        except Exception:
+            logger.exception("run %s: registering output files failed", run.id)
 
     @staticmethod
     def _store_rows(s: Session, run_id: int, runner: ToolRunner, stdout_path: Path) -> int:

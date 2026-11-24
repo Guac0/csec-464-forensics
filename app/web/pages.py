@@ -361,12 +361,22 @@ def rows_context(
         "q": q or "",
         "tag": tag,
         "tags": runs_svc.annotation_tags(session, run.id),
+        "row_artifacts": _row_artifacts(run),
         "has_annotations": any(r.annotations for r in rows) or bool(tag),
         "columns": list(columns),
         "highlight": highlight,
         "prev_offset": max(0, offset - limit) if offset > 0 else None,
         "next_offset": offset + limit if offset + limit < total else None,
     }
+
+
+def _row_artifacts(run: Run) -> dict[int, list[Any]]:
+    """row_idx -> artifacts named by that row (for the results table's "File" column)."""
+    out: dict[int, list[Any]] = {}
+    for a in getattr(run, "artifacts", None) or []:
+        if a.source_row_idx is not None:
+            out.setdefault(a.source_row_idx, []).append(a)
+    return out
 
 
 def page_url(run_id: int, offset: int, q: str, limit: int = PAGE_SIZE, tag: str = "") -> str:
@@ -465,6 +475,7 @@ def _render_run_page(
         hook_errors=[h for h in run.hook_results or [] if h.get("status") != "ok"],
         follow_ups=follow_ups,
         message=message,
+        zip_password=get_settings().artifact_zip_password,
         **ctx,
     )
 
@@ -879,3 +890,19 @@ def ui_acknowledge_mismatch(
         ctx.update(integrity_error=str(exc))
         return render(request, "evidence.html", status_code=422, **ctx)
     return redirect(f"/evidence/{evidence_id}#integrity")
+
+
+# --------------------------------------------------------------------------- artifacts
+
+
+@router.get("/ui/artifacts/{artifact_id}/download")
+def ui_artifact_download(
+    artifact_id: int,
+    session: SessionDep,
+    format: str = "zip",  # noqa: A002
+) -> Response:
+    from app.api.artifacts import file_download
+
+    if format not in ("zip", "raw"):
+        raise HTTPException(422, "format must be zip or raw")
+    return file_download(session, artifact_id, format)

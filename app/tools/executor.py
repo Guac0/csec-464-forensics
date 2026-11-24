@@ -25,6 +25,21 @@ OUTPUT_DIR_NAME = "output"
 HEARTBEAT_INTERVAL = 5.0  # seconds between on_heartbeat calls
 POLL_INTERVAL = 0.2  # seconds between checks of process/cancel/timeout
 KILL_GRACE = 5.0  # seconds between SIGTERM and SIGKILL
+OUTPUT_CHECK_INTERVAL = 2.0  # seconds between output-dir size checks
+
+
+def dir_size(path: Path) -> int:
+    """Total size of regular files under ``path`` (symlinks not followed)."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                st = os.lstat(os.path.join(root, name))
+            except OSError:
+                continue
+            if not os.path.islink(os.path.join(root, name)):
+                total += st.st_size
+    return total
 
 
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -82,6 +97,8 @@ def execute(
     *,
     heartbeat_interval: float = HEARTBEAT_INTERVAL,
     kill_grace: float = KILL_GRACE,
+    max_output_bytes: int | None = None,
+    output_check_interval: float | None = None,
 ) -> ExecutionResult:
     """Run one tool invocation and return its ExecutionResult.
 
@@ -101,6 +118,9 @@ def execute(
       message written to the stderr file, so the worker's usual "record stderr tail" failure path
       applies. Callers should treat ``returncode is None`` (and not cancelled/timed out) as failure.
     - ``stdout_sha256`` is the SHA-256 of the stdout file after exit.
+    - ``max_output_bytes``: if the files the tool writes into ``run_dir/output`` grow past this,
+      the process group is stopped and ``output_limit_exceeded`` is set (checked every
+      ``output_check_interval`` seconds and once more after exit).
     """
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -138,8 +158,10 @@ def execute(
                 tool_version=tool_version,
             )
 
+        output_check_interval = output_check_interval or OUTPUT_CHECK_INTERVAL
         start = time.monotonic()
-        last_heartbeat = start
+        last_heartbeat = last_output_check = start
+        output_limit_exceeded = False
         while True:
             try:
                 proc.wait(timeout=POLL_INTERVAL)
@@ -155,6 +177,12 @@ def execute(
                 timed_out = True
                 _stop(proc, kill_grace)
                 break
+            if max_output_bytes is not None and now - last_output_check >= output_check_interval:
+                last_output_check = now
+                if dir_size(output_dir) > max_output_bytes:
+                    output_limit_exceeded = True
+                    _stop(proc, kill_grace)
+                    break
             if on_heartbeat is not None and now - last_heartbeat >= heartbeat_interval:
                 last_heartbeat = now
                 try:
@@ -171,4 +199,6 @@ def execute(
         tool_version=tool_version,
         timed_out=timed_out,
         cancelled=cancelled,
+        output_limit_exceeded=output_limit_exceeded
+        or (max_output_bytes is not None and dir_size(output_dir) > max_output_bytes),
     )

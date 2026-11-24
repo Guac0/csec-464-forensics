@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # modification-time check is done before every run instead.
     verify_on_run: bool = False
 
+    # Files written by tools (e.g. --dump) per run: the run is stopped if they exceed this.
+    max_artifact_bytes: int = 2 * 1024**3
+    # Password of the encrypted zip that artifacts are downloaded in (malware-sharing convention).
+    artifact_zip_password: str = "infected"  # noqa: S105 - public convention, not a secret
+
     # Post-run hooks (app/tools/hooks.py).
     hooks_enabled: bool = True
     # Allow hooks to queue follow-up runs automatically.

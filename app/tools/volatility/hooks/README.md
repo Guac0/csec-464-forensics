@@ -40,6 +40,7 @@ def flag_orphans(ctx: HookContext) -> None:
 | Read | |
 |---|---|
 | `ctx.rows(run_id=None)` | Rows of this run (or another run on the same evidence) as read-only `HookRow(row_idx, depth, parent_idx, data)`, streamed in order |
+| `ctx.artifacts()` | Files this run wrote (e.g. `--dump`): filename, size, SHA-256/MD5/SHA-1, guessed type, row that names it |
 | `ctx.latest_run(plugin, args=None)` | Latest **succeeded** run of another plugin on this evidence (`RunInfo`), or `None` |
 | `ctx.run_id`, `plugin`, `args`, `row_count`, `chain_depth` | About this run |
 | `ctx.evidence_id`, `evidence_path`, `evidence_sha256`, `os_info` | About the image |

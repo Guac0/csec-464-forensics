@@ -40,6 +40,18 @@ def format_row(row: ResultRow) -> str:
     return text
 
 
+def _artifacts_line(run: Run, limit: int = 10) -> str:
+    """Files the run wrote (e.g. --dump), with hashes, for the model to reference."""
+    parts = []
+    for a in run.artifacts[:limit]:
+        where = f", row R{run.id}:{a.source_row_idx}" if a.source_row_idx is not None else ""
+        parts.append(
+            f"{a.filename} ({a.file_type}, {a.size_bytes} bytes, sha256 {a.sha256}{where})"
+        )
+    more = f"; ... ({len(run.artifacts)} total)" if len(run.artifacts) > limit else ""
+    return "dumped files: " + "; ".join(parts) + more
+
+
 def _findings_block(run: Run, max_rows: int = 10) -> list[str]:
     """Hook findings for a run, labelled as automated heuristics with their supporting rows."""
     if not run.findings:
@@ -201,6 +213,8 @@ def build_context(
         if run.error:
             header.append(f"error: {run.error}")
         header.extend(_findings_block(run))
+        if run.artifacts:
+            header.append(_artifacts_line(run))
         rows = list(
             session.execute(
                 select(ResultRow)

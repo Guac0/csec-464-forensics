@@ -15,13 +15,14 @@
   {% if rows %}
   <div class="table-wrap">
   <table class="data results">
-    <thead><tr><th>Cite</th>{% if has_annotations %}<th>Flags</th>{% endif %}{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <thead><tr><th>Cite</th>{% if row_artifacts %}<th>File</th>{% endif %}{% if has_annotations %}<th>Flags</th>{% endif %}{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
     <tbody>
     {% for r in rows %}
       {% set sev = r.annotations | max_severity %}
       {% set cls = ["highlight" if highlight is not none and r.row_idx == highlight else "", ("annotated sev-" ~ sev) if sev else ""] | select | join(" ") %}
       <tr id="row-{{ run.id }}-{{ r.row_idx }}"{% if cls %} class="{{ cls }}"{% endif %}>
         <td class="mono cite-key"><a href="/runs/{{ run.id }}?row={{ r.row_idx }}#row-{{ run.id }}-{{ r.row_idx }}">R{{ run.id }}:{{ r.row_idx }}</a></td>
+        {% if row_artifacts %}<td>{% for a in row_artifacts.get(r.row_idx, []) %}<a class="badge" href="#artifact-{{ a.id }}" title="{{ a.filename }} ({{ a.file_type }})">file</a> {% endfor %}</td>{% endif %}
         {% if has_annotations %}<td class="flags">{% for a in r.annotations or [] %}<span class="badge sev-{{ a.severity }}" title="{{ a.note }} ({{ a.hook }})">{{ a.tag }}</span> {% endfor %}</td>{% endif %}
         {% for c in columns %}
         {% if loop.first and r.depth %}

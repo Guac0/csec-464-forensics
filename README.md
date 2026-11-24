@@ -121,6 +121,14 @@ Team workflow, branch rules and guidance for AI coding assistants:
   citation key `R<run>:<row>`.
 - _TODO: describe any per-plugin views or highlighting._
 
+### Dumped files
+- **Status:** infrastructure done; which plugins may dump is TODO (example: pslist `--dump`)
+- Files a plugin writes (e.g. dumped processes) are hashed (SHA-256, MD5, SHA-1), typed, linked
+  to the result row that names them, and listed on the run page. Downloads are an encrypted zip
+  (password `infected`) by default, or the raw file after a warning; every download re-checks
+  the hash and is recorded in the activity log. Each run may write at most 2 GiB
+  (`FT_MAX_ARTIFACT_BYTES`); bigger runs are stopped, keeping what was written.
+
 ### Post-processing hooks
 - **Status:** infrastructure done, hooks TODO
 - After a run succeeds, plugin-specific hooks can flag rows (highlighted, filterable by tag),

@@ -36,6 +36,7 @@ class RunOut(BaseModel):
     evidence_mtime: float | None
     integrity_warning: str | None
     phase: str | None
+    artifact_count: int = 0
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
