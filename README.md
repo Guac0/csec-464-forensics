@@ -38,7 +38,7 @@ an OpenAI-compatible AI endpoint (e.g. a local Ollama/vLLM server or an approved
    ```
 
 2. **Add evidence:** copy RAM images into the `evidence/` folder. It is mounted read-only into the
-   container and ignored by git — never commit images.
+   container and ignored by git as images are typically too large to version control and vary based on the user's needs.
 
 3. **Start:**
 

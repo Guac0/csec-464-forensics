@@ -32,7 +32,9 @@ def _evidence_root() -> Path:
 
 
 def _iter_evidence_files(root: Path) -> list[Path]:
-    """Regular files under root, skipping hidden entries and symlinks that escape root."""
+    """Regular files under root, skipping hidden entries, excluded file types (README, hash
+    files, archives; see ``Settings.evidence_exclude_extensions``) and symlinks escaping root."""
+    excluded = get_settings().excluded_evidence_suffixes
     found: list[Path] = []
     # followlinks=False: symlinked directories are never descended into.
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
@@ -41,6 +43,8 @@ def _iter_evidence_files(root: Path) -> list[Path]:
             if name.startswith("."):
                 continue
             path = Path(dirpath) / name
+            if path.suffix.lower() in excluded:
+                continue
             if path.is_symlink():
                 try:
                     target = path.resolve(strict=True)

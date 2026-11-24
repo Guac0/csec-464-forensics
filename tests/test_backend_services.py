@@ -348,3 +348,22 @@ def test_recover_stale_runs(session: Session, evidence: Evidence) -> None:
         assert len(failed) == 2
         assert all(r.error == "interrupted by restart" for r in failed)
     assert recover_stale_runs(session) == 0
+
+
+def test_scan_skips_docs_hashes_and_archives(settings, session):
+    root = settings.evidence_dir
+    for name in ("README.md", "notes.TXT", "image.raw.sha256", "sample.zip"):
+        (root / name).write_text("not evidence")
+    (root / "noext_image").write_bytes(b"\x00" * 16)
+    found = {e.rel_path for e in evidence_service.scan_evidence(session)}
+    assert found == {"sample.raw", "noext_image"}
+
+
+def test_scan_exclusions_configurable(settings, session, monkeypatch):
+    from app.config import get_settings
+
+    (settings.evidence_dir / "README.md").write_text("x")
+    monkeypatch.setenv("FT_EVIDENCE_EXCLUDE_EXTENSIONS", "raw")
+    get_settings.cache_clear()
+    found = {e.rel_path for e in evidence_service.scan_evidence(session)}
+    assert found == {"README.md"}

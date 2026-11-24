@@ -6,20 +6,20 @@ Checklist of what is left after the infrastructure scaffold. Tick items off as t
 
 ### Before the first commit
 
-- [ ] **Replace placeholders:**
+- [X] **Replace placeholders:**
   - `.github/CODEOWNERS`: `@TEAM_MEMBER_DEFAULT`, `@TEAM_MEMBER_FORENSICS_1`,
     `@TEAM_MEMBER_FORENSICS_2` → real GitHub usernames.
   - `.github/ISSUE_TEMPLATE/config.yml`: `OWNER/REPO` → `Guac0/csec-464-forensics`.
-- [ ] **Set up pre-commit** (pins could not all be verified from the build sandbox):
+- [X] **Set up pre-commit** (pins could not all be verified from the build sandbox):
   ```bash
   pip install -e ".[dev]"
   pre-commit autoupdate
   pre-commit install
   pre-commit run --all-files
   ```
-- [ ] **Check nothing sensitive is staged:** `git add -A && git status` — no `.env`, no memory
+- [X] **Check nothing sensitive is staged:** `git add -A && git status` — no `.env`, no memory
       images, no `data/`, `symbols/` or `__pycache__/`.
-- [ ] **First commit and push:** `git commit -m "Initial scaffold" && git push -u origin main`.
+- [X] **First commit and push:** `git commit -m "Initial scaffold" && git push -u origin main`.
 
 ### On GitHub
 - [ ] **Watch the first CI run.** The `docker` job is the first real build against the
@@ -29,11 +29,11 @@ Checklist of what is left after the infrastructure scaffold. Tick items off as t
   - require a pull request with 1 approval and Code Owner review,
   - require status checks `lint`, `test`, `docker`,
   - block force pushes and deletion.
-- [ ] **Actions settings:** leave default workflow permissions as read-only (the workflows request
+- [X] **Actions settings:** leave default workflow permissions as read-only (the workflows request
       what they need).
-- [ ] **Security settings:** enable secret scanning + push protection and Dependabot alerts if your
+- [X] **Security settings:** enable secret scanning + push protection and Dependabot alerts if your
       plan offers them (free on public repos).
-- [ ] **Dependabot: alerts only, no PRs.** Delete `.github/dependabot.yml` after unzipping (it
+- [X] **Dependabot: alerts only, no PRs.** Delete `.github/dependabot.yml` after unzipping (it
       only configures routine version-update PRs). In Settings → Code security, turn on
       *Dependency graph* and *Dependabot alerts*, and leave *Dependabot security updates* **off**
       (that setting is what opens security-fix PRs).

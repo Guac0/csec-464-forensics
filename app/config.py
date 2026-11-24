@@ -11,6 +11,14 @@ class Settings(BaseSettings):
 
     # Read-only mount containing RAM images placed there by the user.
     evidence_dir: Path = Path("/evidence")
+    # Comma-separated file extensions ignored when scanning evidence_dir (docs, hashes, archives).
+    # A denylist rather than an allowlist: memory images use many extensions (.raw, .mem, .vmem,
+    # .dmp, .lime, .bin, .img, .001, ...) or none at all.
+    evidence_exclude_extensions: str = (
+        ".md,.txt,.rst,.pdf,.html,.json,.csv,.log,.ini,.yml,.yaml,"
+        ".md5,.sha1,.sha256,.sha512,.sig,.asc,"
+        ".zip,.7z,.rar,.gz,.bz2,.xz,.tar,.tgz"
+    )
     # Writable persistent data: SQLite DB, raw tool output, dumped files.
     data_dir: Path = Path("/data")
     # Writable volatility3 symbol cache.
@@ -32,6 +40,11 @@ class Settings(BaseSettings):
     ai_temperature: float = 0.2
     ai_max_tokens: int = 2000
     ai_timeout_seconds: int = 120
+
+    @property
+    def excluded_evidence_suffixes(self) -> frozenset[str]:
+        parts = (p.strip().lower() for p in self.evidence_exclude_extensions.split(","))
+        return frozenset(p if p.startswith(".") else f".{p}" for p in parts if p)
 
     @property
     def database_url(self) -> str:
