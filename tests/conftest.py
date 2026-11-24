@@ -38,7 +38,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
 def session(settings: Settings) -> Iterator[Session]:
     """A session on a fresh SQLite DB in settings.data_dir with all tables created."""
     db.init_engine()
-    db.create_all()
+    db.migrate()
     with db.SessionLocal() as s:
         yield s
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.db import SessionLocal, create_all, init_engine
+from app.db import SessionLocal, init_engine, migrate
 from app.jobs.worker import get_worker, recover_stale_runs
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         init_engine()
-        create_all()
+        migrate()
         with SessionLocal() as session:
             recover_stale_runs(session)
         worker = get_worker() if start_worker else None

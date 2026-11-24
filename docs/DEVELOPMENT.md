@@ -85,6 +85,43 @@ AI coding assistants are allowed and encouraged, with these rules:
    the PR which parts were AI-generated.
 5. Don't paste real case data, API keys or `.env` content into an assistant.
 
+## Database migrations
+
+The schema is managed with [Alembic](https://alembic.sqlalchemy.org/). The app runs
+`app.db.migrate()` at startup, which upgrades the database to the latest migration, so users
+never lose their data when they pull a new version. (Databases created before Alembic was added
+are detected and adopted automatically.)
+
+**Any change to `app/models.py` must ship with a migration in the same PR:**
+
+```bash
+pip install -e ".[dev]"
+mkdir -p data
+FT_DATA_DIR=./data alembic upgrade head                        # bring your dev DB up to date
+FT_DATA_DIR=./data alembic revision --autogenerate -m "add run hook results"
+```
+
+Then **review the generated file** in `app/migrations/versions/` (autogenerate is a draft, not
+the truth):
+
+- New columns on existing tables should be nullable or have a `server_default`, or existing rows
+  will break the migration.
+- SQLite can't alter columns in place; the generated `batch_alter_table` blocks rebuild the table
+  for you. Keep them.
+- Renames are detected as drop + add (data loss). Edit them into `alter_column(new_column_name=...)`.
+- Fill in `downgrade()` and check it works: `alembic downgrade -1 && alembic upgrade head`.
+- Data migrations (backfilling values) go in the same file using `op.execute(...)`.
+
+Rules:
+
+- **Never edit a migration that has been merged to `main`**; add a new one instead.
+- **One head only.** If two PRs both add a migration on the same parent, CI fails
+  (`tests/test_migrations.py::test_single_head`). Whoever merges second rebases and changes their
+  migration's `down_revision` to the other migration's revision id.
+- CI also fails if the models and the migrations disagree (`test_migrations_match_models`),
+  i.e. someone changed `app/models.py` without generating a migration.
+- Resetting a local DB is still fine for experiments: `docker compose down -v`.
+
 ## Fixtures: adding real volatility3 output
 
 Unit tests never run real volatility: they use `tests/fixtures/fake_vol.py` and recorded
@@ -118,5 +155,6 @@ docker compose up --build             # run the app at http://127.0.0.1:8000
 docker compose run --rm app vol -h    # run vol inside the image
 docker compose exec app sh            # shell in the running container
 docker compose down -v                # wipe DB, run outputs and symbol cache
+FT_DATA_DIR=./data alembic current    # which migration a local dev DB is at
 pre-commit autoupdate                 # bump hook versions (separate PR)
 ```
