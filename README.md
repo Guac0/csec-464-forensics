@@ -91,6 +91,7 @@ Team workflow, branch rules and guidance for AI coding assistants:
 ### Evidence handling
 - **Status:** infrastructure done
 - Scan the read-only evidence folder, SHA-256 hashing, per-image description and notes.
+- OS details are filled from `windows.info` by a post-run hook (EXAMPLE; under review).
 - _TODO: describe OS detection and what is shown per image._
 
 ### Volatility plugins
@@ -114,6 +115,14 @@ Team workflow, branch rules and guidance for AI coding assistants:
 - Paged, filterable results tables; tree output (e.g. process trees) is indented; each row has a
   citation key `R<run>:<row>`.
 - _TODO: describe any per-plugin views or highlighting._
+
+### Post-processing hooks
+- **Status:** infrastructure done, hooks TODO
+- After a run succeeds, plugin-specific hooks can flag rows (highlighted, filterable by tag),
+  add run-level findings with row citations, record facts about the image, and queue follow-up
+  runs (with loop guards). A failing hook shows a warning but never fails the run; hooks can be
+  re-run from the run page. Findings and flags are passed to the AI as automated heuristics.
+- _TODO: list the hooks and what each one flags._
 
 ### AI analysis
 - **Status:** infrastructure done, prompts TODO

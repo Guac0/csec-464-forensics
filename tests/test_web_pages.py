@@ -137,7 +137,7 @@ def _make_fakes(session: Session) -> dict[str, SimpleNamespace]:
         sess.commit()
         return run
 
-    def get_rows(sess, run_id, offset=0, limit=100, q=None):
+    def get_rows(sess, run_id, offset=0, limit=100, q=None, annotated=False, tag=None):
         rows = list(
             sess.scalars(
                 select(ResultRow).where(ResultRow.run_id == run_id).order_by(ResultRow.row_idx)
@@ -145,7 +145,18 @@ def _make_fakes(session: Session) -> dict[str, SimpleNamespace]:
         )
         if q:
             rows = [r for r in rows if q.lower() in json.dumps(r.data).lower()]
+        if annotated or tag:
+            rows = [r for r in rows if r.annotations]
+        if tag:
+            rows = [r for r in rows if any(a.get("tag") == tag for a in r.annotations)]
         return rows[offset : offset + limit], len(rows)
+
+    def annotation_tags(sess, run_id):
+        counts: dict[str, int] = {}
+        for r in sess.scalars(select(ResultRow).where(ResultRow.run_id == run_id)):
+            for t in {a.get("tag") for a in r.annotations or []}:
+                counts[t] = counts.get(t, 0) + 1
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
     def list_notes(sess, evidence_id=None):
         stmt = select(Note).order_by(Note.id)
@@ -211,6 +222,7 @@ def _make_fakes(session: Session) -> dict[str, SimpleNamespace]:
             enqueue_auto=enqueue_auto,
             cancel_run=cancel_run,
             get_rows=get_rows,
+            annotation_tags=annotation_tags,
         ),
         "notes_svc": SimpleNamespace(
             list_notes=list_notes,

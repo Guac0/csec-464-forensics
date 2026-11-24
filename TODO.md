@@ -57,8 +57,9 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
       `tests/fixtures/` and replace the synthetic `sample_pstree.jsonl`.
 - [ ] **Output parsing** — check `VolatilityRunner.parse_output` (`app/tools/volatility/runner.py`)
       against those fixtures; add per-plugin post-processing where needed.
-- [ ] **OS detection** — fill `Evidence.os_info` from `windows.info` output (needs a small
-      post-success hook in `app/jobs/worker.py` that calls your code).
+- [ ] **Post-run hooks** — `app/tools/volatility/hooks/` (guide: `hooks/README.md`). Review the
+      EXAMPLE `windows_info.py` OS-detection hook against real output, and add hooks that flag
+      suspicious rows, summarise runs as findings, and queue sensible follow-up plugins.
 - [ ] **AI prompts** — `app/ai/prompts.py`: the analysis system prompt and the run-summary question.
 - [ ] **AI context** — `app/ai/context.py`: choose which rows of each plugin are worth sending.
 - [ ] **Citation checking** — `app/ai/citations.py`: verify that cited row values actually

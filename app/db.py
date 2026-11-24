@@ -73,13 +73,27 @@ def migrate(engine: Engine | None = None) -> None:
 
     engine = engine or get_engine()
     cfg = alembic_config()
-    with engine.begin() as conn:
-        cfg.attributes["connection"] = conn
-        tables = set(inspect(conn).get_table_names())
-        if "alembic_version" not in tables and "evidence" in tables:
-            logger.info("pre-Alembic database detected; stamping %s", BASELINE_REVISION)
-            command.stamp(cfg, BASELINE_REVISION)
-        command.upgrade(cfg, "head")
+    with engine.connect() as conn:
+        # SQLite changes most of a table's schema by rebuilding it (Alembic "batch mode": copy
+        # to a new table, DROP the old one, rename). With foreign keys ON, that DROP would fire
+        # ON DELETE CASCADE and silently wipe child rows (e.g. all result rows of every run).
+        # PRAGMA foreign_keys is ignored inside a transaction, so switch it off first.
+        conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        conn.commit()
+        try:
+            with conn.begin():
+                cfg.attributes["connection"] = conn
+                tables = set(inspect(conn).get_table_names())
+                if "alembic_version" not in tables and "evidence" in tables:
+                    logger.info("pre-Alembic database detected; stamping %s", BASELINE_REVISION)
+                    command.stamp(cfg, BASELINE_REVISION)
+                command.upgrade(cfg, "head")
+                problems = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+                if problems:
+                    raise RuntimeError(f"migration left broken foreign keys: {problems[:5]}")
+        finally:
+            conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+            conn.commit()
 
 
 def get_session() -> Iterator[Session]:

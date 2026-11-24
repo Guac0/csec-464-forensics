@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db import SessionLocal, init_engine, migrate
 from app.jobs.worker import get_worker, recover_stale_runs
+from app.tools import hooks
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ ROUTER_MODULES = (
     "app.api.evidence",
     "app.api.runs",
     "app.api.notes",
+    "app.api.hooks",
     "app.api.ai",
     "app.web.pages",
 )
@@ -74,6 +76,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         init_engine()
         migrate()
+        hooks.load_hooks()  # import hook modules now so import errors show up in the log
         with SessionLocal() as session:
             recover_stale_runs(session)
         worker = get_worker() if start_worker else None

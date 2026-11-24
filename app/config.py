@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     # Pass --offline to volatility3 (no symbol downloads; pre-fill the symbols volume first).
     vol_offline: bool = False
 
+    # Post-run hooks (app/tools/hooks.py).
+    hooks_enabled: bool = True
+    # Allow hooks to queue follow-up runs automatically.
+    hook_followups_enabled: bool = True
+    # Max length of a follow-up chain (user run -> follow-up -> follow-up ...). 0 = no follow-ups.
+    hook_max_chain_depth: int = 2
+    # Max follow-up runs a single run's hooks may queue in one pass.
+    hook_max_followups_per_run: int = 10
+
     # External OpenAI-compatible AI provider.
     ai_base_url: str = "http://localhost:11434/v1"
     ai_api_key: str = ""

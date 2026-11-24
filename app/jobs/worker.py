@@ -52,6 +52,18 @@ def execute(
     )
 
 
+def run_post_hooks(session: Session, run_id: int) -> None:
+    """Run post-run hooks for a succeeded run. Hook failures are recorded on the run by
+    app.tools.hooks and never change its status; anything unexpected is only logged."""
+    from app.tools import hooks
+
+    try:
+        hooks.run_hooks(session, run_id)
+    except Exception:
+        session.rollback()
+        logger.exception("post-run hooks could not run for run %s", run_id)
+
+
 def _rel_to_data_dir(path: Path, settings: Settings) -> str:
     """Path relative to data_dir (as stored on Run); falls back to the absolute path."""
     try:
@@ -311,6 +323,7 @@ class Worker:
             return
         self._finish(s, run_id, RunStatus.SUCCEEDED, None, row_count=count)
         logger.info("run %s: succeeded with %d rows", run_id, count)
+        run_post_hooks(s, run_id)
 
     @staticmethod
     def _store_rows(s: Session, run_id: int, runner: ToolRunner, stdout_path: Path) -> int:

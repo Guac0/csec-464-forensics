@@ -76,10 +76,14 @@ def test_downgrade_to_base_and_upgrade_again(settings: Settings) -> None:
 
 def test_pre_alembic_database_is_stamped_and_keeps_data(settings: Settings) -> None:
     """A DB made by the old create_all() (no alembic_version table) must be adopted in place."""
-    from app import models  # noqa: F401
-
     engine = _engine(settings)
-    db.Base.metadata.create_all(engine)  # what the PoC did before Alembic
+    # Recreate what the PoC built before Alembic: the baseline schema without alembic_version.
+    # (Base.metadata.create_all would build today's models, which are newer than the baseline.)
+    cfg = db.alembic_config()
+    with engine.begin() as conn:
+        cfg.attributes["connection"] = conn
+        command.upgrade(cfg, db.BASELINE_REVISION)
+        conn.execute(text("DROP TABLE alembic_version"))
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -91,3 +95,39 @@ def test_pre_alembic_database_is_stamped_and_keeps_data(settings: Settings) -> N
     assert _current_revision(engine) == _head()
     with engine.connect() as conn:
         assert conn.execute(text("SELECT rel_path FROM evidence")).scalar_one() == "old.raw"
+
+
+def test_table_rebuilds_do_not_cascade_delete_rows(settings: Settings) -> None:
+    """Upgrading from the baseline rebuilds the runs table (SQLite batch mode). With foreign keys
+    on, dropping the old table would cascade-delete every result row; migrate() must prevent it."""
+    engine = _engine(settings)
+    cfg = db.alembic_config()
+    with engine.begin() as conn:
+        cfg.attributes["connection"] = conn
+        command.upgrade(cfg, db.BASELINE_REVISION)
+        conn.execute(
+            text(
+                "INSERT INTO evidence (id, rel_path, size_bytes, mtime, description, created_at) "
+                "VALUES (1, 'a.raw', 1, 0, '', '2026-01-01 00:00:00')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO runs (id, evidence_id, tool, plugin, args, origin, status, "
+                "created_at, row_count) VALUES (1, 1, 'volatility3', 'p', '{}', 'MANUAL', "
+                "'SUCCEEDED', '2026-01-01 00:00:00', 2)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO result_rows (run_id, row_idx, depth, data) "
+                "VALUES (1, 0, 0, '{}'), (1, 1, 0, '{}')"
+            )
+        )
+    db.migrate(engine)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM result_rows")).scalar_one() == 2
+        assert conn.execute(text("SELECT chain_depth FROM runs")).scalar_one() == 0
+        # Foreign keys are switched back on for normal operation.
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1

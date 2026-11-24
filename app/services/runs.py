@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import Text, cast, func, select, update
+from sqlalchemy import Text, cast, exists, func, literal_column, select, update
 from sqlalchemy.orm import Session
 
 from app.models import ResultRow, Run, RunOrigin, RunStatus, utcnow
@@ -20,6 +20,7 @@ __all__ = [
     "enqueue_auto",
     "get_rows",
     "get_run",
+    "annotation_tags",
     "get_runner",
     "list_runs",
 ]
@@ -60,9 +61,14 @@ def create_run(
     request: ToolRequest,
     origin: RunOrigin = RunOrigin.MANUAL,
     tool: str = "volatility3",
+    *,
+    parent_run_id: int | None = None,
+    triggered_by_hook: str | None = None,
+    chain_depth: int = 0,
 ) -> Run:
     """Validate the request against the tool's allowlist and queue a run.
 
+    The keyword-only arguments record follow-up provenance for runs queued by post-run hooks.
     Raises ArgValidationError for disallowed plugins/args and LookupError for unknown evidence.
     """
     get_evidence(session, evidence_id)
@@ -75,6 +81,9 @@ def create_run(
         args=args,
         origin=origin,
         status=RunStatus.QUEUED,
+        parent_run_id=parent_run_id,
+        triggered_by_hook=triggered_by_hook,
+        chain_depth=chain_depth,
     )
     session.add(run)
     session.commit()
@@ -152,16 +161,45 @@ def _escape_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def annotation_tags(session: Session, run_id: int) -> list[tuple[str, int]]:
+    """Distinct annotation tags on a run's rows with row counts, most common first."""
+    each = func.json_each(ResultRow.annotations).table_valued("value").alias("a")
+    tag = func.json_extract(each.c.value, "$.tag")
+    stmt = (
+        select(tag.label("tag"), func.count(func.distinct(ResultRow.id)).label("n"))
+        .select_from(ResultRow)
+        .join(each, literal_column("1") == literal_column("1"))
+        .where(ResultRow.run_id == run_id, ResultRow.annotations.is_not(None))
+        .group_by(tag)
+        .order_by(func.count(func.distinct(ResultRow.id)).desc(), tag)
+    )
+    return [(t, n) for t, n in session.execute(stmt) if t]
+
+
 def get_rows(
     session: Session,
     run_id: int,
     offset: int = 0,
     limit: int = 100,
     q: str | None = None,
+    annotated: bool = False,
+    tag: str | None = None,
 ) -> tuple[list[ResultRow], int]:
     """Page through a run's rows ordered by row_idx. ``q`` is a case-insensitive substring
-    match on the JSON-serialised row data. Returns (rows, total matching)."""
+    match on the JSON-serialised row data; ``annotated`` keeps only rows a hook annotated and
+    ``tag`` only rows with that annotation tag. Returns (rows, total matching)."""
     where = [ResultRow.run_id == run_id]
+    if annotated or tag:
+        where.append(ResultRow.annotations.is_not(None))
+    if tag:
+        # SQLite JSON1: any annotation object whose "tag" equals the requested tag.
+        where.append(
+            exists(
+                select(literal_column("1"))
+                .select_from(func.json_each(ResultRow.annotations).table_valued("value"))
+                .where(func.json_extract(literal_column("value"), "$.tag") == tag)
+            )
+        )
     if q:
         pattern = f"%{_escape_like(q)}%"
         where.append(cast(ResultRow.data, Text).ilike(pattern, escape="\\"))

@@ -17,7 +17,7 @@
     <dt>Tool</dt><dd class="mono">{{ run.tool }} {{ run.tool_version or "" }}</dd>
     <dt>Args</dt><dd class="mono">{{ run.args | args or "—" }}</dd>
     <dt>Exact argv</dt><dd><pre>{{ run.argv | argv }}</pre></dd>
-    <dt>Origin</dt><dd>{{ run.origin.value }}</dd>
+    <dt>Origin</dt><dd>{{ run.origin.value }}{% if run.parent_run_id %} — queued by hook <span class="mono">{{ run.triggered_by_hook }}</span> after <a href="/runs/{{ run.parent_run_id }}">run {{ run.parent_run_id }}</a> (chain depth {{ run.chain_depth }}){% endif %}</dd>
     <dt>Evidence SHA-256</dt><dd class="mono">{{ run.evidence_sha256 or "—" }}</dd>
     <dt>Stdout SHA-256</dt><dd class="mono">{{ run.stdout_sha256 or "—" }}</dd>
     <dt>Created</dt><dd class="mono">{{ run.created_at | dt }}</dd>
@@ -28,17 +28,94 @@
   </dl>
   {% if run.error %}<div class="small-label">Error</div><pre class="error-block">{{ run.error }}</pre>{% endif %}
   {% if stderr_tail %}<div class="small-label">stderr (tail)</div><pre class="error-block">{{ stderr_tail }}</pre>{% endif %}
+  {% if message %}<p class="flash">{{ message }}</p>{% endif %}
   <div id="run-summary">{% if summary %}{% set msg = summary %}{% include "_ai_message.html" %}{% endif %}</div>
 </section>
+
+{% if run.status.value == "succeeded" and (hook_specs or run.hook_results or run.findings or follow_ups) %}
+<section class="panel" id="post-processing">
+  <div class="panel-head">
+    <h2>Post-processing</h2>
+    {% if hook_specs or run.hook_results %}
+    <form method="post" action="/ui/runs/{{ run.id }}/hooks/rerun">
+      <button type="submit" class="small" title="Run this plugin's hooks again without re-running the tool">Re-run post-processing</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if hook_errors %}
+  <p class="flash warn">{{ hook_errors | length }} post-processing hook(s) failed. The tool output below is unaffected.</p>
+  {% endif %}
+  {% if run.findings %}
+  <div class="small-label">Findings (automated, verify against the cited rows)</div>
+  <ul class="findings">
+    {% for f in run.findings %}
+    <li class="finding sev-{{ f.severity }}">
+      <span class="badge sev-{{ f.severity }}">{{ f.severity }}</span>
+      <strong>{{ f.title }}</strong>
+      {% if f.detail %}<div class="finding-detail">{{ f.detail }}</div>{% endif %}
+      {% if f.rows %}<div class="small-text">Rows:
+        {% for idx in f.rows[:50] %}<a class="mono" href="/runs/{{ run.id }}?row={{ idx }}#row-{{ run.id }}-{{ idx }}">R{{ run.id }}:{{ idx }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if f.rows | length > 50 %} … ({{ f.rows | length }} total){% endif %}
+      </div>{% endif %}
+      <div class="muted small-text">from {{ f.hook }}</div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if follow_ups %}
+  <div class="small-label">Follow-up runs queued by hooks</div>
+  <ul class="plain">
+    {% for f in follow_ups %}
+    <li><a href="/runs/{{ f.id }}">Run {{ f.id }}</a> <span class="mono">{{ f.plugin }}</span> <span class="mono small-text">{{ f.args | args }}</span>
+      <span class="badge status-{{ f.status.value }}">{{ f.status.value }}</span> <span class="muted small-text">via {{ f.triggered_by_hook }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if run.hook_results %}
+  <details{% if hook_errors %} open{% endif %}>
+    <summary>Hook details ({{ run.hook_results | length }})</summary>
+    <table class="data">
+      <thead><tr><th>Hook</th><th>Version</th><th>Status</th><th>Time</th><th>Result</th></tr></thead>
+      <tbody>
+      {% for h in run.hook_results %}
+        <tr>
+          <td class="mono">{{ h.hook }}</td>
+          <td class="mono">{{ h.version }}</td>
+          <td><span class="badge {{ 'status-succeeded' if h.status == 'ok' else 'status-failed' }}">{{ h.status }}</span></td>
+          <td class="mono small-text">{{ h.duration_ms }} ms</td>
+          <td class="small-text">
+            {% if h.error %}<pre class="error-block">{{ h.error }}</pre>{% endif %}
+            {% if h.annotated_rows %}{{ h.annotated_rows }} row(s) annotated. {% endif %}
+            {% if h.findings %}{{ h.findings }} finding(s). {% endif %}
+            {% if h.metadata_keys %}Evidence metadata: <span class="mono">{{ h.metadata_keys | join(", ") }}</span>. {% endif %}
+            {% if h.follow_ups_queued %}Queued: {% for rid in h.follow_ups_queued %}<a href="/runs/{{ rid }}">run {{ rid }}</a>{% if not loop.last %}, {% endif %}{% endfor %}. {% endif %}
+            {% for s in h.follow_ups_skipped or [] %}<div>Skipped <span class="mono">{{ s.plugin }} {{ s.args | args }}</span>: {{ s.skipped }}</div>{% endfor %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% elif hook_specs %}
+  <p class="muted small-text">Hooks for this plugin ({{ hook_specs | map(attribute="name") | join(", ") }}) have not run on this run yet.</p>
+  {% endif %}
+</section>
+{% endif %}
 
 <section class="panel">
   <div class="panel-head">
     <h2>Results</h2>
     <form class="filter" method="get" action="/runs/{{ run.id }}"
           hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML">
-      <input type="search" name="q" value="{{ q }}" placeholder="Filter rows…"
+      <input type="search" name="q" value="{{ q }}" placeholder="Filter rows…" hx-include="closest form"
              hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML"
              hx-trigger="input changed delay:400ms, search">
+      {% if tags %}
+      <select name="tag" hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML" hx-include="closest form" title="Filter by hook annotation">
+        <option value="">All rows</option>
+        <option value="*"{% if tag == "*" %} selected{% endif %}>Any annotation</option>
+        {% for t, n in tags %}<option value="{{ t }}"{% if tag == t %} selected{% endif %}>{{ t }} ({{ n }})</option>{% endfor %}
+      </select>
+      {% endif %}
       <button type="submit" class="small">Filter</button>
     </form>
   </div>

@@ -29,7 +29,33 @@ def _json(value: Any) -> str:
 
 def format_row(row: ResultRow) -> str:
     indent = "  " * max(row.depth, 0)
-    return f"{indent}[{row.citation}] {_json(row.data)}"
+    text = f"{indent}[{row.citation}] {_json(row.data)}"
+    if row.annotations:
+        flags = "; ".join(
+            f"{a.get('tag')} ({a.get('severity')})" + (f": {a['note']}" if a.get("note") else "")
+            for a in row.annotations
+        )
+        text += f"  <- automated flags: {flags}"
+    return text
+
+
+def _findings_block(run: Run, max_rows: int = 10) -> list[str]:
+    """Hook findings for a run, labelled as automated heuristics with their supporting rows."""
+    if not run.findings:
+        return []
+    lines = ["automated findings (post-run hooks; heuristics to verify, not conclusions):"]
+    for f in run.findings:
+        rows = f.get("rows") or []
+        cites = ", ".join(f"R{run.id}:{i}" for i in rows[:max_rows])
+        if len(rows) > max_rows:
+            cites += f", ... ({len(rows)} rows)"
+        line = f"- [{f.get('severity')}] {f.get('title')}"
+        if f.get("detail"):
+            line += f" - {f['detail']}"
+        if cites:
+            line += f" (rows: {cites})"
+        lines.append(line)
+    return lines
 
 
 class _Builder:
@@ -172,7 +198,8 @@ def build_context(
         ]
         if run.error:
             header.append(f"error: {run.error}")
-        rows = (
+        header.extend(_findings_block(run))
+        rows = list(
             session.execute(
                 select(ResultRow)
                 .where(ResultRow.run_id == run.id)
@@ -182,8 +209,28 @@ def build_context(
             .scalars()
             .all()
         )
+        shown_first = len(rows)
+        # Rows flagged by hooks beyond the first N are included too, so flags are never hidden
+        # just because the row appears late in the output.
+        flagged = (
+            session.execute(
+                select(ResultRow)
+                .where(
+                    ResultRow.run_id == run.id,
+                    ResultRow.row_idx >= shown_first,
+                    ResultRow.annotations.is_not(None),
+                )
+                .order_by(ResultRow.row_idx)
+                .limit(max_rows_per_run)
+            )
+            .scalars()
+            .all()
+        )
+        rows.extend(flagged)
         if rows and run.row_count > len(rows):
-            header.append(f"(showing first {len(rows)} of {run.row_count} rows)")
+            note = f"(showing first {shown_first} of {run.row_count} rows"
+            note += f" plus {len(flagged)} later flagged rows)" if flagged else ")"
+            header.append(note)
         # TODO(forensics): per-plugin summarization / row selection (e.g. only suspicious
         # malfind hits, collapsed pstree branches) instead of the first N rows.
         if not b.add("\n".join(header)):

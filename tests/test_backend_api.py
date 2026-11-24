@@ -105,6 +105,7 @@ def test_rows_endpoint(client: TestClient, session: Session) -> None:
         "depth": 0,
         "parent_idx": None,
         "data": {"name": "evil.exe"},
+        "annotations": None,
     }
     assert client.get("/api/runs/999/rows").status_code == 404
 
