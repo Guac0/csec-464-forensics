@@ -61,6 +61,21 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
 
+### Audit log
+- `app/services/audit.py` (frozen interface): `record(session, action, *, category, summary,
+  object_type, object_id, evidence_id, details)`, `record_now(action, ...)`, `audit_context(...)`,
+  `current_context()`, `list_events(...)`, `verify_chain(session)`, `verify_and_record(session)`,
+  categories `CHANGE`/`KEY_READ`/`REQUEST`, `audit_requests_middleware`.
+- **Rule:** every function that changes data calls `audit.record(...)` before its
+  `session.commit()` (same transaction). Action names are `<object>.<verb>` (e.g. `note.edit`).
+- Tables: `audit_events` and `note_versions` are append-only (DB triggers); `audit_head` holds the
+  chain head. A migration that rebuilds these tables must recreate the triggers.
+- `app/services/notes.py`: `list_versions(session, note_id)`; every create/edit/delete adds a
+  `NoteVersion`.
+- API: `GET /api/audit`, `GET /api/audit/verify`, `GET /api/notes/{id}/versions`.
+  UI: `/activity`, `/notes/{id}/history`.
+- Setting `FT_AUDIT_LEVEL` = `changes` | `key_reads` | `all` (temporary default `all`).
+
 ### Post-run hooks
 - `app/tools/hooks.py` (engine, frozen interface): `@post_run(*plugins, tool, name, version)`,
   `HookContext` (`rows`, `latest_run`, `annotate`, `add_finding`, `update_evidence_metadata`,

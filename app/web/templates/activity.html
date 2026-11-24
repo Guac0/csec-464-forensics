@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Activity{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a> / Activity{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Activity log</h2>
+    <form method="post" action="/ui/audit/verify">
+      <button type="submit" class="small" title="Recompute the hash chain over every event">Verify integrity</button>
+    </form>
+  </div>
+  {% if report %}
+    {% if report.ok %}
+    <p class="flash">Integrity verified: {{ report.events }} event(s), chain intact. Head hash <span class="mono small-text">{{ report.head_hash }}</span></p>
+    {% else %}
+    <p class="flash error">Integrity check FAILED{% if report.bad_seq %} at event #{{ report.bad_seq }}{% endif %}: {{ report.error }}. The log may have been edited outside the app.</p>
+    {% endif %}
+  {% endif %}
+  <p class="muted small-text">Append-only and hash-chained. Logging level: <span class="mono">{{ audit_level }}</span>{% if audit_level == "all" %} (every page and API request is recorded){% endif %}.</p>
+  <form class="filter-row" method="get" action="/activity">
+    <select name="category">
+      <option value="">All categories</option>
+      {% for c in categories %}<option value="{{ c }}"{% if filters.category == c %} selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+    <input type="text" name="action" value="{{ filters.action or '' }}" placeholder="action, e.g. note. or run.create" size="22">
+    <input type="number" name="evidence_id" value="{{ filters.evidence_id if filters.evidence_id is not none else '' }}" placeholder="evidence id" min="1">
+    <input type="text" name="object_type" value="{{ filters.object_type or '' }}" placeholder="object type" size="10">
+    <input type="number" name="object_id" value="{{ filters.object_id if filters.object_id is not none else '' }}" placeholder="object id" min="1">
+    <button type="submit" class="small">Filter</button>
+    <a class="small-text" href="/activity">Clear</a>
+  </form>
+  <div class="pager">
+    {% if total %}Events {{ offset + 1 }}–{{ [offset + limit, total] | min }} of {{ total }} (newest first){% else %}No events{% endif %}
+    {% if prev_link %}<a href="{{ prev_link }}">&larr; Newer</a>{% endif %}
+    {% if next_link %}<a href="{{ next_link }}">Older &rarr;</a>{% endif %}
+  </div>
+  {% if events %}
+  <div class="table-wrap">
+  <table class="data audit">
+    <thead><tr><th>#</th><th>Time (UTC)</th><th>Origin</th><th>Category</th><th>Action</th><th>Summary</th><th>Details</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr class="cat-{{ e.category }}">
+        <td class="mono">{{ e.seq }}</td>
+        <td class="mono small-text">{{ e.ts }}</td>
+        <td>{{ e.origin }}</td>
+        <td><span class="badge">{{ e.category }}</span></td>
+        <td class="mono small-text">{{ e.action }}</td>
+        <td>
+          {{ e.summary }}
+          {% if e.object_type == "run" and e.object_id %} <a class="small-text" href="/runs/{{ e.object_id }}">run {{ e.object_id }}</a>{% endif %}
+          {% if e.object_type == "note" and e.object_id %} <a class="small-text" href="/notes/{{ e.object_id }}/history">history</a>{% endif %}
+          {% if e.evidence_id %} <a class="small-text" href="/evidence/{{ e.evidence_id }}">evidence {{ e.evidence_id }}</a>{% endif %}
+        </td>
+        <td>
+          <details><summary class="small-text">show</summary>
+            <pre class="small-text">{{ e.details | pretty }}</pre>
+            <div class="small-text muted">actor {{ e.actor }}{% if e.request_id %} · request {{ e.request_id }}{% endif %}</div>
+            <div class="small-text muted mono">hash {{ e.hash }}<br>prev {{ e.prev_hash }}</div>
+          </details>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

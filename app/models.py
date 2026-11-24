@@ -161,3 +161,59 @@ class AIMessage(Base):
     usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class NoteVersion(Base):
+    """Append-only history of a note: one row per create/edit/delete (DB triggers block changes).
+
+    ``note_id`` is deliberately not a foreign key, so history survives the note being deleted.
+    """
+
+    __tablename__ = "note_versions"
+    __table_args__ = (UniqueConstraint("note_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    note_id: Mapped[int] = mapped_column(Integer, index=True)
+    version: Mapped[int] = mapped_column(Integer)  # 1, 2, 3... per note
+    action: Mapped[str] = mapped_column(String)  # "create" | "edit" | "delete"
+    body: Mapped[str] = mapped_column(Text)  # text after the action (last text for "delete")
+    evidence_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    actor: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuditEvent(Base):
+    """One audit log entry. Append-only (DB triggers) and hash-chained (see app/services/audit.py).
+
+    ``ts`` is stored as an ISO-8601 UTC string (not DateTime) so the value that was hashed is
+    byte-for-byte the value read back during verification.
+    """
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, unique=True)  # 1, 2, 3... gaps = deleted rows
+    ts: Mapped[str] = mapped_column(String, index=True)
+    actor: Mapped[str] = mapped_column(String)  # "local" until there is login
+    origin: Mapped[str] = mapped_column(String)  # ui | api | worker | system
+    category: Mapped[str] = mapped_column(String, index=True)  # change | key_read | request
+    action: Mapped[str] = mapped_column(String, index=True)  # e.g. "note.edit", "run.create"
+    object_type: Mapped[str | None] = mapped_column(String, default=None)
+    object_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    evidence_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), default=None)
+    request_id: Mapped[str | None] = mapped_column(String, default=None)
+    prev_hash: Mapped[str] = mapped_column(String(64))
+    hash: Mapped[str] = mapped_column(String(64))
+
+
+class AuditHead(Base):
+    """Single row (id=1) holding the latest chain hash and sequence number. Updating it first in
+    every audit write takes SQLite's write lock, so chain appends are serialised."""
+
+    __tablename__ = "audit_head"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+    last_hash: Mapped[str] = mapped_column(String(64))

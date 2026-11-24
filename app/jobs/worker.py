@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.models import Evidence, ResultRow, Run, RunStatus, utcnow
+from app.services import audit
 from app.services import runs as runs_service
 from app.services.evidence import resolve_evidence_path
 from app.tools.base import ArgValidationError, ExecutionResult, ToolRequest, ToolRunner
@@ -89,6 +90,15 @@ def _with_tail(message: str, tail: str) -> str:
 
 def recover_stale_runs(session: Session) -> int:
     """Mark runs left RUNNING by a previous process as FAILED. Returns the number updated."""
+    for run in session.scalars(select(Run).where(Run.status == RunStatus.RUNNING)):
+        audit.record(
+            session,
+            "run.interrupted",
+            object_type="run",
+            object_id=run.id,
+            evidence_id=run.evidence_id,
+            summary=f"Run {run.id} was still running at restart; marked failed",
+        )
     res = session.execute(
         update(Run)
         .where(Run.status == RunStatus.RUNNING)
@@ -194,9 +204,20 @@ class Worker:
                     .where(Run.id == run_id, Run.status == RunStatus.QUEUED)
                     .values(status=RunStatus.RUNNING, started_at=now, heartbeat_at=now)
                 )
-                s.commit()
                 if res.rowcount == 1:  # type: ignore[attr-defined]
+                    run = s.get(Run, run_id)
+                    with audit.audit_context(origin="worker", request_id=None):
+                        audit.record(
+                            s,
+                            "run.start",
+                            object_type="run",
+                            object_id=run_id,
+                            evidence_id=run.evidence_id if run else None,
+                            summary=f"Started run {run_id}",
+                        )
+                    s.commit()
                     return run_id
+                s.commit()
                 # Lost the race (e.g. cancelled meanwhile): unregister and try the next one.
                 with self._lock:
                     self._cancel_events.pop(run_id, None)
@@ -205,6 +226,10 @@ class Worker:
     # -- execution ---------------------------------------------------------------------------
 
     def _run_task(self, run_id: int) -> None:
+        with audit.audit_context(origin="worker", request_id=None):
+            self._run_task_inner(run_id)
+
+    def _run_task_inner(self, run_id: int) -> None:
         with self._lock:
             cancel_event = self._cancel_events.get(run_id) or threading.Event()
         try:
@@ -229,6 +254,25 @@ class Worker:
     def _finish(
         s: Session, run_id: int, status: RunStatus, error: str | None, **values: Any
     ) -> None:
+        run = s.get(Run, run_id)
+        audit.record(
+            s,
+            "run.finish",
+            object_type="run",
+            object_id=run_id,
+            evidence_id=run.evidence_id if run else None,
+            summary=f"Run {run_id} {status.value}"
+            + (f" ({values['row_count']} rows)" if "row_count" in values else ""),
+            details={
+                "status": status.value,
+                "row_count": values.get("row_count"),
+                "returncode": run.returncode if run else None,
+                "stdout_sha256": run.stdout_sha256 if run else None,
+                "tool_version": run.tool_version if run else None,
+                "argv": run.argv if run else None,
+                "error": (error or "")[:500] or None,
+            },
+        )
         s.execute(
             update(Run)
             .where(Run.id == run_id)

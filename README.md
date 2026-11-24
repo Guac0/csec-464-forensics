@@ -131,8 +131,17 @@ Team workflow, branch rules and guidance for AI coding assistants:
 - _TODO: describe the analysis approach, what context is sent, and known limitations._
 
 ### Notes and export
-- **Status:** notes done, export TODO
+- **Status:** notes done (with full version history), export TODO
+- Every note edit is kept; "history" on a note shows all versions, even after deletion.
 - _TODO: describe the markdown export once implemented._
+
+### Activity (audit) log
+- **Status:** done
+- Every action is recorded in an append-only, tamper-evident log: evidence scans and hashing,
+  runs (queued, started, finished, cancelled), post-processing, notes, AI questions and answers,
+  and (for now) every page and API request. "Activity" in the top bar shows and filters it;
+  "Verify integrity" checks that nothing was edited or deleted. Evidence and run pages link to
+  their own activity.
 
 ## Limitations
 

@@ -4,6 +4,7 @@
     <div class="note-body">{{ note.body }}</div>
     <div class="note-meta muted">
       {{ note.created_at | dt }}{% if note.updated_at and note.updated_at != note.created_at %} · edited {{ note.updated_at | dt }}{% endif %}
+      · <a href="/notes/{{ note.id }}/history">history</a>
     </div>
     <details class="note-edit">
       <summary>Edit</summary>

@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,6 +33,14 @@ class Settings(BaseSettings):
     vol_executable: str = "vol"
     # Pass --offline to volatility3 (no symbol downloads; pre-fill the symbols volume first).
     vol_offline: bool = False
+
+    # Audit log detail (app/services/audit.py):
+    #   "changes"   - only actions that change data
+    #   "key_reads" - changes + sensitive reads (verify, exports, downloads) <- intended default
+    #   "all"       - also every HTTP request (page views, API reads, HTMX polling)
+    # TEMPORARY: "all" while the PoC is being evaluated, for maximum coverage. Switching to the
+    # intended level later is just changing this default (or FT_AUDIT_LEVEL); nothing else.
+    audit_level: Literal["changes", "key_reads", "all"] = "all"
 
     # Post-run hooks (app/tools/hooks.py).
     hooks_enabled: bool = True
