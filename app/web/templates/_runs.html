@@ -8,7 +8,7 @@
     {% for run in runs %}
       <tr>
         <td><a href="/runs/{{ run.id }}">{{ run.id }}</a></td>
-        <td><span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span></td>
+        <td><span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>{% if run.phase %} <span class="small-text muted">{{ run.phase }}</span>{% endif %}{% if run.integrity_warning %} <span class="badge sev-medium" title="{{ run.integrity_warning }}">integrity warning</span>{% endif %}</td>
         <td class="mono"><a href="/runs/{{ run.id }}">{{ run.plugin }}</a></td>
         <td class="mono small-text">{{ run.args | args }}</td>
         <td>{{ run.origin.value }}{% if run.parent_run_id %} <a class="small-text" href="/runs/{{ run.parent_run_id }}" title="queued by {{ run.triggered_by_hook }}">&larr; #{{ run.parent_run_id }}</a>{% endif %}

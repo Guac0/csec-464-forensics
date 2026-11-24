@@ -550,16 +550,20 @@ def _queue_follow_ups(
         if duplicate is not None:
             skip(f"duplicate of run {duplicate}")
             continue
-        new_run = runs_service.create_run(
-            session,
-            run.evidence_id,
-            request,
-            RunOrigin.HOOK,
-            run.tool,
-            parent_run_id=run.id,
-            triggered_by_hook=ctx._spec.name,  # noqa: SLF001
-            chain_depth=depth,
-        )
+        try:
+            new_run = runs_service.create_run(
+                session,
+                run.evidence_id,
+                request,
+                RunOrigin.HOOK,
+                run.tool,
+                parent_run_id=run.id,
+                triggered_by_hook=ctx._spec.name,  # noqa: SLF001
+                chain_depth=depth,
+            )
+        except runs_service.IntegrityError as exc:
+            skip(f"evidence integrity: {exc}")
+            continue
         budget[0] -= 1
         queued.append(new_run.id)
     return queued, skipped

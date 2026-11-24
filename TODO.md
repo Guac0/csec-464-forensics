@@ -78,8 +78,8 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
       exports, or copy it to a separate file/system).
 
 - [ ] Markdown export of notes, runs, hashes and AI outputs is not implemented yet.
-- [ ] Runs don't re-verify the image hash before executing; a run records the evidence SHA-256 only
-      if the image was hashed first.
+- [ ] Integrity: a full re-hash before each run is off by default (`FT_VERIFY_ON_RUN`); the
+      default pre-run check is size + modification time only. Decide per deployment.
 - [ ] The UI doesn't refresh automatically after hashing finishes (reload the page).
 - [ ] Failed AI requests show the error text twice in the AI panel.
 - [ ] The gitleaks pre-commit hook only protects local commits; in CI it checks nothing.

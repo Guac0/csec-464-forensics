@@ -5,7 +5,7 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Run {{ run.id }}: <span class="mono">{{ run.plugin }}</span>
-      <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span></h2>
+      <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>{% if run.phase %} <span class="badge">{{ run.phase }}</span>{% endif %}</h2>
     <form method="post" action="/ui/runs/{{ run.id }}/summarize"
           hx-post="/ui/runs/{{ run.id }}/summarize" hx-target="#run-summary" hx-swap="innerHTML"
           hx-indicator="#summary-spinner" hx-disabled-elt="find button">
@@ -18,7 +18,8 @@
     <dt>Args</dt><dd class="mono">{{ run.args | args or "—" }}</dd>
     <dt>Exact argv</dt><dd><pre>{{ run.argv | argv }}</pre></dd>
     <dt>Origin</dt><dd>{{ run.origin.value }}{% if run.parent_run_id %} — queued by hook <span class="mono">{{ run.triggered_by_hook }}</span> after <a href="/runs/{{ run.parent_run_id }}">run {{ run.parent_run_id }}</a> (chain depth {{ run.chain_depth }}){% endif %}</dd>
-    <dt>Evidence SHA-256</dt><dd class="mono">{{ run.evidence_sha256 or "—" }}</dd>
+    <dt>Evidence at run time</dt><dd class="mono small-text">{% if run.evidence_sha256 %}SHA-256 {{ run.evidence_sha256 }} · {{ run.evidence_size_bytes }} bytes{% if run.evidence_sha256 != run.evidence.sha256 %} <span class="badge status-failed" title="the image's current hash differs">differs from current hash</span>{% endif %}{% else %}—{% endif %}</dd>
+    {% if run.integrity_warning %}<dt>Integrity warning</dt><dd><span class="flash warn">{{ run.integrity_warning }}</span></dd>{% endif %}
     <dt>Stdout SHA-256</dt><dd class="mono">{{ run.stdout_sha256 or "—" }}</dd>
     <dt>Created</dt><dd class="mono">{{ run.created_at | dt }}</dd>
     <dt>Started</dt><dd class="mono">{{ run.started_at | dt }}</dd>

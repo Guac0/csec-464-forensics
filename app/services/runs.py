@@ -8,14 +8,16 @@ from sqlalchemy import Text, cast, exists, func, literal_column, select, update
 from sqlalchemy.orm import Session
 
 from app.models import ResultRow, Run, RunOrigin, RunStatus, utcnow
-from app.services import audit
+from app.services import audit, integrity
 from app.services.evidence import get_evidence
+from app.services.integrity import IntegrityError
 from app.tools.base import ArgValidationError, ToolRequest, ToolRunner
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "ArgValidationError",
+    "IntegrityError",
     "cancel_run",
     "create_run",
     "enqueue_auto",
@@ -70,9 +72,10 @@ def create_run(
     """Validate the request against the tool's allowlist and queue a run.
 
     The keyword-only arguments record follow-up provenance for runs queued by post-run hooks.
-    Raises ArgValidationError for disallowed plugins/args and LookupError for unknown evidence.
+    Raises ArgValidationError for disallowed plugins/args, LookupError for unknown evidence and
+    IntegrityError (strict mode) if the image changed or mismatches its expected hashes.
     """
-    get_evidence(session, evidence_id)
+    integrity.check_can_run(get_evidence(session, evidence_id))
     runner = get_runner(tool)
     args = runner.validate(request)
     run = Run(

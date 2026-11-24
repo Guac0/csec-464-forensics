@@ -6,11 +6,9 @@ Evidence files live in the read-only ``settings.evidence_dir`` mount; we only ev
 from __future__ import annotations
 
 import contextvars
-import hashlib
 import logging
 import os
 import threading
-import time
 from pathlib import Path
 
 from sqlalchemy import select
@@ -18,12 +16,10 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Evidence, utcnow
-from app.services import audit
+from app.models import Evidence
+from app.services import audit, integrity
 
 logger = logging.getLogger(__name__)
-
-HASH_CHUNK_SIZE = 1024 * 1024  # 1 MiB
 
 # Evidence ids currently being hashed by a background thread (avoid duplicate work).
 _hashing: set[int] = set()
@@ -99,24 +95,16 @@ def scan_evidence(session: Session) -> list[Evidence]:
             )
             added.append(rel_path)
         elif ev.size_bytes != st.st_size or ev.mtime != st.st_mtime:
-            # File changed on disk: the old hash no longer describes it.
-            audit.record(
+            if ev.sha256 is None:
+                # Not hashed yet: nothing to protect, just track the current file.
+                ev.size_bytes, ev.mtime = st.st_size, st.st_mtime
+            elif integrity.mark_changed(
                 session,
-                "evidence.changed_on_disk",
-                object_type="evidence",
-                object_id=ev.id,
-                evidence_id=ev.id,
-                summary=f"Evidence file {rel_path} changed on disk; hash cleared",
-                details={
-                    "before": {"size_bytes": ev.size_bytes, "mtime": ev.mtime, "sha256": ev.sha256},
-                    "after": {"size_bytes": st.st_size, "mtime": st.st_mtime},
-                },
-            )
-            ev.size_bytes = st.st_size
-            ev.mtime = st.st_mtime
-            ev.sha256 = None
-            ev.hashed_at = None
-            changed.append(rel_path)
+                ev,
+                f"scan: size {ev.size_bytes} -> {st.st_size}, mtime {ev.mtime} -> {st.st_mtime}",
+            ):
+                # The hashed size/mtime are kept as the baseline; the analyst must re-verify.
+                changed.append(rel_path)
         result.append(ev)
     audit.record(
         session,
@@ -169,54 +157,24 @@ def resolve_evidence_path(evidence: Evidence) -> Path:
     return path
 
 
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        while chunk := f.read(HASH_CHUNK_SIZE):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def hash_evidence(session: Session, evidence_id: int) -> Evidence:
-    """Compute the SHA-256 of an evidence file. Skipped if already hashed at the same size+mtime."""
+    """Hash (or re-verify) an image now: SHA-256 + MD5 + SHA-1, recorded as an integrity check.
+
+    This is the analyst's "Verify": the current content becomes the image's baseline (a change
+    since the last hash is recorded as result "changed"). See app/services/integrity.py.
+    """
     ev = get_evidence(session, evidence_id)
-    path = resolve_evidence_path(ev)
-    st = path.stat()
-    if ev.sha256 and ev.size_bytes == st.st_size and ev.mtime == st.st_mtime:
-        return ev
-    logger.info("hashing evidence %s (%s, %d bytes)", ev.id, ev.rel_path, st.st_size)
-    started = time.perf_counter()
-    digest = _sha256_file(path)
-    # Re-stat: if the file changed while hashing, the digest is not trustworthy.
-    st_after = path.stat()
-    if (st_after.st_size, st_after.st_mtime) != (st.st_size, st.st_mtime):
-        raise RuntimeError(f"evidence {ev.rel_path!r} changed while hashing")
-    ev.size_bytes = st.st_size
-    ev.mtime = st.st_mtime
-    audit.record(
-        session,
-        "evidence.hash",
-        object_type="evidence",
-        object_id=ev.id,
-        evidence_id=ev.id,
-        summary=f"Hashed {ev.rel_path}: SHA-256 {digest}",
-        details={
-            "sha256": digest,
-            "previous_sha256": ev.sha256,
-            "size_bytes": st.st_size,
-            "mtime": st.st_mtime,
-            "seconds": round(time.perf_counter() - started, 3),
-        },
+    integrity.hash_evidence(
+        session, evidence_id, kind="initial" if ev.sha256 is None else "verify", accept=True
     )
-    ev.sha256 = digest
-    ev.hashed_at = utcnow()
-    session.commit()
+    session.refresh(ev)
     return ev
 
 
 def is_hashing(evidence_id: int) -> bool:
+    """True while a background verify or the worker is hashing this image."""
     with _hashing_lock:
-        return evidence_id in _hashing
+        return evidence_id in _hashing or integrity.is_hashing(evidence_id)
 
 
 def start_hash_in_background(evidence_id: int) -> None:
@@ -230,16 +188,9 @@ def start_hash_in_background(evidence_id: int) -> None:
         try:
             with SessionLocal() as s:
                 hash_evidence(s, evidence_id)
-        except Exception as exc:
+        except Exception:
+            # integrity.hash_evidence already recorded the failure (check + audit event).
             logger.exception("background hash of evidence %s failed", evidence_id)
-            audit.record_now(
-                "evidence.hash_failed",
-                object_type="evidence",
-                object_id=evidence_id,
-                evidence_id=evidence_id,
-                summary=f"Hashing evidence {evidence_id} failed: {exc}",
-                details={"error": f"{type(exc).__name__}: {exc}"},
-            )
         finally:
             with _hashing_lock:
                 _hashing.discard(evidence_id)

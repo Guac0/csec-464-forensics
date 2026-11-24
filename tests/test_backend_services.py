@@ -53,17 +53,18 @@ def test_scan_finds_files_and_skips_hidden_and_escaping_links(
     assert {e.id for e in again} == {e.id for e in found}
 
 
-def test_scan_clears_hash_when_file_changes(settings: Settings, session: Session) -> None:
+def test_scan_flags_hashed_file_that_changed(settings: Settings, session: Session) -> None:
     (ev,) = evidence_service.scan_evidence(session)
     evidence_service.hash_evidence(session, ev.id)
-    assert ev.sha256
+    baseline = ev.sha256
     path = settings.evidence_dir / "sample.raw"
     path.write_bytes(b"\x01" * 10)
     os.utime(path, (1_000_000, 1_000_000))
     (ev2,) = evidence_service.scan_evidence(session)
     assert ev2.id == ev.id
-    assert ev2.size_bytes == 10
-    assert ev2.sha256 is None
+    # The hashed baseline is kept; the image is flagged until the analyst re-verifies it.
+    assert ev2.size_bytes == 4096 and ev2.sha256 == baseline
+    assert ev2.changed_detected_at is not None
 
 
 @pytest.mark.parametrize("bad", ["../outside.raw", "/etc/passwd", "sub/../../x", ""])
@@ -79,19 +80,16 @@ def test_resolve_evidence_path_ok(settings: Settings) -> None:
     assert p == (settings.evidence_dir / "sample.raw").resolve()
 
 
-def test_hash_evidence_and_cache(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hash_evidence_computes_all_hashes(session: Session) -> None:
     import hashlib
 
     (ev,) = evidence_service.scan_evidence(session)
     evidence_service.hash_evidence(session, ev.id)
-    assert ev.sha256 == hashlib.sha256(b"\x00" * 4096).hexdigest()
+    data = b"\x00" * 4096
+    assert ev.sha256 == hashlib.sha256(data).hexdigest()
+    assert ev.md5 == hashlib.md5(data).hexdigest()  # noqa: S324
+    assert ev.sha1 == hashlib.sha1(data).hexdigest()  # noqa: S324
     assert ev.hashed_at is not None
-
-    def boom(_path: Path) -> str:
-        raise AssertionError("should be cached")
-
-    monkeypatch.setattr(evidence_service, "_sha256_file", boom)
-    assert evidence_service.hash_evidence(session, ev.id).sha256 == ev.sha256
 
 
 def test_hash_in_background(session: Session) -> None:
