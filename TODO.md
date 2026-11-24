@@ -75,5 +75,4 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] The UI doesn't refresh automatically after hashing finishes (reload the page).
 - [ ] Failed AI requests show the error text twice in the AI panel.
 - [ ] The gitleaks pre-commit hook only protects local commits; in CI it checks nothing.
-- [ ] Move from `create_all()` to Alembic migrations once the schema settles.
 - [ ] Linux/macOS memory images (custom symbol tables) are out of scope for the PoC.

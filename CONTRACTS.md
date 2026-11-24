@@ -11,7 +11,10 @@ auto-enumeration list, per-plugin parsing/summaries, OS detection and the analys
 ## Frozen shared files (do not edit without team agreement)
 
 - `app/config.py` — `Settings` / `get_settings()` (env prefix `FT_`)
-- `app/db.py` — `Base`, `init_engine()`, `create_all()`, `SessionLocal`, `get_session()`
+- `app/db.py` — `Base`, `init_engine()`, `migrate()`, `alembic_config()`,
+  `SessionLocal`, `get_session()`
+- `app/migrations/versions/` — applied migrations are never edited; every change to
+  `app/models.py` ships with a new migration in the same PR (see docs/DEVELOPMENT.md)
 - `app/models.py` — `Evidence`, `Run`, `RunStatus`, `RunOrigin`, `ResultRow`, `Note`, `AIMessage`
 - `app/tools/base.py` — `ToolRunner`, `PluginSpec`, `ArgSpec`, `ToolRequest`, `ParsedRow`,
   `ExecutionResult`, `ArgValidationError`
@@ -25,7 +28,7 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 
 ### Backend core
 - `app/main.py`: `create_app(start_worker: bool = True) -> FastAPI`. Lifespan: `init_engine()`,
-  `create_all()`, recover stale runs, start/stop worker. Includes routers from
+  `migrate()`, recover stale runs, start/stop worker. Includes routers from
   `app.api.evidence`, `app.api.runs`, `app.api.notes`, `app.api.ai`, `app.web.pages`; mounts
   `app/web/static` at `/static`. `GET /health -> {"status": "ok"}`.
 - `app/services/evidence.py`
