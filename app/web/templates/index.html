@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Evidence{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Evidence</h2>
+    <form method="post" action="/ui/scan" hx-post="/ui/scan" hx-target="#evidence-list" hx-swap="outerHTML">
+      <button type="submit">Scan evidence folder</button>
+    </form>
+  </div>
+  {% include "_evidence_list.html" %}
+</section>
+<section class="panel" id="notes-section">
+  <h2>Investigation notes</h2>
+  {% include "_notes.html" %}
+</section>
+{% endblock %}

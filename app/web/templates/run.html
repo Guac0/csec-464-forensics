@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id }}{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a> / <a href="/evidence/{{ run.evidence_id }}" class="mono">{{ run.evidence.rel_path }}</a> / Run {{ run.id }}{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Run {{ run.id }}: <span class="mono">{{ run.plugin }}</span>
+      <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span></h2>
+    <form method="post" action="/ui/runs/{{ run.id }}/summarize"
+          hx-post="/ui/runs/{{ run.id }}/summarize" hx-target="#run-summary" hx-swap="innerHTML"
+          hx-indicator="#summary-spinner" hx-disabled-elt="find button">
+      <button type="submit">Summarize with AI</button>
+      <span id="summary-spinner" class="htmx-indicator spinner">Asking AI...</span>
+    </form>
+  </div>
+  <dl class="meta">
+    <dt>Tool</dt><dd class="mono">{{ run.tool }} {{ run.tool_version or "" }}</dd>
+    <dt>Args</dt><dd class="mono">{{ run.args | args or "—" }}</dd>
+    <dt>Exact argv</dt><dd><pre>{{ run.argv | argv }}</pre></dd>
+    <dt>Origin</dt><dd>{{ run.origin.value }}</dd>
+    <dt>Evidence SHA-256</dt><dd class="mono">{{ run.evidence_sha256 or "—" }}</dd>
+    <dt>Stdout SHA-256</dt><dd class="mono">{{ run.stdout_sha256 or "—" }}</dd>
+    <dt>Created</dt><dd class="mono">{{ run.created_at | dt }}</dd>
+    <dt>Started</dt><dd class="mono">{{ run.started_at | dt }}</dd>
+    <dt>Finished</dt><dd class="mono">{{ run.finished_at | dt }}</dd>
+    <dt>Return code</dt><dd class="mono">{{ run.returncode if run.returncode is not none else "—" }}</dd>
+    <dt>Rows</dt><dd>{{ run.row_count }}</dd>
+  </dl>
+  {% if run.error %}<div class="small-label">Error</div><pre class="error-block">{{ run.error }}</pre>{% endif %}
+  {% if stderr_tail %}<div class="small-label">stderr (tail)</div><pre class="error-block">{{ stderr_tail }}</pre>{% endif %}
+  <div id="run-summary">{% if summary %}{% set msg = summary %}{% include "_ai_message.html" %}{% endif %}</div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Results</h2>
+    <form class="filter" method="get" action="/runs/{{ run.id }}"
+          hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML">
+      <input type="search" name="q" value="{{ q }}" placeholder="Filter rows…"
+             hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML"
+             hx-trigger="input changed delay:400ms, search">
+      <button type="submit" class="small">Filter</button>
+    </form>
+  </div>
+  {% include "_rows.html" %}
+</section>
+{% endblock %}

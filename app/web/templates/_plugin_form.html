@@ -1,0 +1,46 @@
+<div id="plugin-form">
+{% if selected_plugin %}
+  {% set p = selected_plugin %}
+  <p class="plugin-desc"><span class="mono">{{ p.name }}</span>{% if p.description %} — {{ p.description }}{% endif %}</p>
+  {% if p.presets %}
+  <div class="presets">
+    <span class="muted">Presets:</span>
+    {% for label, pargs in p.presets %}
+    <form class="inline" method="post" action="/ui/evidence/{{ evidence_id }}/runs"
+          hx-post="/ui/evidence/{{ evidence_id }}/runs" hx-target="#runs" hx-swap="outerHTML">
+      <input type="hidden" name="plugin" value="{{ p.name }}">
+      <input type="hidden" name="origin" value="preset">
+      <input type="hidden" name="args_json" value='{{ pargs | tojson }}'>
+      <button type="submit" class="small" title="{{ pargs | args }}">{{ label }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <form class="run-form" method="post" action="/ui/evidence/{{ evidence_id }}/runs"
+        hx-post="/ui/evidence/{{ evidence_id }}/runs" hx-target="#runs" hx-swap="outerHTML">
+    <input type="hidden" name="plugin" value="{{ p.name }}">
+    <input type="hidden" name="origin" value="manual">
+    {% for a in p.args %}
+    <div class="field">
+      {% set fid = "arg-" ~ a.name %}
+      {% if a.type == "bool" %}
+        <label><input type="checkbox" id="{{ fid }}" name="arg_{{ a.name }}" {% if values.get(a.name) %}checked{% endif %}>
+          <span class="mono">{{ a.flag }}</span></label>
+      {% else %}
+        <label for="{{ fid }}"><span class="mono">{{ a.flag }}</span>{% if a.required %} <span class="req">*</span>{% endif %}</label>
+        <input id="{{ fid }}" name="arg_{{ a.name }}" value="{{ values.get(a.name, '') }}"
+          {% if a.type == "int" %}type="number" step="1"{% else %}type="text"{% endif %}
+          {% if a.type == "int_list" %}placeholder="1, 2, 3" pattern="[0-9,\s]*"{% endif %}
+          {% if a.required %}required{% endif %}>
+      {% endif %}
+      {% if a.help %}<small class="muted">{{ a.help }}</small>{% endif %}
+    </div>
+    {% else %}
+    <p class="muted">This plugin takes no arguments.</p>
+    {% endfor %}
+    <button type="submit">Run</button>
+  </form>
+{% else %}
+  <p class="muted">Choose a plugin to see its options.</p>
+{% endif %}
+</div>

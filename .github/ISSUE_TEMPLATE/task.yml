@@ -1,0 +1,44 @@
+name: Task
+description: A unit of planned work (feature, refactor, forensics content, docs).
+title: "[task] "
+labels: [task]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be true when this is done?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] Tests added/updated (using fixtures, no real images)
+    validations:
+      required: true
+  - type: dropdown
+    id: owner-area
+    attributes:
+      label: Area (see CONTRACTS.md)
+      options:
+        - Backend core
+        - Tool runner (volatility mechanism)
+        - Forensics content (plugin catalog, presets, parsing, prompts)
+        - AI layer
+        - Web UI
+        - DevOps
+    validations:
+      required: true
+  - type: checkboxes
+    id: contracts
+    attributes:
+      label: Contracts
+      options:
+        - label: This changes a frozen contract file and needs team agreement
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / links

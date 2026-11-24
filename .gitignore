@@ -1,0 +1,73 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Tool caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache/
+
+# --- Secrets / local config ---
+.env
+.env.*
+!.env.example
+
+# --- Local runtime data (dev runs outside Docker) ---
+data/
+symbols/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# --- Evidence: NEVER commit memory images ---
+evidence/*
+!evidence/README.md
+*.raw
+*.mem
+*.vmem
+*.dmp
+*.lime
+*.img
+*.bin
+*.vmsn
+*.vmss
+*.E01
+*.e01
+*.aff4
+*.core
+*.crash
+hiberfil.sys
+pagefile.sys
+swapfile.sys
+
+# --- CI helpers ---
+.ci-symbols/
+vol-output/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

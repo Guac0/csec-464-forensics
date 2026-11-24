@@ -1,0 +1,147 @@
+name: Integration (real memory sample)
+
+# SLOW and deliberately OFF the PR path: manual trigger only.
+# Downloads a small *public* Windows memory sample, runs one real volatility3 plugin inside the
+# app image and uploads the output. First run also downloads Windows symbols from Microsoft's
+# symbol server (can take several minutes); symbols are cached afterwards.
+# Use it to sanity-check the image's volatility3 install and to capture real plugin output
+# for tests/fixtures/ (see docs/DEVELOPMENT.md). Never point this at non-public evidence.
+on:
+  workflow_dispatch:
+    inputs:
+      sample_url:
+        description: "URL of a small public Windows memory sample (.raw/.mem/.vmem/.dmp, or .zip/.7z containing one)"
+        required: true
+        type: string
+      sample_sha256:
+        description: "SHA-256 of the file at sample_url (as downloaded)"
+        required: true
+        type: string
+      plugin:
+        description: "volatility3 plugin to run"
+        required: true
+        default: windows.info.Info
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Inputs are passed via env (never interpolated into scripts) to avoid script injection.
+  SAMPLE_URL: ${{ inputs.sample_url }}
+  SAMPLE_SHA256: ${{ inputs.sample_sha256 }}
+  PLUGIN: ${{ inputs.plugin }}
+
+jobs:
+  volatility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          [[ "$SAMPLE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "::error::sample_sha256 must be 64 hex chars"; exit 1; }
+          [[ "$PLUGIN" =~ ^[A-Za-z0-9_.]+$ ]] || { echo "::error::plugin must look like windows.info.Info"; exit 1; }
+          [[ "$SAMPLE_URL" =~ ^https?:// ]] || { echo "::error::sample_url must be http(s)"; exit 1; }
+          echo "SAMPLE_SHA256=${SAMPLE_SHA256,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: forensics-tool:dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Restore memory sample cache
+        id: sample-cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-sample
+          key: memsample-${{ inputs.sample_sha256 }}
+
+      - name: Download sample
+        if: steps.sample-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-sample
+          name=$(basename "${SAMPLE_URL%%\?*}" | tr -cd 'A-Za-z0-9._-')
+          [ -n "$name" ] || name=sample.bin
+          curl -fL --retry 3 --max-time 1800 -o ".ci-sample/$name" "$SAMPLE_URL"
+
+      - name: Verify SHA-256
+        run: |
+          set -euo pipefail
+          f=$(find .ci-sample -maxdepth 1 -type f | head -n1)
+          echo "$SAMPLE_SHA256  $f" | sha256sum -c -
+          echo "SAMPLE_FILE=$f" >> "$GITHUB_ENV"
+
+      - name: Place sample in evidence/
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/ci
+          case "$SAMPLE_FILE" in
+            *.zip|*.ZIP) unzip -o -q "$SAMPLE_FILE" -d evidence/ci ;;
+            *.7z)        7z x -y -oevidence/ci "$SAMPLE_FILE" > /dev/null ;;
+            *)           cp "$SAMPLE_FILE" evidence/ci/ ;;
+          esac
+          # Use the largest file as the memory image.
+          img=$(find evidence/ci -type f -printf '%s\t%P\n' | sort -nr | head -n1 | cut -f2)
+          [ -n "$img" ] || { echo "::error::no file found in sample"; exit 1; }
+          ls -la evidence/ci
+          echo "EVIDENCE_REL=ci/$img" >> "$GITHUB_ENV"
+
+      - name: Restore volatility symbol cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-symbols
+          key: vol-symbols-${{ inputs.sample_sha256 }}-${{ github.run_id }}
+          restore-keys: |
+            vol-symbols-${{ inputs.sample_sha256 }}-
+            vol-symbols-
+
+      # Bind-mount a host dir for /symbols (instead of the named volume) so actions/cache
+      # can persist it. Compose merges volumes by container path, so this replaces vol-symbols.
+      - name: Compose override for symbols
+        run: |
+          mkdir -p .ci-symbols vol-output
+          cat > compose.ci-symbols.yml <<'EOF'
+          services:
+            app:
+              volumes:
+                - ./.ci-symbols:/symbols
+          EOF
+
+      - name: Run volatility3 in the container
+        run: |
+          # Run as the runner's uid so the bind-mounted cache dir is writable and cacheable.
+          # `-s /symbols` mirrors the app's runner: downloaded ISFs land in /symbols (cached).
+          rc=0
+          docker compose -f docker-compose.yml -f compose.ci-symbols.yml run --rm -T --no-deps \
+            --user "$(id -u):$(id -g)" app \
+            vol -q -r jsonl -s /symbols -f "/evidence/$EVIDENCE_REL" "$PLUGIN" \
+            > vol-output/output.jsonl 2> vol-output/stderr.log || rc=$?
+          echo "vol exit code: $rc"
+          echo "--- stderr (tail) ---"; tail -n 50 vol-output/stderr.log || true
+          echo "--- stdout (head) ---"; head -n 20 vol-output/output.jsonl || true
+          echo "rows: $(wc -l < vol-output/output.jsonl)"
+          exit $rc
+
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vol-${{ inputs.plugin }}-${{ github.run_id }}
+          path: vol-output/
+          if-no-files-found: warn
+          retention-days: 14

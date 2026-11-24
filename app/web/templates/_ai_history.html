@@ -1,0 +1,8 @@
+<div id="ai-history" class="ai-history">
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+  {% for msg in messages %}
+    {% include "_ai_message.html" %}
+  {% else %}
+    <p class="muted">No questions asked yet.</p>
+  {% endfor %}
+</div>
