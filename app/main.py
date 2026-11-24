@@ -32,6 +32,7 @@ ROUTER_MODULES = (
     "app.api.notes",
     "app.api.hooks",
     "app.api.audit",
+    "app.api.artifacts",
     "app.api.ai",
     "app.web.pages",
 )

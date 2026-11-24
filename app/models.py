@@ -119,9 +119,16 @@ class Run(Base):
     chain_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     evidence: Mapped[Evidence] = relationship(back_populates="runs")
+    artifacts: Mapped[list[DerivedArtifact]] = relationship(
+        viewonly=True, order_by="DerivedArtifact.filename"
+    )
     rows: Mapped[list[ResultRow]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="ResultRow.row_idx"
     )
+
+    @property
+    def artifact_count(self) -> int:
+        return len(self.artifacts)
 
 
 class ResultRow(Base):
@@ -260,4 +267,29 @@ class IntegrityCheck(Base):
     mtime: Mapped[float | None] = mapped_column(default=None)
     seconds: Mapped[float | None] = mapped_column(default=None)
     detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DerivedArtifact(Base):
+    """A file a tool wrote during a run (e.g. a process dumped with --dump).
+
+    Stored under ``<data_dir>/runs/<run_id>/output/``. Hashed when registered; downloads re-check
+    the SHA-256. Treat the content as potentially malicious.
+    """
+
+    __tablename__ = "derived_artifacts"
+    __table_args__ = (UniqueConstraint("run_id", "rel_path"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), index=True)
+    evidence_id: Mapped[int] = mapped_column(Integer, index=True)
+    rel_path: Mapped[str] = mapped_column(String)  # relative to settings.data_dir
+    filename: Mapped[str] = mapped_column(String)  # path relative to the run's output dir
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    md5: Mapped[str] = mapped_column(String(32))
+    sha1: Mapped[str] = mapped_column(String(40))
+    file_type: Mapped[str] = mapped_column(String, default="data")  # guessed from magic bytes
+    # Result row that names this file (e.g. pslist's "File output" column), if any.
+    source_row_idx: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -151,3 +151,7 @@ tr.cat-request td { color: #667085; }
 form.stack { display: flex; flex-direction: column; gap: .35rem; max-width: 46rem; margin: .4rem 0; }
 form.stack label { display: flex; flex-direction: column; font-size: 13px; }
 table.hashes td { word-break: break-all; }
+
+/* Dumped files */
+a.button { display: inline-block; padding: .15rem .5rem; border-radius: 4px; background: var(--accent); color: #fff; text-decoration: none; }
+a.danger-link { color: var(--danger); }

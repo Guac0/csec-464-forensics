@@ -215,6 +215,20 @@ class RunInfo:
     row_count: int
 
 
+@dataclass(frozen=True)
+class ArtifactInfo:
+    """Read-only summary of a file the run wrote (see app/services/artifacts.py)."""
+
+    id: int
+    filename: str
+    size_bytes: int
+    sha256: str
+    md5: str
+    sha1: str
+    file_type: str
+    source_row_idx: int | None
+
+
 @dataclass
 class _Staged:
     annotations: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
@@ -281,6 +295,28 @@ class HookContext:
             if args is None or (run.args or {}) == args:
                 return RunInfo(run.id, run.plugin, dict(run.args or {}), run.status, run.row_count)
         return None
+
+    def artifacts(self) -> list[ArtifactInfo]:
+        """Files this run wrote (e.g. --dump output), with hashes and the row that names them."""
+        from app.models import DerivedArtifact
+
+        return [
+            ArtifactInfo(
+                a.id,
+                a.filename,
+                a.size_bytes,
+                a.sha256,
+                a.md5,
+                a.sha1,
+                a.file_type,
+                a.source_row_idx,
+            )  # fmt: skip
+            for a in self._session.scalars(
+                select(DerivedArtifact)
+                .where(DerivedArtifact.run_id == self.run_id)
+                .order_by(DerivedArtifact.filename)
+            )
+        ]
 
     # -- staging -----------------------------------------------------------------------------
 

@@ -73,6 +73,8 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] **Audit level:** `FT_AUDIT_LEVEL` defaults to `all` (every page/API request) for the PoC.
       Switch the default in `app/config.py` to `key_reads` when evaluation is over.
 - [ ] Audit log has no retention/archiving; at level `all` it grows with every request.
+- [ ] Dumped files are never deleted and there is no total disk quota (only a per-run limit).
+- [ ] Decide which plugins may write files (`--dump` etc.); only the EXAMPLE pslist entry does.
 - [ ] The audit chain head lives in the same DB file; someone with write access to the file
       could rebuild the whole chain. Optionally anchor the head hash elsewhere (e.g. print it in
       exports, or copy it to a separate file/system).

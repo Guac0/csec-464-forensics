@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.27",
     "pydantic-settings>=2.3",
     "alembic>=1.13",
+    "pyzipper>=0.3.6",  # AES-encrypted zips for downloading dumped (possibly malicious) files
 ]
 
 [project.optional-dependencies]

@@ -61,6 +61,20 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
 
+### Derived artifacts (dumped files)
+- `app/services/artifacts.py`: `register_run_outputs(session, run, output_dir)` (worker, after
+  every run incl. failed ones), `list_for_run`, `get_artifact`, `artifact_path` (refuses paths
+  outside `runs/<id>/output`), `guess_file_type`, `prepare_download(session, id, "zip"|"raw")`
+  (re-checks SHA-256 -> `ArtifactIntegrityError`; audited as key_read).
+- Model `DerivedArtifact` (+ `Run.artifacts`, `Run.artifact_count`); linked to the result row
+  whose value names the file (`source_row_idx`).
+- Executor: `execute(..., max_output_bytes=None)` stops the tool when `run_dir/output` grows past
+  the limit (`ExecutionResult.output_limit_exceeded`); worker passes `FT_MAX_ARTIFACT_BYTES`.
+- Hooks: `ctx.artifacts()`.
+- API: `GET /api/runs/{id}/artifacts`, `GET /api/artifacts/{id}`,
+  `GET /api/artifacts/{id}/download?format=zip|raw`. Settings `FT_MAX_ARTIFACT_BYTES`,
+  `FT_ARTIFACT_ZIP_PASSWORD`.
+
 ### Evidence integrity
 - `app/services/integrity.py`: `compute_hashes(path, should_stop, on_progress)`,
   `hash_evidence(session, evidence_id, *, kind, accept, run_id, ...)`, `status(ev)` (one of

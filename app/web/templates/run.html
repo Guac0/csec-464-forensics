@@ -34,6 +34,36 @@
   <div id="run-summary">{% if summary %}{% set msg = summary %}{% include "_ai_message.html" %}{% endif %}</div>
 </section>
 
+{% if run.artifacts %}
+<section class="panel" id="artifacts">
+  <div class="panel-head"><h2>Dumped files ({{ run.artifacts | length }})</h2></div>
+  <p class="flash warn">These files were extracted from the memory image and may be live malware. The default download is an encrypted zip (password <span class="mono">{{ zip_password }}</span>); open it only in an analysis environment.</p>
+  <div class="table-wrap">
+  <table class="data">
+    <thead><tr><th>File</th><th>Type</th><th>Size</th><th>Hashes</th><th>Row</th><th>Download</th></tr></thead>
+    <tbody>
+    {% for a in run.artifacts %}
+      <tr id="artifact-{{ a.id }}">
+        <td class="mono small-text">{{ a.filename }}</td>
+        <td>{{ a.file_type }}</td>
+        <td class="num">{{ a.size_bytes | humansize }}</td>
+        <td class="mono small-text">SHA-256 {{ a.sha256 }}<br>MD5 {{ a.md5 }}<br>SHA-1 {{ a.sha1 }}</td>
+        <td>{% if a.source_row_idx is not none %}<a class="mono" href="/runs/{{ run.id }}?row={{ a.source_row_idx }}#row-{{ run.id }}-{{ a.source_row_idx }}">R{{ run.id }}:{{ a.source_row_idx }}</a>{% endif %}</td>
+        <td>
+          <a class="button small" href="/ui/artifacts/{{ a.id }}/download?format=zip">Encrypted zip</a>
+          <details class="small-text"><summary>Raw file</summary>
+            <p>Downloads the file itself. Antivirus may delete it and it could run if opened. Recorded in the audit log.</p>
+            <a class="danger-link" href="/ui/artifacts/{{ a.id }}/download?format=raw">Download raw file anyway</a>
+          </details>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
 {% if run.status.value == "succeeded" and (hook_specs or run.hook_results or run.findings or follow_ups) %}
 <section class="panel" id="post-processing">
   <div class="panel-head">

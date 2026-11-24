@@ -61,6 +61,8 @@ class ExecutionResult:
     tool_version: str | None
     timed_out: bool = False
     cancelled: bool = False
+    # True if the files the tool wrote to output_dir exceeded max_output_bytes and it was stopped.
+    output_limit_exceeded: bool = False
 
 
 class ToolRunner(ABC):
