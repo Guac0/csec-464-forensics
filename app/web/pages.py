@@ -26,6 +26,7 @@ from app.ai import service as ai_svc
 from app.config import get_settings
 from app.db import get_session
 from app.models import AIMessage, Evidence, Note, ResultRow, Run, RunOrigin, RunStatus
+from app.services import audit as audit_svc
 from app.services import evidence as evidence_svc
 from app.services import notes as notes_svc
 from app.services import runs as runs_svc
@@ -730,3 +731,93 @@ def ui_summarize(request: Request, run_id: int, session: SessionDep) -> Response
     if not is_htmx(request):
         return _render_run_page(request, session, run, summary=msg)
     return render(request, "_ai_message.html", msg=msg, evidence_id=run.evidence_id)
+
+
+# --------------------------------------------------------------------------- audit + note history
+
+AUDIT_PAGE_SIZE = 100
+
+
+@router.get("/activity", response_class=HTMLResponse)
+def activity_page(
+    request: Request,
+    session: SessionDep,
+    category: str | None = None,
+    action: str | None = None,
+    evidence_id: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    offset: int = 0,
+) -> HTMLResponse:
+    return _render_activity(
+        request, session, category, action, evidence_id, object_type, object_id, offset
+    )
+
+
+def _render_activity(
+    request: Request,
+    session: Session,
+    category: str | None = None,
+    action: str | None = None,
+    evidence_id: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    offset: int = 0,
+    report: audit_svc.ChainReport | None = None,
+) -> HTMLResponse:
+    filters = {
+        "category": (category or "").strip() or None,
+        "action": (action or "").strip() or None,
+        "evidence_id": _int_or_none(evidence_id),
+        "object_type": (object_type or "").strip() or None,
+        "object_id": _int_or_none(object_id),
+    }
+    offset = max(0, offset)
+    events, total = audit_svc.list_events(session, **filters, offset=offset, limit=AUDIT_PAGE_SIZE)
+    query = {k: v for k, v in filters.items() if v is not None}
+
+    def page_link(new_offset: int) -> str:
+        return "/activity?" + urlencode({**query, "offset": new_offset})
+
+    return render(
+        request,
+        "activity.html",
+        events=events,
+        total=total,
+        offset=offset,
+        limit=AUDIT_PAGE_SIZE,
+        filters=filters,
+        categories=audit_svc.CATEGORIES,
+        audit_level=get_settings().audit_level,
+        report=report,
+        prev_link=page_link(max(0, offset - AUDIT_PAGE_SIZE)) if offset > 0 else None,
+        next_link=page_link(offset + AUDIT_PAGE_SIZE) if offset + AUDIT_PAGE_SIZE < total else None,
+        evidence_id=filters["evidence_id"],
+    )
+
+
+def _int_or_none(value: str | None) -> int | None:
+    try:
+        return int(value) if value not in (None, "") else None
+    except ValueError:
+        return None
+
+
+@router.post("/ui/audit/verify", dependencies=[Depends(same_origin_post)])
+def ui_audit_verify(request: Request, session: SessionDep) -> Response:
+    report = audit_svc.verify_and_record(session)
+    return _render_activity(request, session, report=report)
+
+
+@router.get("/notes/{note_id}/history", response_class=HTMLResponse)
+def note_history(request: Request, note_id: int, session: SessionDep) -> HTMLResponse:
+    versions = notes_svc.list_versions(session, note_id)
+    if not versions:
+        raise HTTPException(404, f"no history for note {note_id}")
+    return render(
+        request,
+        "note_history.html",
+        note_id=note_id,
+        versions=versions,
+        evidence_id=versions[-1].evidence_id,
+    )

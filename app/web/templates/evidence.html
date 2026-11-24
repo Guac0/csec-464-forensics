@@ -9,6 +9,7 @@
     <dt>SHA-256</dt><dd class="mono">{{ ev.sha256 or "not hashed" }}{% if ev.hashed_at %} <span class="muted">({{ ev.hashed_at | dt }})</span>{% endif %}</dd>
     <dt>OS info</dt><dd>{{ ev.os_info | os_info }}</dd>
     <dt>Registered</dt><dd>{{ ev.created_at | dt }}</dd>
+    <dt>Activity</dt><dd><a href="/activity?evidence_id={{ ev.id }}">Audit log for this evidence</a></dd>
     {% if ev.description %}<dt>Description</dt><dd class="prewrap">{{ ev.description }}</dd>{% endif %}
   </dl>
 </section>

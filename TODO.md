@@ -70,6 +70,13 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 
 ## 3. Known infrastructure follow-ups
 
+- [ ] **Audit level:** `FT_AUDIT_LEVEL` defaults to `all` (every page/API request) for the PoC.
+      Switch the default in `app/config.py` to `key_reads` when evaluation is over.
+- [ ] Audit log has no retention/archiving; at level `all` it grows with every request.
+- [ ] The audit chain head lives in the same DB file; someone with write access to the file
+      could rebuild the whole chain. Optionally anchor the head hash elsewhere (e.g. print it in
+      exports, or copy it to a separate file/system).
+
 - [ ] Markdown export of notes, runs, hashes and AI outputs is not implemented yet.
 - [ ] Runs don't re-verify the image hash before executing; a run records the evidence SHA-256 only
       if the image was hashed first.

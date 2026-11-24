@@ -29,7 +29,10 @@ def init_engine(url: str | None = None) -> Engine:
     if url is None:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         url = settings.database_url
-    _engine = create_engine(url, connect_args={"check_same_thread": False})
+    _engine = create_engine(
+        url,
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
 
     @event.listens_for(_engine, "connect")
     def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001

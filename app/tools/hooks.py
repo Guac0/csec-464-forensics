@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Evidence, ResultRow, Run, RunOrigin, RunStatus, utcnow
+from app.services import audit
 from app.tools.base import ArgValidationError, ToolRequest
 
 logger = logging.getLogger(__name__)
@@ -407,6 +408,34 @@ def run_hooks(session: Session, run_id: int) -> list[dict[str, Any]]:
 
     session.refresh(run)
     run.hook_results = results
+    audit.record(
+        session,
+        "hooks.run",
+        object_type="run",
+        object_id=run.id,
+        evidence_id=run.evidence_id,
+        summary=f"Post-processing on run {run.id}: {len(results)} hook(s), "
+        f"{sum(r['status'] != 'ok' for r in results)} failed",
+        details={
+            "hooks": [
+                {
+                    k: r.get(k)
+                    for k in (
+                        "hook",
+                        "version",
+                        "status",
+                        "error",
+                        "annotated_rows",
+                        "findings",
+                        "metadata_keys",
+                        "follow_ups_queued",
+                    )
+                    if r.get(k) is not None
+                }
+                for r in results
+            ]
+        },
+    )
     session.commit()
     failed = [r["hook"] for r in results if r["status"] != "ok"]
     logger.info(

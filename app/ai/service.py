@@ -7,6 +7,8 @@ AI output is a lead, not evidence; it is kept separate from tool output (ResultR
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from sqlalchemy import select
@@ -19,6 +21,7 @@ from app.ai.prompts import SUMMARIZE_RUN_QUESTION, build_system_prompt
 from app.ai.suggestions import parse_suggestions, strip_suggestions_block, validate_suggestions
 from app.config import get_settings
 from app.models import AIMessage, Evidence, Run
+from app.services import audit
 
 HISTORY_LIMIT = 6
 SUMMARY_MAX_ROWS = 200
@@ -66,6 +69,8 @@ def _run_pipeline(
     row_refs: list[str] | None,
     client: AIClient | None,
     max_rows_per_run: int = 50,
+    action: str = "ai.ask",
+    run_id: int | None = None,
 ) -> AIMessage:
     if session.get(Evidence, evidence_id) is None:
         raise NotFoundError(f"evidence {evidence_id} not found")
@@ -83,9 +88,28 @@ def _run_pipeline(
 
     user_msg = AIMessage(evidence_id=evidence_id, role="user", content=question)
     session.add(user_msg)
+    session.flush()
+    params = client.build_params()
+    audit.record(
+        session,
+        f"{action}.request",
+        object_type="ai_message",
+        object_id=user_msg.id,
+        evidence_id=evidence_id,
+        summary=(f"AI summary requested for run {run_id}" if run_id else "AI question asked"),
+        details={
+            "question": question,
+            "run_id": run_id,
+            "run_ids": run_ids,
+            "row_refs": row_refs,
+            "context_refs": context_refs,
+            "model": params.get("model"),
+            "provider_base_url": client.base_url,
+            "request_sha256": _sha256_json(messages),
+        },
+    )
     session.commit()
 
-    params = client.build_params()
     provenance: dict[str, Any] = {
         "evidence_id": evidence_id,
         "role": "assistant",
@@ -117,8 +141,35 @@ def _run_pipeline(
             usage=result.usage,
         )
     session.add(reply)
+    session.flush()
+    audit.record(
+        session,
+        f"{action}.response",
+        object_type="ai_message",
+        object_id=reply.id,
+        evidence_id=evidence_id,
+        summary=f"AI response failed: {reply.error}"
+        if reply.error
+        else f"AI responded ({reply.model_returned or reply.model_requested})",
+        details={
+            "request_message_id": user_msg.id,
+            "model_returned": reply.model_returned,
+            "error": reply.error,
+            "citations": len(reply.citations or []),
+            "invalid_citations": sum(1 for c in reply.citations or [] if not c.get("valid")),
+            "suggestions": len(reply.suggestions or []),
+            "usage": reply.usage,
+            "content_sha256": hashlib.sha256(reply.content.encode("utf-8")).hexdigest(),
+        },
+    )
     session.commit()
     return reply
+
+
+def _sha256_json(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
 
 
 def ask(
@@ -150,4 +201,6 @@ def summarize_run(session: Session, run_id: int, client: AIClient | None = None)
         row_refs=None,
         client=client,
         max_rows_per_run=SUMMARY_MAX_ROWS,
+        action="ai.summarize",
+        run_id=run.id,
     )

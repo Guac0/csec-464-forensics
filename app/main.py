@@ -15,8 +15,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.config import get_settings
 from app.db import SessionLocal, init_engine, migrate
 from app.jobs.worker import get_worker, recover_stale_runs
+from app.services import audit
 from app.tools import hooks
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ ROUTER_MODULES = (
     "app.api.runs",
     "app.api.notes",
     "app.api.hooks",
+    "app.api.audit",
     "app.api.ai",
     "app.web.pages",
 )
@@ -76,7 +79,18 @@ def create_app(start_worker: bool = True) -> FastAPI:
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         init_engine()
         migrate()
-        hooks.load_hooks()  # import hook modules now so import errors show up in the log
+        hook_errors = hooks.load_hooks()  # import hook modules now so errors show in the log
+        settings = get_settings()
+        audit.record_now(
+            "app.start",
+            summary="Application started",
+            details={
+                "version": _app.version,
+                "audit_level": settings.audit_level,
+                "hooks": [h.name for h in hooks.registered_hooks()],
+                "hook_load_errors": hook_errors,
+            },
+        )
         with SessionLocal() as session:
             recover_stale_runs(session)
         worker = get_worker() if start_worker else None
@@ -89,6 +103,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
                 worker.stop()
 
     app = FastAPI(title="Forensics Tool", version="0.1.0", lifespan=lifespan)
+    # Sets the audit context (origin/request id) and logs requests at FT_AUDIT_LEVEL=all.
+    app.middleware("http")(audit.audit_requests_middleware)
 
     @app.get("/health")
     def health() -> dict[str, str]:

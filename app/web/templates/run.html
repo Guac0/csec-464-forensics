@@ -25,6 +25,7 @@
     <dt>Finished</dt><dd class="mono">{{ run.finished_at | dt }}</dd>
     <dt>Return code</dt><dd class="mono">{{ run.returncode if run.returncode is not none else "—" }}</dd>
     <dt>Rows</dt><dd>{{ run.row_count }}</dd>
+    <dt>Activity</dt><dd><a href="/activity?object_type=run&object_id={{ run.id }}">Audit log for this run</a></dd>
   </dl>
   {% if run.error %}<div class="small-label">Error</div><pre class="error-block">{{ run.error }}</pre>{% endif %}
   {% if stderr_tail %}<div class="small-label">stderr (tail)</div><pre class="error-block">{{ stderr_tail }}</pre>{% endif %}

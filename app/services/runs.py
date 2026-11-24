@@ -8,6 +8,7 @@ from sqlalchemy import Text, cast, exists, func, literal_column, select, update
 from sqlalchemy.orm import Session
 
 from app.models import ResultRow, Run, RunOrigin, RunStatus, utcnow
+from app.services import audit
 from app.services.evidence import get_evidence
 from app.tools.base import ArgValidationError, ToolRequest, ToolRunner
 
@@ -86,6 +87,24 @@ def create_run(
         chain_depth=chain_depth,
     )
     session.add(run)
+    session.flush()  # assign run.id for the audit event
+    audit.record(
+        session,
+        "run.create",
+        object_type="run",
+        object_id=run.id,
+        evidence_id=evidence_id,
+        summary=f"Queued run {run.id}: {request.plugin} ({origin.value})",
+        details={
+            "tool": tool,
+            "plugin": request.plugin,
+            "args": args,
+            "origin": origin.value,
+            "parent_run_id": parent_run_id,
+            "triggered_by_hook": triggered_by_hook,
+            "chain_depth": chain_depth,
+        },
+    )
     session.commit()
     logger.info("queued run %s: %s %s (%s)", run.id, request.plugin, args, origin.value)
     return run
@@ -113,6 +132,16 @@ def enqueue_auto(session: Session, evidence_id: int, tool: str = "volatility3") 
         if any((r.args or {}) == normalized for r in existing):
             continue
         created.append(create_run(session, evidence_id, request, RunOrigin.AUTO, tool))
+    audit.record(
+        session,
+        "evidence.auto_enumerate",
+        object_type="evidence",
+        object_id=evidence_id,
+        evidence_id=evidence_id,
+        summary=f"Auto-enumerate queued {len(created)} run(s)",
+        details={"run_ids": [r.id for r in created]},
+    )
+    session.commit()
     return created
 
 
@@ -123,6 +152,16 @@ def cancel_run(session: Session, run_id: int) -> Run:
     (a signalled RUNNING run becomes CANCELLED once the worker notices).
     """
     run = get_run(session, run_id)
+    previous_status = run.status.value
+    audit.record(
+        session,
+        "run.cancel",
+        object_type="run",
+        object_id=run.id,
+        evidence_id=run.evidence_id,
+        summary=f"Cancel requested for run {run.id} ({previous_status})",
+        details={"status_before": previous_status},
+    )
     # Atomic: only flip if the worker hasn't claimed it in the meantime.
     res = session.execute(
         update(Run)

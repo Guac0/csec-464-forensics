@@ -132,3 +132,13 @@ li.finding.sev-medium, li.finding.sev-high { border-left-color: var(--danger); }
 li.finding .finding-detail { margin: .2rem 0; white-space: pre-wrap; }
 ul.plain { list-style: none; padding: 0; }
 .flash.warn { background: #fffaeb; border-color: #f79009; color: #93370d; }
+
+/* Activity log */
+.topbar .nav-right { margin-left: auto; color: inherit; }
+.filter-row { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
+table.audit td { vertical-align: top; }
+tr.cat-request td { color: #667085; }
+.note.version-delete .note-body { text-decoration: line-through; color: #667085; }
+.filter-row input, .filter-row select { width: auto; flex: 0 1 auto; }
+.filter-row input[type="number"] { width: 8em; }
+.note[class*="version-"] { margin-bottom: .6rem; padding-bottom: .4rem; border-bottom: 1px solid #eaecf0; }

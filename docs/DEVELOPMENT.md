@@ -85,6 +85,37 @@ AI coding assistants are allowed and encouraged, with these rules:
    the PR which parts were AI-generated.
 5. Don't paste real case data, API keys or `.env` content into an assistant.
 
+## Audit log
+
+Everything that changes data must be recorded in the audit log, in the **same transaction** as
+the change (so both are saved or neither is):
+
+```python
+from app.services import audit
+
+note.body = new_body
+audit.record(
+    session,
+    "note.edit",  # <object>.<verb>
+    object_type="note",
+    object_id=note.id,
+    evidence_id=note.evidence_id,
+    summary=f"Edited note {note.id}",  # human readable, shown in the Activity page
+    details={"version": 3},  # JSON; anything useful to reconstruct what happened
+)
+session.commit()
+```
+
+- Who/where (`actor`, `origin`, `request_id`) is filled in automatically from the request or
+  worker context.
+- Use `category=audit.KEY_READ` for sensitive reads (exports, downloads). Ordinary reads need
+  nothing: at `FT_AUDIT_LEVEL=all` the middleware logs every request.
+- The log can't be edited or deleted (DB triggers) and is hash-chained; "Verify integrity" on
+  the Activity page (or `GET /api/audit/verify`) recomputes the chain.
+- `FT_AUDIT_LEVEL=all` is a temporary PoC default (very verbose). The intended setting is
+  `key_reads`; switching is a one-line change of the default in `app/config.py`.
+- New actions should get a line in `tests/test_audit.py::test_every_state_change_is_audited`.
+
 ## Database migrations
 
 The schema is managed with [Alembic](https://alembic.sqlalchemy.org/). The app runs
