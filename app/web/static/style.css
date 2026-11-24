@@ -116,3 +116,19 @@ a.cite { font-family: var(--mono); font-size: 12px; }
 .htmx-indicator { display: none; }
 .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline; }
 .spinner { color: #5b3aa6; font-style: italic; }
+
+/* Post-run hooks: severities, annotated rows, findings */
+.badge.sev-info { background: #e0eaff; color: #2d31a6; }
+.badge.sev-low { background: #fef7c3; color: #854a0e; }
+.badge.sev-medium { background: #fdead7; color: #9c2a10; }
+.badge.sev-high { background: #fee4e2; color: #912018; }
+tr.annotated.sev-low td { background: #fefbe8; }
+tr.annotated.sev-medium td { background: #fef6ee; }
+tr.annotated.sev-high td { background: #fef3f2; }
+td.flags { white-space: nowrap; }
+ul.findings { list-style: none; padding: 0; margin: .3rem 0 .8rem; }
+li.finding { padding: .4rem .6rem; margin-bottom: .4rem; border-left: 3px solid #98a2b3; background: #f9fafb; }
+li.finding.sev-medium, li.finding.sev-high { border-left-color: var(--danger); }
+li.finding .finding-detail { margin: .2rem 0; white-space: pre-wrap; }
+ul.plain { list-style: none; padding: 0; }
+.flash.warn { background: #fffaeb; border-color: #f79009; color: #93370d; }

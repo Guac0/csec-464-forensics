@@ -42,6 +42,11 @@ class RunOut(BaseModel):
     stdout_sha256: str | None
     row_count: int
     error: str | None
+    hook_results: list[dict[str, Any]] | None
+    findings: list[dict[str, Any]] | None
+    parent_run_id: int | None
+    triggered_by_hook: str | None
+    chain_depth: int
 
 
 class RunCreate(BaseModel):
@@ -58,6 +63,7 @@ class RowOut(BaseModel):
     depth: int
     parent_idx: int | None
     data: dict[str, Any]
+    annotations: list[dict[str, Any]] | None
 
 
 class RowsPage(BaseModel):
@@ -81,6 +87,8 @@ def list_runs(session: SessionDep, evidence_id: int | None = None) -> list[Run]:
 
 @router.post("", response_model=RunOut, status_code=201)
 def create_run(body: RunCreate, session: SessionDep) -> Run:
+    if body.origin == RunOrigin.HOOK:
+        raise HTTPException(422, "origin 'hook' is reserved for runs queued by post-run hooks")
     try:
         return runs_service.create_run(
             session,
@@ -113,9 +121,13 @@ def get_rows(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     q: str | None = None,
+    annotated: bool = False,
+    tag: str | None = None,
 ) -> RowsPage:
     _get_or_404(session, run_id)
-    rows, total = runs_service.get_rows(session, run_id, offset=offset, limit=limit, q=q)
+    rows, total = runs_service.get_rows(
+        session, run_id, offset=offset, limit=limit, q=q, annotated=annotated, tag=tag
+    )
     return RowsPage(
         total=total,
         offset=offset,
@@ -127,7 +139,23 @@ def get_rows(
                 depth=r.depth,
                 parent_idx=r.parent_idx,
                 data=r.data,
+                annotations=r.annotations,
             )
             for r in rows
         ],
     )
+
+
+@router.post("/{run_id}/hooks/rerun", response_model=RunOut)
+def rerun_hooks(run_id: int, session: SessionDep) -> Run:
+    """Run the post-run hooks again (e.g. after changing hook code) without re-running the tool.
+    Previous annotations, findings and hook results of this run are replaced."""
+    from app.tools import hooks
+
+    run = _get_or_404(session, run_id)
+    try:
+        hooks.run_hooks(session, run_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    session.refresh(run)
+    return run

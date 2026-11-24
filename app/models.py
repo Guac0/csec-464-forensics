@@ -49,6 +49,7 @@ class RunOrigin(enum.StrEnum):
     PRESET = "preset"  # user clicked a hardcoded suggested query
     AUTO = "auto"  # queued by auto-enumeration
     AI_SUGGESTED = "ai"  # user clicked a validated AI suggestion
+    HOOK = "hook"  # queued by a post-run hook as a follow-up (see app/tools/hooks.py)
 
 
 class Run(Base):
@@ -77,6 +78,24 @@ class Run(Base):
     stdout_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
     row_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # Post-run hooks (app/tools/hooks.py). One entry per hook executed on the last hook pass:
+    # {"hook", "version", "status": "ok"|"error", "duration_ms", "error", "at", ...counts}.
+    hook_results: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
+    # Run-level findings from hooks: {"hook", "title", "detail", "severity", "rows": [row_idx]}.
+    findings: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
+    # Follow-up provenance: set when a hook queued this run.
+    parent_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL", name="fk_runs_parent_run_id"),
+        default=None,
+        index=True,
+    )
+    triggered_by_hook: Mapped[str | None] = mapped_column(String, default=None)
+    # 0 for user/auto runs; parent's depth + 1 for hook follow-ups (loop guard).
+    chain_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     evidence: Mapped[Evidence] = relationship(back_populates="runs")
     rows: Mapped[list[ResultRow]] = relationship(
@@ -97,6 +116,10 @@ class ResultRow(Base):
     depth: Mapped[int] = mapped_column(Integer, default=0)
     parent_idx: Mapped[int | None] = mapped_column(Integer, default=None)
     data: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # Hook annotations: [{"hook", "tag", "severity", "note"}]; None when not annotated.
+    annotations: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
 
     run: Mapped[Run] = relationship(back_populates="rows")
 

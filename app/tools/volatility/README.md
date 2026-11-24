@@ -36,13 +36,12 @@ The scaffold provides the **mechanism** for running volatility3 safely. The **fo
 - **Presets** - `PluginSpec.presets`: `(label, args)` one-click queries.
 - **Auto-enumeration set** - `PluginSpec.auto_enumerate=True` on the plugins to queue for each
   new evidence item.
-- **OS detection** - `Evidence.os_info` is meant to be filled from `windows.info.Info` (and
-  linux/mac equivalents) output. Nothing populates it yet: decide what keys you want
-  (e.g. `{"os": "windows", "build": "19041", "arch": "x64"}`) and which columns map to them; the
-  backend team will add a post-success hook in the worker calling your function.
-- **Per-plugin parsing / summaries** - the generic parser keeps vol's column names and values
-  (absent values -> `null`, datetimes -> ISO strings, bytes -> hex strings). If a plugin needs
-  renames, type fixes or derived columns, add per-plugin post-processing keyed on the plugin name.
+- **Post-run hooks** - plugin-specific post-processing (OS detection, flagging rows, run
+  findings, follow-up runs) goes in `hooks/`. See [hooks/README.md](hooks/README.md). An EXAMPLE
+  hook (`hooks/windows_info.py`) fills `Evidence.os_info` from `windows.info.Info`; review its keys.
+- **Per-plugin parsing** - the generic parser keeps vol's column names and values
+  (absent values -> `null`, datetimes -> ISO strings, bytes -> hex strings). Interpretation
+  (flags, summaries) belongs in hooks; only fix the raw parse if a plugin's output is mis-read.
 - **Symbols / offline** - Windows symbols are downloaded from Microsoft's symbol server and the
   generated ISF is written to `FT_SYMBOLS_DIR` (first writable symbol dir). For air-gapped use,
   pre-populate that dir and run with `--offline` (`VolatilityRunner(offline=True)`; a settings

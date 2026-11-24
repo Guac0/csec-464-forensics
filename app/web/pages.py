@@ -29,6 +29,7 @@ from app.models import AIMessage, Evidence, Note, ResultRow, Run, RunOrigin, Run
 from app.services import evidence as evidence_svc
 from app.services import notes as notes_svc
 from app.services import runs as runs_svc
+from app.tools import hooks as hooks_mod
 from app.tools import registry
 from app.tools.base import ArgValidationError, PluginSpec, ToolRequest
 
@@ -41,6 +42,8 @@ PAGE_SIZE = 100
 MAX_PAGE_SIZE = 500
 STDERR_TAIL_BYTES = 4096
 ACTIVE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING)
+SEVERITIES = hooks_mod.SEVERITIES
+ANY_TAG = "*"  # tag filter value meaning "any annotated row"
 UI_ORIGINS = {"manual": RunOrigin.MANUAL, "preset": RunOrigin.PRESET, "ai": RunOrigin.AI_SUGGESTED}
 
 
@@ -124,7 +127,19 @@ def render_ai_content(content: str | None, citations: list[dict[str, Any]] | Non
 def fmt_os_info(value: dict[str, Any] | None) -> str:
     if not value:
         return "—"
-    return ", ".join(f"{k}={v}" for k, v in value.items())
+    parts = []
+    for k, v in value.items():
+        if isinstance(v, dict | list):
+            parts.append(f"{k}=({len(v)} fields)")  # nested detail is shown on hover/API
+        else:
+            parts.append(f"{k}={v}")
+    return ", ".join(parts)
+
+
+def max_severity(annotations: list[dict[str, Any]] | None) -> str | None:
+    """Highest severity among a row's annotations (for row highlighting)."""
+    levels = [a.get("severity") for a in annotations or [] if a.get("severity") in SEVERITIES]
+    return max(levels, key=SEVERITIES.index) if levels else None
 
 
 templates.env.filters.update(
@@ -136,6 +151,7 @@ templates.env.filters.update(
     pretty=pretty_json,
     ai_content=render_ai_content,
     os_info=fmt_os_info,
+    max_severity=max_severity,
 )
 
 
@@ -301,12 +317,27 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
 
 
 def rows_context(
-    session: Session, run: Run, offset: int, limit: int, q: str | None, highlight: int | None
+    session: Session,
+    run: Run,
+    offset: int,
+    limit: int,
+    q: str | None,
+    highlight: int | None,
+    tag: str | None = None,
 ) -> dict[str, Any]:
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     offset = max(0, offset)
     q = (q or "").strip() or None
-    rows, total = runs_svc.get_rows(session, run.id, offset=offset, limit=limit, q=q)
+    tag = (tag or "").strip()
+    rows, total = runs_svc.get_rows(
+        session,
+        run.id,
+        offset=offset,
+        limit=limit,
+        q=q,
+        annotated=tag == ANY_TAG,
+        tag=tag if tag and tag != ANY_TAG else None,
+    )
     columns: dict[str, None] = {}
     for r in rows:
         for k in r.data or {}:
@@ -318,6 +349,9 @@ def rows_context(
         "offset": offset,
         "limit": limit,
         "q": q or "",
+        "tag": tag,
+        "tags": runs_svc.annotation_tags(session, run.id),
+        "has_annotations": any(r.annotations for r in rows) or bool(tag),
         "columns": list(columns),
         "highlight": highlight,
         "prev_offset": max(0, offset - limit) if offset > 0 else None,
@@ -325,10 +359,12 @@ def rows_context(
     }
 
 
-def page_url(run_id: int, offset: int, q: str, limit: int = PAGE_SIZE) -> str:
+def page_url(run_id: int, offset: int, q: str, limit: int = PAGE_SIZE, tag: str = "") -> str:
     params: dict[str, Any] = {"offset": offset}
     if q:
         params["q"] = q
+    if tag:
+        params["tag"] = tag
     if limit != PAGE_SIZE:
         params["limit"] = limit
     return f"/runs/{run_id}?{urlencode(params)}"
@@ -376,9 +412,10 @@ def run_page(
     limit: int = PAGE_SIZE,
     q: str | None = None,
     row: int | None = None,
+    tag: str | None = None,
 ) -> HTMLResponse:
     run = get_run_or_404(session, run_id)
-    return _render_run_page(request, session, run, offset, limit, q, row)
+    return _render_run_page(request, session, run, offset, limit, q, row, tag=tag)
 
 
 def _render_run_page(
@@ -390,10 +427,13 @@ def _render_run_page(
     q: str | None = None,
     row: int | None = None,
     summary: AIMessage | None = None,
+    tag: str | None = None,
+    message: str | None = None,
 ) -> HTMLResponse:
     if row is not None:
         # Open the (unfiltered) page containing the requested row.
         q = None
+        tag = None
         before = session.scalar(
             select(func.count(ResultRow.id)).where(
                 ResultRow.run_id == run.id, ResultRow.row_idx < row
@@ -401,13 +441,20 @@ def _render_run_page(
         )
         limit = max(1, min(limit, MAX_PAGE_SIZE))
         offset = ((before or 0) // limit) * limit
-    ctx = rows_context(session, run, offset, limit, q, row)
+    ctx = rows_context(session, run, offset, limit, q, row, tag)
+    follow_ups = list(
+        session.scalars(select(Run).where(Run.parent_run_id == run.id).order_by(Run.id))
+    )
     return render(
         request,
         "run.html",
         stderr_tail=stderr_tail(run) if run.status == RunStatus.FAILED else None,
         summary=summary,
         evidence_id=run.evidence_id,
+        hook_specs=hooks_mod.hooks_for(run.tool, run.plugin),
+        hook_errors=[h for h in run.hook_results or [] if h.get("status") != "ok"],
+        follow_ups=follow_ups,
+        message=message,
         **ctx,
     )
 
@@ -605,11 +652,28 @@ def ui_rows(
     offset: int = 0,
     limit: int = PAGE_SIZE,
     q: str | None = None,
+    tag: str | None = None,
 ) -> Response:
     run = get_run_or_404(session, run_id)
     if not is_htmx(request):
-        return redirect(page_url(run_id, offset, (q or "").strip(), limit))
-    return render(request, "_rows.html", **rows_context(session, run, offset, limit, q, None))
+        return redirect(page_url(run_id, offset, (q or "").strip(), limit, (tag or "").strip()))
+    return render(request, "_rows.html", **rows_context(session, run, offset, limit, q, None, tag))
+
+
+@router.post("/ui/runs/{run_id}/hooks/rerun", dependencies=[Depends(same_origin_post)])
+def ui_rerun_hooks(request: Request, run_id: int, session: SessionDep) -> Response:
+    """Re-run post-processing hooks on a finished run (no re-run of the tool)."""
+    run = get_run_or_404(session, run_id)
+    try:
+        hooks_mod.load_hooks(force=True)  # pick up edited hook code without a restart
+        results = hooks_mod.run_hooks(session, run_id)
+    except ValueError as exc:
+        session.rollback()
+        return _render_run_page(request, session, run, message=str(exc))
+    session.refresh(run)
+    failed = sum(1 for r in results if r.get("status") != "ok")
+    message = f"Post-processing re-run: {len(results)} hook(s), {failed} failed."
+    return _render_run_page(request, session, run, message=message)
 
 
 @router.get("/ui/evidence/{evidence_id}/ai", response_class=HTMLResponse)

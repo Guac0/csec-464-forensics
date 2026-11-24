@@ -41,13 +41,16 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
     (validates via `get_runner(tool).validate`, raises `ArgValidationError`; status QUEUED)
   - `enqueue_auto(session, evidence_id) -> list[Run]` — one run per `PluginSpec.auto_enumerate`
   - `cancel_run(session, run_id) -> Run`
-  - `get_rows(session, run_id, offset=0, limit=100, q: str | None = None) -> tuple[list[ResultRow], int]`
+  - `create_run(..., *, parent_run_id=None, triggered_by_hook=None, chain_depth=0)` — follow-up
+    provenance, used by hooks
+  - `get_rows(session, run_id, offset=0, limit=100, q=None, annotated=False, tag=None) -> tuple[list[ResultRow], int]`
+  - `annotation_tags(session, run_id) -> list[tuple[str, int]]`
 - `app/services/notes.py`: `list_notes(session, evidence_id=None)`, `create_note(session, body, evidence_id=None)`,
   `update_note(session, note_id, body)`, `delete_note(session, note_id)`
 - `app/jobs/worker.py`: `Worker` (start/stop, polls QUEUED runs, thread pool of
   `settings.max_concurrent_runs`, heartbeats, cancel via per-run `threading.Event`),
   `get_worker() -> Worker`, `recover_stale_runs(session) -> int`. Uses `app.tools.executor.execute`
-  and `runner.parse_output`, inserting `ResultRow`s in batches.
+  and `runner.parse_output`, inserting `ResultRow`s in batches, then `run_post_hooks()`.
 - `app/api/{evidence,runs,notes}.py`: JSON API under `/api`.
 
 ### Tool runner (volatility mechanism)
@@ -57,6 +60,16 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/registry.py`: `get_runner(name: str = "volatility3") -> ToolRunner`, `available_tools() -> list[str]`
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
+
+### Post-run hooks
+- `app/tools/hooks.py` (engine, frozen interface): `@post_run(*plugins, tool, name, version)`,
+  `HookContext` (`rows`, `latest_run`, `annotate`, `add_finding`, `update_evidence_metadata`,
+  `queue_follow_up`), `run_hooks(session, run_id) -> list[dict]`, `load_hooks()`,
+  `registered_hooks()`, `hooks_for(tool, plugin)`, `load_errors()`, `SEVERITIES`.
+- `app/tools/volatility/hooks/*.py`: hook modules, auto-discovered — **TODO(forensics)**.
+- Stored on `Run`: `hook_results`, `findings`, `parent_run_id`, `triggered_by_hook`, `chain_depth`;
+  on `ResultRow`: `annotations`. `RunOrigin.HOOK` marks follow-up runs (not accepted from the API).
+- API: `GET /api/hooks`, `POST /api/runs/{id}/hooks/rerun`, rows filter `?annotated=true&tag=`.
 
 ### AI layer
 - `app/ai/client.py`: `AIClient(settings, transport=None).chat(messages, **overrides) -> AIResult`

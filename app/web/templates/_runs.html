@@ -11,7 +11,9 @@
         <td><span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span></td>
         <td class="mono"><a href="/runs/{{ run.id }}">{{ run.plugin }}</a></td>
         <td class="mono small-text">{{ run.args | args }}</td>
-        <td>{{ run.origin.value }}</td>
+        <td>{{ run.origin.value }}{% if run.parent_run_id %} <a class="small-text" href="/runs/{{ run.parent_run_id }}" title="queued by {{ run.triggered_by_hook }}">&larr; #{{ run.parent_run_id }}</a>{% endif %}
+          {% if run.findings %}<span class="badge sev-info" title="hook findings">{{ run.findings | length }} finding{{ "s" if run.findings | length != 1 }}</span>{% endif %}
+          {% if run.hook_results and run.hook_results | selectattr("status", "ne", "ok") | list %}<span class="badge status-failed" title="a post-processing hook failed">hook error</span>{% endif %}</td>
         <td class="num">{{ run.row_count }}</td>
         <td class="mono small-text">{{ run.created_at | dt }}</td>
         <td>
