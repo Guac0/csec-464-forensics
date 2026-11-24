@@ -28,6 +28,7 @@ from app.db import get_session
 from app.models import AIMessage, Evidence, Note, ResultRow, Run, RunOrigin, RunStatus
 from app.services import audit as audit_svc
 from app.services import evidence as evidence_svc
+from app.services import integrity as integrity_svc
 from app.services import notes as notes_svc
 from app.services import runs as runs_svc
 from app.tools import hooks as hooks_mod
@@ -153,6 +154,8 @@ templates.env.filters.update(
     ai_content=render_ai_content,
     os_info=fmt_os_info,
     max_severity=max_severity,
+    integrity_status=lambda ev: integrity_svc.status(ev),
+    integrity_problem=lambda ev: integrity_svc.describe_problem(ev),
 )
 
 
@@ -314,6 +317,12 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "messages": ai_history(session, ev.id),
         "runs_panel": True,
         "values": {},
+        "integrity_status": integrity_svc.status(ev),
+        "integrity_problem": integrity_svc.describe_problem(ev),
+        "integrity_checks": integrity_svc.list_checks(session, ev.id)[:20],
+        "integrity_mode": get_settings().integrity_mode,
+        "verify_on_run": get_settings().verify_on_run,
+        "hashing": evidence_svc.is_hashing(ev.id),
     }
 
 
@@ -481,7 +490,7 @@ def ui_hash(request: Request, evidence_id: int, session: SessionDep) -> Response
     get_evidence_or_404(session, evidence_id)
     evidence_svc.start_hash_in_background(evidence_id)
     if not is_htmx(request):
-        return redirect("/")
+        return redirect(request.headers.get("referer") or "/")
     return evidence_list_response(
         request, session, message="Hashing started in the background; refresh to see the result."
     )
@@ -601,7 +610,11 @@ def ui_create_run(
         session.commit()
     except (ValueError, KeyError) as exc:  # ArgValidationError and JSON errors are ValueErrors
         session.rollback()
-        error = str(exc) if isinstance(exc, ArgValidationError) else f"invalid request: {exc}"
+        error = (
+            str(exc)
+            if isinstance(exc, ArgValidationError | integrity_svc.IntegrityError)
+            else f"invalid request: {exc}"
+        )
 
     if is_htmx(request):
         if error:
@@ -621,7 +634,13 @@ def ui_create_run(
 @router.post("/ui/evidence/{evidence_id}/auto", dependencies=[Depends(same_origin_post)])
 def ui_auto(request: Request, evidence_id: int, session: SessionDep) -> Response:
     get_evidence_or_404(session, evidence_id)
-    runs = runs_svc.enqueue_auto(session, evidence_id)
+    try:
+        runs = runs_svc.enqueue_auto(session, evidence_id)
+    except integrity_svc.IntegrityError as exc:
+        session.rollback()
+        if not is_htmx(request):
+            return redirect(f"/evidence/{evidence_id}#integrity")
+        return runs_response(request, session, evidence_id, error=str(exc))
     session.commit()
     if not is_htmx(request):
         return redirect(f"/evidence/{evidence_id}#runs")
@@ -821,3 +840,42 @@ def note_history(request: Request, note_id: int, session: SessionDep) -> HTMLRes
         versions=versions,
         evidence_id=versions[-1].evidence_id,
     )
+
+
+# --------------------------------------------------------------------------- integrity
+
+
+@router.post("/ui/evidence/{evidence_id}/expected-hashes", dependencies=[Depends(same_origin_post)])
+def ui_expected_hashes(
+    request: Request, evidence_id: int, form: FormDep, session: SessionDep
+) -> Response:
+    ev = get_evidence_or_404(session, evidence_id)
+    try:
+        integrity_svc.set_expected_hashes(
+            session,
+            evidence_id,
+            sha256=form.get("expected_sha256"),
+            md5=form.get("expected_md5"),
+            sha1=form.get("expected_sha1"),
+        )
+    except ValueError as exc:
+        session.rollback()
+        ctx = evidence_context(session, ev)
+        ctx.update(integrity_error=str(exc), expected_values=form)
+        return render(request, "evidence.html", status_code=422, **ctx)
+    return redirect(f"/evidence/{evidence_id}#integrity")
+
+
+@router.post("/ui/evidence/{evidence_id}/acknowledge", dependencies=[Depends(same_origin_post)])
+def ui_acknowledge_mismatch(
+    request: Request, evidence_id: int, form: FormDep, session: SessionDep
+) -> Response:
+    ev = get_evidence_or_404(session, evidence_id)
+    try:
+        integrity_svc.acknowledge_mismatch(session, evidence_id, form.get("reason") or "")
+    except ValueError as exc:
+        session.rollback()
+        ctx = evidence_context(session, ev)
+        ctx.update(integrity_error=str(exc))
+        return render(request, "evidence.html", status_code=422, **ctx)
+    return redirect(f"/evidence/{evidence_id}#integrity")

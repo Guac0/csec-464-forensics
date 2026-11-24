@@ -32,6 +32,10 @@ class RunOut(BaseModel):
     status: RunStatus
     tool_version: str | None
     evidence_sha256: str | None
+    evidence_size_bytes: int | None
+    evidence_mtime: float | None
+    integrity_warning: str | None
+    phase: str | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -99,6 +103,8 @@ def create_run(body: RunCreate, session: SessionDep) -> Run:
         )
     except ArgValidationError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except runs_service.IntegrityError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 

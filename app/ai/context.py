@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.citations import parse_key
 from app.models import Evidence, Note, ResultRow, Run, RunStatus
+from app.services import integrity
 
 TRUNCATED_MARKER = "[truncated]"
 
@@ -99,6 +100,7 @@ def _evidence_block(ev: Evidence) -> str:
         f"file: {ev.rel_path}",
         f"size_bytes: {ev.size_bytes}",
         f"sha256: {ev.sha256 or '(not yet hashed)'}",
+        f"integrity: {integrity.status(ev)}",
         f"os_info: {_json(ev.os_info) if ev.os_info else '(unknown)'}",
     ]
     if ev.description:

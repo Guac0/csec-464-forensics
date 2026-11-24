@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     # intended level later is just changing this default (or FT_AUDIT_LEVEL); nothing else.
     audit_level: Literal["changes", "key_reads", "all"] = "all"
 
+    # Evidence integrity (app/services/integrity.py):
+    #   "strict" - runs are refused/failed if the image changed since it was hashed or does not
+    #              match the analyst's expected hashes (unless the mismatch is acknowledged)
+    #   "warn"   - runs go ahead; the problem is recorded on the run as a warning
+    integrity_mode: Literal["strict", "warn"] = "strict"
+    # Also re-hash the whole image before every run (slow on big images). Off: a fast size +
+    # modification-time check is done before every run instead.
+    verify_on_run: bool = False
+
     # Post-run hooks (app/tools/hooks.py).
     hooks_enabled: bool = True
     # Allow hooks to queue follow-up runs automatically.

@@ -26,8 +26,22 @@ class Evidence(Base):
     rel_path: Mapped[str] = mapped_column(String, unique=True)
     size_bytes: Mapped[int] = mapped_column(Integer)
     mtime: Mapped[float] = mapped_column()
-    sha256: Mapped[str | None] = mapped_column(String(64), default=None)  # None until hashed
+    # Computed hashes (one pass over the file); None until hashed. See app/services/integrity.py.
+    sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    md5: Mapped[str | None] = mapped_column(String(32), default=None)
+    sha1: Mapped[str | None] = mapped_column(String(40), default=None)
     hashed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # Hashes the analyst expects (e.g. from the acquisition report). A difference = mismatch.
+    expected_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    expected_md5: Mapped[str | None] = mapped_column(String(32), default=None)
+    expected_sha1: Mapped[str | None] = mapped_column(String(40), default=None)
+    # Analyst's explicit decision to run despite a mismatch (cleared when hashes change).
+    mismatch_ack_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    mismatch_ack_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    # Set when the file's size/mtime no longer match what was hashed; cleared by re-hashing.
+    changed_detected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
     # Filled by humans' windows.info handling (e.g. {"os": "windows", "build": "19041"}).
     os_info: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -66,7 +80,14 @@ class Run(Base):
     origin: Mapped[RunOrigin] = mapped_column(Enum(RunOrigin), default=RunOrigin.MANUAL)
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.QUEUED)
     tool_version: Mapped[str | None] = mapped_column(String, default=None)
+    # Snapshot of the evidence the tool actually ran against (checked just before execution).
     evidence_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    evidence_size_bytes: Mapped[int | None] = mapped_column(Integer, default=None)
+    evidence_mtime: Mapped[float | None] = mapped_column(default=None)
+    # Set when FT_INTEGRITY_MODE=warn let the run go ahead despite an integrity problem.
+    integrity_warning: Mapped[str | None] = mapped_column(Text, default=None)
+    # What a RUNNING run is doing: "hashing" | "verifying" | "running" | "post-processing".
+    phase: Mapped[str | None] = mapped_column(String, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -217,3 +238,26 @@ class AuditHead(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     seq: Mapped[int] = mapped_column(Integer, default=0)
     last_hash: Mapped[str] = mapped_column(String(64))
+
+
+class IntegrityCheck(Base):
+    """Append-only record of every hash computation / verification of an evidence file."""
+
+    __tablename__ = "integrity_checks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    evidence_id: Mapped[int] = mapped_column(Integer, index=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, default=None)  # set for pre-run checks
+    # "initial" (first hash) | "verify" (manual) | "pre_run" (FT_VERIFY_ON_RUN) | "rehash"
+    kind: Mapped[str] = mapped_column(String)
+    # "ok" | "changed" (content differs from the last hash) | "mismatch" (differs from the
+    # expected hashes) | "error"
+    result: Mapped[str] = mapped_column(String)
+    sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    md5: Mapped[str | None] = mapped_column(String(32), default=None)
+    sha1: Mapped[str | None] = mapped_column(String(40), default=None)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, default=None)
+    mtime: Mapped[float | None] = mapped_column(default=None)
+    seconds: Mapped[float | None] = mapped_column(default=None)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

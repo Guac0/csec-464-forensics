@@ -1,0 +1,1 @@
+{% set st = ev | integrity_status %}<span class="badge integrity-{{ st }}" title="{{ ev | integrity_problem or '' }}">{{ {"not_hashed": "not hashed", "hashed": "hashed", "matches_expected": "matches expected", "mismatch": "HASH MISMATCH", "mismatch_acknowledged": "mismatch (acknowledged)", "changed": "CHANGED SINCE HASHED"}[st] }}</span>

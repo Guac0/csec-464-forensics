@@ -231,7 +231,9 @@ def _make_fakes(session: Session) -> dict[str, SimpleNamespace]:
             delete_note=delete_note,
         ),
         "evidence_svc": SimpleNamespace(
-            scan_evidence=scan_evidence, start_hash_in_background=lambda evidence_id: None
+            scan_evidence=scan_evidence,
+            start_hash_in_background=lambda evidence_id: None,
+            is_hashing=lambda evidence_id: False,
         ),
         "ai_svc": SimpleNamespace(ask=ask, summarize_run=summarize_run, get_messages=get_messages),
         "calls": calls,

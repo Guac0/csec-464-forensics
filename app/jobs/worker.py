@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.models import Evidence, ResultRow, Run, RunStatus, utcnow
-from app.services import audit
+from app.services import audit, integrity
 from app.services import runs as runs_service
 from app.services.evidence import resolve_evidence_path
 from app.tools.base import ArgValidationError, ExecutionResult, ToolRequest, ToolRunner
@@ -273,6 +273,7 @@ class Worker:
                 "error": (error or "")[:500] or None,
             },
         )
+        values.setdefault("phase", None)
         s.execute(
             update(Run)
             .where(Run.id == run_id)
@@ -313,9 +314,38 @@ class Worker:
 
         runner = runs_service.get_runner(run.tool)
         request = ToolRequest(plugin=run.plugin, args=dict(run.args or {}))
-        run.evidence_sha256 = evidence.sha256
         run.started_at = utcnow()
         s.commit()
+
+        # Integrity gate: hash the image if needed, check it is unchanged and matches the
+        # expected hashes, and snapshot what the tool runs against (app/services/integrity.py).
+        heartbeat = self._heartbeat_callback(run_id)
+
+        def set_phase(name: str) -> None:
+            run.phase = name
+            s.commit()
+
+        try:
+            integrity.prepare_for_run(
+                s,
+                run,
+                evidence,
+                evidence_path,
+                should_stop=cancel_event.is_set,
+                on_progress=lambda _done: heartbeat(),
+                set_phase=set_phase,
+            )
+        except integrity.IntegrityBlocked as exc:
+            self._finish(s, run_id, RunStatus.FAILED, f"integrity check failed: {exc}")
+            return
+        except integrity.HashCancelled:
+            reason = "cancelled: worker shutting down" if self._stop.is_set() else "cancelled"
+            self._finish(s, run_id, RunStatus.CANCELLED, f"{reason} (while hashing evidence)")
+            return
+        except Exception as exc:  # hashing failed (unreadable file, changed while hashing...)
+            self._finish(s, run_id, RunStatus.FAILED, f"integrity check failed: {exc}")
+            return
+        set_phase("running")
 
         run_dir = settings.runs_dir / str(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -365,9 +395,11 @@ class Worker:
             s.rollback()  # discard any rows inserted so far
             self._finish(s, run_id, RunStatus.FAILED, f"output parse failed: {exc}", row_count=0)
             return
-        self._finish(s, run_id, RunStatus.SUCCEEDED, None, row_count=count)
+        self._finish(s, run_id, RunStatus.SUCCEEDED, None, row_count=count, phase="post-processing")
         logger.info("run %s: succeeded with %d rows", run_id, count)
         run_post_hooks(s, run_id)
+        s.execute(update(Run).where(Run.id == run_id).values(phase=None))
+        s.commit()
 
     @staticmethod
     def _store_rows(s: Session, run_id: int, runner: ToolRunner, stdout_path: Path) -> int:

@@ -90,7 +90,12 @@ Team workflow, branch rules and guidance for AI coding assistants:
 
 ### Evidence handling
 - **Status:** infrastructure done
-- Scan the read-only evidence folder, SHA-256 hashing, per-image description and notes.
+- Scan the read-only evidence folder, per-image description and notes.
+- **Integrity:** each image is hashed (SHA-256, MD5, SHA-1) before its first run, and checked for
+  changes (size + modification time; optionally a full re-hash) before every run. Analysts can
+  enter the hashes from the acquisition report; a mismatch blocks runs until it is fixed or
+  acknowledged with a reason (`FT_INTEGRITY_MODE=warn` flags instead of blocking). Every run
+  records the exact image hash it ran against; every hash computation is kept in a history.
 - OS details are filled from `windows.info` by a post-run hook (EXAMPLE; under review).
 - _TODO: describe OS detection and what is shown per image._
 

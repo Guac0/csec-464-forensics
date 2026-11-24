@@ -61,6 +61,24 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
 
+### Evidence integrity
+- `app/services/integrity.py`: `compute_hashes(path, should_stop, on_progress)`,
+  `hash_evidence(session, evidence_id, *, kind, accept, run_id, ...)`, `status(ev)` (one of
+  `not_hashed`, `hashed`, `matches_expected`, `mismatch`, `mismatch_acknowledged`, `changed`),
+  `describe_problem(ev)`, `check_can_run(ev)`, `set_expected_hashes(...)`,
+  `acknowledge_mismatch(session, evidence_id, reason)`, `list_checks(...)`,
+  `prepare_for_run(session, run, ev, path, ...)`; exceptions `IntegrityError` (refused, -> 409),
+  `IntegrityBlocked` (worker), `HashCancelled`.
+- `runs.create_run` calls `check_can_run` (strict mode). The worker calls `prepare_for_run`
+  before executing a tool; runs record `evidence_sha256/size_bytes/mtime`, `integrity_warning`,
+  and `phase` while running.
+- `evidence.hash_evidence(session, id)` = the analyst's "Verify" (accepts current content).
+  Scans no longer clear hashes: they flag hashed images that changed (`changed_detected_at`).
+- `integrity_checks` is append-only (triggers). Settings `FT_INTEGRITY_MODE` (strict|warn),
+  `FT_VERIFY_ON_RUN`.
+- API: `PATCH /api/evidence/{id}` (description, expected_*), `POST /api/evidence/{id}/verify`
+  (alias `/hash`), `POST /api/evidence/{id}/acknowledge-mismatch`, `GET /api/evidence/{id}/integrity`.
+
 ### Audit log
 - `app/services/audit.py` (frozen interface): `record(session, action, *, category, summary,
   object_type, object_id, evidence_id, details)`, `record_now(action, ...)`, `audit_context(...)`,
