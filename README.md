@@ -117,8 +117,14 @@ Team workflow, branch rules and guidance for AI coding assistants:
 
 ### Results browsing
 - **Status:** infrastructure done
-- Paged, filterable results tables; tree output (e.g. process trees) is indented; each row has a
-  citation key `R<run>:<row>`.
+- Paged results tables with stable columns; tree output (e.g. process trees) is indented; each
+  row has a citation key `R<run>:<row>`.
+- Search across all columns, per-column filters (text contains, or `=`, `!=`, `>`, `>=`, `<`,
+  `<=` with numbers compared as numbers) and click-to-sort headers. The view lives in the URL.
+- **Export…** downloads the current view or all rows as CSV (Excel / Timeline Explorer) or JSON
+  Lines, or the tool's raw output. Exports are recorded in the activity log.
+- Fast up to ~1M rows per run; `FT_SEARCH_INDEX=true` adds a full-text index for near-instant
+  search on huge runs (more storage). Measure with `python -m scripts.bench_rows`.
 - _TODO: describe any per-plugin views or highlighting._
 
 ### Dumped files

@@ -19,12 +19,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import SessionLocal
-from app.models import Evidence, ResultRow, Run, RunStatus, utcnow
+from app.models import Evidence, Run, RunStatus, utcnow
 from app.services import audit, integrity
 from app.services import runs as runs_service
 from app.services.evidence import resolve_evidence_path
@@ -449,26 +449,17 @@ class Worker:
 
     @staticmethod
     def _store_rows(s: Session, run_id: int, runner: ToolRunner, stdout_path: Path) -> int:
-        """Insert parsed rows in batches within the current (uncommitted) transaction."""
-        batch: list[dict[str, Any]] = []
-        count = 0
-        for idx, row in enumerate(runner.parse_output(stdout_path)):
-            batch.append(
-                {
-                    "run_id": run_id,
-                    "row_idx": idx,
-                    "depth": row.depth,
-                    "parent_idx": row.parent_idx,
-                    "data": row.data,
-                }
-            )
-            count += 1
-            if len(batch) >= ROW_BATCH_SIZE:
-                s.execute(insert(ResultRow), batch)
-                batch = []
-        if batch:
-            s.execute(insert(ResultRow), batch)
-        return count
+        """Insert parsed rows in batches within the current (uncommitted) transaction, record
+        the run's columns and, with FT_SEARCH_INDEX, add them to the full-text index."""
+        from app.services import results
+
+        return results.store_rows(
+            s,
+            run_id,
+            runner.parse_output(stdout_path),
+            search_index=get_settings().search_index,
+            batch_size=ROW_BATCH_SIZE,
+        )
 
 
 _worker: Worker | None = None

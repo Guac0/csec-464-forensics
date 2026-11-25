@@ -155,3 +155,14 @@ table.hashes td { word-break: break-all; }
 /* Dumped files */
 a.button { display: inline-block; padding: .15rem .5rem; border-radius: 4px; background: var(--accent); color: #fff; text-decoration: none; }
 a.danger-link { color: var(--danger); }
+
+/* Results table: sorting, column filters, export dialog */
+th a.sort { color: inherit; text-decoration: none; }
+th a.sort:hover { text-decoration: underline; }
+tr.filter-row th { padding: 2px 4px; background: #f9fafb; }
+input.col-filter { width: 100%; min-width: 5em; font-size: 12px; padding: 2px 4px; }
+dialog.export-dialog { border: 1px solid #d0d5dd; border-radius: 8px; padding: 1rem 1.25rem; max-width: 36rem; }
+dialog.export-dialog::backdrop { background: rgba(16, 24, 40, .35); }
+dialog.export-dialog fieldset { border: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.dialog-buttons { display: flex; gap: .5rem; justify-content: flex-end; }
+button.secondary { background: #f2f4f7; color: #344054; }

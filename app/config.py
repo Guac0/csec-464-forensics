@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # Password of the encrypted zip that artifacts are downloaded in (malware-sharing convention).
     artifact_zip_password: str = "infected"  # noqa: S105 - public convention, not a secret
 
+    # Full-text (trigram) search index for result rows: near-instant substring search on very
+    # large runs, at the cost of ~2x row storage and slower ingest. Applies to runs stored while
+    # enabled (others use a scan, which is fine up to ~1M rows). See scripts/bench_rows.py.
+    search_index: bool = False
+
     # Post-run hooks (app/tools/hooks.py).
     hooks_enabled: bool = True
     # Allow hooks to queue follow-up runs automatically.

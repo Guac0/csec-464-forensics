@@ -137,7 +137,7 @@ def _make_fakes(session: Session) -> dict[str, SimpleNamespace]:
         sess.commit()
         return run
 
-    def get_rows(sess, run_id, offset=0, limit=100, q=None, annotated=False, tag=None):
+    def get_rows(sess, run_id, offset=0, limit=100, q=None, annotated=False, tag=None, **_view):
         rows = list(
             sess.scalars(
                 select(ResultRow).where(ResultRow.run_id == run_id).order_by(ResultRow.row_idx)
@@ -502,7 +502,8 @@ def test_run_page_metadata_and_table(web: TestClient, big_run: Run) -> None:
     assert f'id="row-{big_run.id}-0"' in html and f'id="row-{big_run.id}-99"' in html
     assert f'id="row-{big_run.id}-100"' not in html
     # Columns: citation first, then union of keys in insertion order.
-    assert re.search(r"<th>Cite</th><th>PID</th><th>ImageFileName</th><th>Extra</th>", html)
+    headers = re.findall(r'class="sort"[^>]*>([^<]+)</a>', html)
+    assert [h.strip() for h in headers] == ["PID", "ImageFileName", "Extra"]
     assert f">R{big_run.id}:5</a>" in html
     assert "&lt;img src=x onerror=alert(1)&gt;" in html and "<img src=x" not in html
     assert "padding-left: 1.75em" in html  # depth-1 row indented

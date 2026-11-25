@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import Text, cast, exists, func, literal_column, select, update
+from sqlalchemy import func, literal_column, select, update
 from sqlalchemy.orm import Session
 
 from app.models import ResultRow, Run, RunOrigin, RunStatus, utcnow
-from app.services import audit, integrity
+from app.services import audit, integrity, results
 from app.services.evidence import get_evidence
 from app.services.integrity import IntegrityError
 from app.tools.base import ArgValidationError, ToolRequest, ToolRunner
@@ -226,31 +226,20 @@ def get_rows(
     q: str | None = None,
     annotated: bool = False,
     tag: str | None = None,
+    filters: dict[str, str] | None = None,
+    sort: str | None = None,
+    desc: bool = False,
 ) -> tuple[list[ResultRow], int]:
-    """Page through a run's rows ordered by row_idx. ``q`` is a case-insensitive substring
-    match on the JSON-serialised row data; ``annotated`` keeps only rows a hook annotated and
-    ``tag`` only rows with that annotation tag. Returns (rows, total matching)."""
-    where = [ResultRow.run_id == run_id]
-    if annotated or tag:
-        where.append(ResultRow.annotations.is_not(None))
-    if tag:
-        # SQLite JSON1: any annotation object whose "tag" equals the requested tag.
-        where.append(
-            exists(
-                select(literal_column("1"))
-                .select_from(func.json_each(ResultRow.annotations).table_valued("value"))
-                .where(func.json_extract(literal_column("value"), "$.tag") == tag)
-            )
-        )
-    if q:
-        pattern = f"%{_escape_like(q)}%"
-        where.append(cast(ResultRow.data, Text).ilike(pattern, escape="\\"))
-    total = session.scalar(select(func.count()).select_from(ResultRow).where(*where)) or 0
-    rows = session.scalars(
-        select(ResultRow)
-        .where(*where)
-        .order_by(ResultRow.row_idx)
-        .offset(max(offset, 0))
-        .limit(max(limit, 0))
+    """Page through a run's rows. ``q``: substring search; ``annotated``/``tag``: hook
+    annotations; ``filters``: {column: expression} (see app/services/results.py); ``sort``: a
+    column name (row order by default). Returns (rows, total matching)."""
+    run = get_run(session, run_id)
+    view = results.RowView(
+        q=q or "",
+        annotated=annotated,
+        tag=tag or "",
+        filters=filters or {},
+        sort=sort or "",
+        desc=desc,
     )
-    return list(rows), total
+    return results.query_rows(session, run, view, offset=offset, limit=limit)

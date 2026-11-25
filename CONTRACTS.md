@@ -43,7 +43,8 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   - `cancel_run(session, run_id) -> Run`
   - `create_run(..., *, parent_run_id=None, triggered_by_hook=None, chain_depth=0)` — follow-up
     provenance, used by hooks
-  - `get_rows(session, run_id, offset=0, limit=100, q=None, annotated=False, tag=None) -> tuple[list[ResultRow], int]`
+  - `get_rows(session, run_id, offset=0, limit=100, q=None, annotated=False, tag=None,
+    filters=None, sort=None, desc=False) -> tuple[list[ResultRow], int]` (delegates to results)
   - `annotation_tags(session, run_id) -> list[tuple[str, int]]`
 - `app/services/notes.py`: `list_notes(session, evidence_id=None)`, `create_note(session, body, evidence_id=None)`,
   `update_note(session, note_id, body)`, `delete_note(session, note_id)`
@@ -60,6 +61,20 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/registry.py`: `get_runner(name: str = "volatility3") -> ToolRunner`, `available_tools() -> list[str]`
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
+
+### Large results
+- `app/services/results.py`: `RowView` (q, annotated, tag, filters {column: expr}, sort, desc;
+  `from_params` / `to_params` with URL keys `q`, `tag` ("*" = any annotation), `sort`, `desc`,
+  `f.<column>`), `query_rows(session, run, view, offset, limit)`, `iter_view`,
+  `export_rows(session, run, view, "csv"|"jsonl")`, `store_rows(...)` (worker ingest: columns +
+  optional index), `index_run(session, run_id)`, `ColumnTracker`, `parse_filter`.
+- `Run.columns` ([{name, type}] recorded at ingest), `Run.search_indexed`. FTS5 table
+  `result_rows_fts` (rowid = result_rows.id) is created by migration 0006 and ignored by the ORM
+  (`app/migrations/env.py` UNMANAGED_TABLE_PREFIXES).
+- API: `GET /api/runs/{id}/rows` (+ `sort`, `desc`, `f.<column>`), `GET /api/runs/{id}/export?
+  format=csv|jsonl|raw` (+ view params; audited key_read), `POST /api/runs/{id}/search-index`.
+  UI: `/ui/runs/{id}/export?choice=csv:view|csv:all|jsonl:view|jsonl:all|raw`.
+- Setting `FT_SEARCH_INDEX` (default false). Benchmark: `python -m scripts.bench_rows`.
 
 ### Derived artifacts (dumped files)
 - `app/services/artifacts.py`: `register_run_outputs(session, run, output_dir)` (worker, after

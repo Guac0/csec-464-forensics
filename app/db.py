@@ -39,6 +39,9 @@ def init_engine(url: str | None = None) -> Engine:
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA foreign_keys=ON")
+        # Safe with WAL (no corruption on crash; at worst the last commits are lost on power
+        # loss) and much faster for large row inserts than the default FULL.
+        cur.execute("PRAGMA synchronous=NORMAL")
         cur.close()
 
     SessionLocal.configure(bind=_engine)

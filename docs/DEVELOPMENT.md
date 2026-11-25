@@ -85,6 +85,13 @@ AI coding assistants are allowed and encouraged, with these rules:
    the PR which parts were AI-generated.
 5. Don't paste real case data, API keys or `.env` content into an assistant.
 
+## Performance check for big runs
+
+`python -m scripts.bench_rows --rows 200000` (add `--search-index` to compare) builds a throwaway
+database with a synthetic filescan-sized run through the real parser and ingest code, and times
+paging, search, filters, sorting and CSV export. Run it before and after changes to row storage
+or querying.
+
 ## Audit log
 
 Everything that changes data must be recorded in the audit log, in the **same transaction** as
