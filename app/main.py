@@ -33,6 +33,7 @@ ROUTER_MODULES = (
     "app.api.hooks",
     "app.api.audit",
     "app.api.artifacts",
+    "app.api.export",
     "app.api.ai",
     "app.web.pages",
 )

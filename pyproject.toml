@@ -23,6 +23,7 @@ dev = [
     "ruff>=0.6",
     "pre-commit>=3.7",
     "pyyaml>=6",  # evaluation case files (evals/)
+    "markdown-it-py>=3",  # tests render case-export Markdown to check escaping
 ]
 
 [build-system]

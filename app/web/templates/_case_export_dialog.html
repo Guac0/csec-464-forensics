@@ -1,0 +1,20 @@
+{# Case export dialog. Set `export_evidence` to an Evidence to export one image; omit for all. #}
+<dialog id="case-export-dialog" class="export-dialog">
+  <form method="get" action="/ui/export" onsubmit="setTimeout(() => this.closest('dialog').close(), 0)">
+    {% if export_evidence %}<input type="hidden" name="evidence_id" value="{{ export_evidence.id }}">{% endif %}
+    <h3>Export {% if export_evidence %}{{ export_evidence.rel_path }}{% else %}the whole investigation{% endif %}</h3>
+    <fieldset>
+      <label><input type="radio" name="format" value="md" checked> Markdown report
+        <span class="muted small-text">(evidence and integrity, notes, runs with exact commands, findings, AI answers with provenance, activity log)</span></label>
+      <label><input type="radio" name="format" value="zip"> ZIP bundle
+        <span class="muted small-text">(the report plus every run's rows as CSV, its raw tool output, and a manifest with the SHA-256 of every file)</span></label>
+      <label class="indent"><input type="checkbox" name="include_dumped" value="true"> Include dumped files in the ZIP
+        <span class="muted small-text">(possible malware: the whole ZIP is then encrypted, password <span class="mono">{{ zip_password() if zip_password is callable else zip_password }}</span>; opens with 7-Zip)</span></label>
+    </fieldset>
+    <p class="muted small-text">Exports are recorded in the activity log. AI answers are marked as leads, not evidence.</p>
+    <div class="dialog-buttons">
+      <button type="submit">Download</button>
+      <button type="button" class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>

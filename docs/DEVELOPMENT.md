@@ -98,6 +98,13 @@ database with a synthetic filescan-sized run through the real parser and ingest 
 paging, search, filters, sorting and CSV export. Run it before and after changes to row storage
 or querying.
 
+## Case export report format
+
+`tests/fixtures/export_golden.md` pins the exact Markdown of a case report. If you change the
+report on purpose, regenerate it with `UPDATE_GOLDEN=1 pytest tests/test_export.py` and review the
+diff in your PR. Any evidence-sourced text must go through `esc()`, `code()` or `fenced()` in
+`app/services/export.py`; `test_export.py` renders the report to check nothing gets through.
+
 ## Audit log
 
 Everything that changes data must be recorded in the audit log, in the **same transaction** as

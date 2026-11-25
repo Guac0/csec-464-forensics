@@ -166,3 +166,4 @@ dialog.export-dialog::backdrop { background: rgba(16, 24, 40, .35); }
 dialog.export-dialog fieldset { border: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 .dialog-buttons { display: flex; gap: .5rem; justify-content: flex-end; }
 button.secondary { background: #f2f4f7; color: #344054; }
+dialog.export-dialog label.indent { margin-left: 1.5rem; }

@@ -84,10 +84,13 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] Dumped files are never deleted and there is no total disk quota (only a per-run limit).
 - [ ] Decide which plugins may write files (`--dump` etc.); only the EXAMPLE pslist entry does.
 - [ ] The audit chain head lives in the same DB file; someone with write access to the file
-      could rebuild the whole chain. Optionally anchor the head hash elsewhere (e.g. print it in
-      exports, or copy it to a separate file/system).
+      could rebuild the whole chain. Optionally anchor the head hash elsewhere (exports now print
+      it; copying it to a separate file/system is still open).
 
-- [ ] Markdown export of notes, runs, hashes and AI outputs is not implemented yet.
+- [ ] Case export: the report has no row data inline (it is in the ZIP's CSVs), skips page/API
+      request events, note edit history and full AI prompts. Revisit if reviewers need them.
+- [ ] Case export ZIPs are built in a temp file; very large runs or dumped files make big
+      downloads. No size limit or progress indicator yet.
 - [ ] Integrity: a full re-hash before each run is off by default (`FT_VERIFY_ON_RUN`); the
       default pre-run check is size + modification time only. Decide per deployment.
 - [ ] The UI doesn't refresh automatically after hashing finishes (reload the page).

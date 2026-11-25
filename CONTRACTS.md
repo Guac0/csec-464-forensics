@@ -131,6 +131,16 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   UI: `/activity`, `/notes/{id}/history`.
 - Setting `FT_AUDIT_LEVEL` = `changes` | `key_reads` | `all` (temporary default `all`).
 
+### Case export
+- `app/services/export.py`: `build_report(session, evidence_id=None) -> str` (deterministic
+  Markdown; all evidence-sourced text escaped or fenced), `build_bundle(session, evidence_id=None,
+  include_dumped=False) -> BundleResult` (ZIP: `report.md`, `manifest.json` with SHA-256 of every
+  file, per-run `rows.csv` / `raw-output.jsonl` / optional `dumped/`; AES-encrypted with
+  `artifact_zip_password` when dumped files are included), `record_export(...)` (audit
+  `case.export`, KEY_READ, includes the report SHA-256).
+- `app/api/export.py`: `GET /api/export?evidence_id=&format=md|zip&include_dumped=` ; UI `/ui/export`.
+- `evidence_id=None` exports the whole investigation (all evidence + global notes).
+
 ### Post-run hooks
 - `app/tools/hooks.py` (engine, frozen interface): `@post_run(*plugins, tool, name, version)`,
   `HookContext` (`rows`, `latest_run`, `annotate`, `add_finding`, `update_evidence_metadata`,
