@@ -62,6 +62,14 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
 
+### AI evaluation harness
+- `evals/` (dev tooling, not shipped in the image): `python -m evals.run` (CLI), `evals/cases/*.yaml`
+  (cases), `evals/scoring.py` (pure scoring/aggregation/baseline comparison), `evals/judge.py`
+  (optional AI judge), `evals/baselines/<model>.json` (committed), `evals/reports/` (ignored).
+- `app/ai/prompts.PROMPT_VERSION`: bump on any prompt/context change; stored in
+  `AIMessage.params["prompt_version"]`, the `ai.*.request` audit event and eval reports.
+- Manual GitHub workflow `.github/workflows/evals.yml` (provider from repo secrets).
+
 ### Large results
 - `app/services/results.py`: `RowView` (q, annotated, tag, filters {column: expr}, sort, desc;
   `from_params` / `to_params` with URL keys `q`, `tag` ("*" = any annotation), `sort`, `desc`,

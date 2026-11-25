@@ -85,6 +85,12 @@ AI coding assistants are allowed and encouraged, with these rules:
    the PR which parts were AI-generated.
 5. Don't paste real case data, API keys or `.env` content into an assistant.
 
+## Changing the AI prompts or context
+
+Measure, don't guess: run `python -m evals.run` before and after the change (see
+[evals/README.md](../evals/README.md)), bump `PROMPT_VERSION` in `app/ai/prompts.py`, and if the
+change is an improvement, commit a new baseline (`--save-baseline`) in the same PR.
+
 ## Performance check for big runs
 
 `python -m scripts.bench_rows --rows 200000` (add `--search-index` to compare) builds a throwaway

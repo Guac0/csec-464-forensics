@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from app.tools.base import PluginSpec
 
+# Bump whenever the system prompt, the summary question or the context format changes. It is
+# stored with every AI answer (AIMessage.params["prompt_version"]) and in evaluation reports, so
+# answers and eval scores can be tied to the prompt that produced them. See evals/README.md.
+PROMPT_VERSION = "placeholder-1"
+
 # TODO(forensics): replace with a reviewed memory-forensics analysis prompt.
 SYSTEM_PROMPT = """\
 You are assisting a memory forensics analyst who is examining a RAM image with volatility3.

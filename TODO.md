@@ -61,6 +61,9 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
       EXAMPLE `windows_info.py` OS-detection hook against real output, and add hooks that flag
       suspicious rows, summarise runs as findings, and queue sensible follow-up plugins.
 - [ ] **AI prompts** — `app/ai/prompts.py`: the analysis system prompt and the run-summary question.
+      Bump `PROMPT_VERSION` with each change and compare with `python -m evals.run`.
+- [ ] **Evaluation cases** — replace the two `evals/cases/*_example.yaml` (synthetic fixture) with
+      cases built from real captured output, then save a baseline per model you use.
 - [ ] **AI context** — `app/ai/context.py`: choose which rows of each plugin are worth sending.
 - [ ] **Citation checking** — `app/ai/citations.py`: verify that cited row values actually
       support the claim (currently only checks the row exists).
@@ -73,6 +76,8 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] **Audit level:** `FT_AUDIT_LEVEL` defaults to `all` (every page/API request) for the PoC.
       Switch the default in `app/config.py` to `key_reads` when evaluation is over.
 - [ ] Audit log has no retention/archiving; at level `all` it grows with every request.
+- [ ] Add `.github/workflows/evals.yml` (provided separately) and the repo secrets
+      `FT_AI_BASE_URL`, `FT_AI_API_KEY` + variable `FT_AI_MODEL` for manual evaluation runs.
 - [ ] Large results: decide whether to enable `FT_SEARCH_INDEX` after measuring real runs on the
       team's machines (`python -m scripts.bench_rows --rows 1000000`); existing runs can be
       indexed later with `POST /api/runs/{id}/search-index`.
