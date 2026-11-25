@@ -403,6 +403,7 @@ def page_url(
 
 
 templates.env.globals.update(page_url=page_url)
+templates.env.globals.update(zip_password=lambda: get_settings().artifact_zip_password)
 
 
 # --------------------------------------------------------------------------- pages
@@ -932,3 +933,22 @@ def ui_artifact_download(
     if format not in ("zip", "raw"):
         raise HTTPException(422, "format must be zip or raw")
     return file_download(session, artifact_id, format)
+
+
+# --------------------------------------------------------------------------- case export
+
+
+@router.get("/ui/export")
+def ui_case_export(
+    session: SessionDep,
+    evidence_id: str | None = None,
+    format: str = "md",  # noqa: A002
+    include_dumped: bool = False,
+) -> Response:
+    """Target of the export dialogs on the home and evidence pages."""
+    from app.api.export import export_response
+
+    ev_id = _int_or_none(evidence_id)
+    if ev_id is not None:
+        get_evidence_or_404(session, ev_id)
+    return export_response(session, ev_id, format, include_dumped and format == "zip")

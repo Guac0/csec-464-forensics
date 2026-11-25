@@ -3,7 +3,11 @@
 {% block crumbs %}<a href="/">Evidence</a> / <span class="mono">{{ ev.rel_path }}</span>{% endblock %}
 {% block content %}
 <section class="panel">
-  <h2 class="mono">{{ ev.rel_path }}</h2>
+  <div class="panel-head">
+    <h2 class="mono">{{ ev.rel_path }}</h2>
+    <button type="button" class="small secondary" onclick="document.getElementById('case-export-dialog').showModal()">Export…</button>
+  </div>
+  {% set export_evidence = ev %}{% include "_case_export_dialog.html" %}
   <dl class="meta">
     <dt>Size</dt><dd>{{ ev.size_bytes | humansize }} ({{ ev.size_bytes }} bytes)</dd>
     <dt>Integrity</dt><dd>{% include "_integrity_badge.html" %} <a class="small-text" href="#integrity">details</a></dd>

@@ -273,17 +273,13 @@ def verify_chain(session: Session, batch: int = 2000) -> ChainReport:
         return ChainReport(False, 0, 0, "", "audit_head row is missing")
     session.refresh(head)
     prev, expected_seq, count, last_seq = GENESIS_HASH, 1, 0, 0
+    # Plain column tuples, not ORM objects: nothing accumulates in (or is evicted from) the
+    # caller's session, however long the log is.
+    columns = [getattr(AuditEvent, k) for k in (*HASHED_FIELDS, "hash")]
     while True:
-        events = (
-            session.execute(
-                select(AuditEvent)
-                .where(AuditEvent.seq > last_seq)
-                .order_by(AuditEvent.seq)
-                .limit(batch)
-            )
-            .scalars()
-            .all()
-        )
+        events = session.execute(
+            select(*columns).where(AuditEvent.seq > last_seq).order_by(AuditEvent.seq).limit(batch)
+        ).all()
         if not events:
             break
         for ev in events:
@@ -295,8 +291,6 @@ def verify_chain(session: Session, batch: int = 2000) -> ChainReport:
             if compute_hash(fields) != ev.hash:
                 return _bad(head, count, ev.seq, "event content does not match its hash")
             prev, expected_seq, count, last_seq = ev.hash, ev.seq + 1, count + 1, ev.seq
-        session.expunge_all()  # keep memory flat on long logs
-        head = session.get(AuditHead, 1) or head
     if head.seq != count or head.last_hash != prev:
         return _bad(head, count, None, "chain head does not match the last event (truncated?)")
     return ChainReport(True, count, head.seq, head.last_hash)

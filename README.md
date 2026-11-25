@@ -156,9 +156,15 @@ Team workflow, branch rules and guidance for AI coding assistants:
   [evals/README.md](evals/README.md).
 
 ### Notes and export
-- **Status:** notes done (with full version history), export TODO
+- **Status:** done
 - Every note edit is kept; "history" on a note shows all versions, even after deletion.
-- _TODO: describe the markdown export once implemented._
+- **Export…** on an evidence page (or **Export investigation…** on the home page) downloads a case
+  report: a Markdown file with hashes and integrity history, notes, every run with its exact
+  command and findings, AI answers (labelled as leads, with model/prompt provenance) and the
+  activity log. The ZIP option adds each run's rows as CSV, the raw tool output and a
+  `manifest.json` with the SHA-256 of every file. Ticking "include dumped files" encrypts the ZIP
+  (password `infected`, open with 7-Zip). Each export is recorded in the activity log with the
+  report's SHA-256.
 
 ### Activity (audit) log
 - **Status:** done
