@@ -46,7 +46,16 @@ def test_migrations_match_models(settings: Settings) -> None:
     engine = _engine(settings)
     db.migrate(engine)
     with engine.connect() as conn:
-        mc = MigrationContext.configure(conn, opts={"compare_type": True})
+        unmanaged = ("result_rows_fts",)  # see app/migrations/env.py
+        mc = MigrationContext.configure(
+            conn,
+            opts={
+                "compare_type": True,
+                "include_object": lambda o, name, type_, *a: (
+                    not (type_ == "table" and name and name.startswith(unmanaged))
+                ),
+            },
+        )
         diff = compare_metadata(mc, db.Base.metadata)
     assert diff == [], (
         "app/models.py and the migrations differ. Create a migration with "

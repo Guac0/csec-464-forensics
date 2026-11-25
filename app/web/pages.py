@@ -30,6 +30,7 @@ from app.services import audit as audit_svc
 from app.services import evidence as evidence_svc
 from app.services import integrity as integrity_svc
 from app.services import notes as notes_svc
+from app.services import results as results_svc
 from app.services import runs as runs_svc
 from app.tools import hooks as hooks_mod
 from app.tools import registry
@@ -329,41 +330,52 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
 def rows_context(
     session: Session,
     run: Run,
+    view: results_svc.RowView,
     offset: int,
     limit: int,
-    q: str | None,
-    highlight: int | None,
-    tag: str | None = None,
+    highlight: int | None = None,
 ) -> dict[str, Any]:
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     offset = max(0, offset)
-    q = (q or "").strip() or None
-    tag = (tag or "").strip()
-    rows, total = runs_svc.get_rows(
-        session,
-        run.id,
-        offset=offset,
-        limit=limit,
-        q=q,
-        annotated=tag == ANY_TAG,
-        tag=tag if tag and tag != ANY_TAG else None,
-    )
-    columns: dict[str, None] = {}
-    for r in rows:
-        for k in r.data or {}:
-            columns.setdefault(k, None)
+    view_error = None
+    try:
+        rows, total = runs_svc.get_rows(
+            session,
+            run.id,
+            offset=offset,
+            limit=limit,
+            q=view.q or None,
+            annotated=view.annotated,
+            tag=view.tag or None,
+            filters=view.filters,
+            sort=view.sort or None,
+            desc=view.desc,
+        )
+    except ValueError as exc:  # e.g. an unsupported column name in a filter
+        rows, total, view_error = [], 0, str(exc)
+    # Stable columns recorded at ingest; fall back to this page's keys for older runs.
+    columns = [c["name"] for c in run.columns or []]
+    if not columns:
+        seen: dict[str, None] = {}
+        for r in rows:
+            for k in r.data or {}:
+                seen.setdefault(k, None)
+        columns = list(seen)
     return {
         "run": run,
         "rows": rows,
         "total": total,
         "offset": offset,
         "limit": limit,
-        "q": q or "",
-        "tag": tag,
+        "view": view,
+        "view_error": view_error,
+        "q": view.q,
+        "tag": "*" if view.annotated and not view.tag else view.tag,
         "tags": runs_svc.annotation_tags(session, run.id),
         "row_artifacts": _row_artifacts(run),
-        "has_annotations": any(r.annotations for r in rows) or bool(tag),
-        "columns": list(columns),
+        "has_annotations": any(r.annotations for r in rows) or view.annotated or bool(view.tag),
+        "columns": columns,
+        "column_types": {c["name"]: c["type"] for c in run.columns or []},
         "highlight": highlight,
         "prev_offset": max(0, offset - limit) if offset > 0 else None,
         "next_offset": offset + limit if offset + limit < total else None,
@@ -379,15 +391,15 @@ def _row_artifacts(run: Run) -> dict[int, list[Any]]:
     return out
 
 
-def page_url(run_id: int, offset: int, q: str, limit: int = PAGE_SIZE, tag: str = "") -> str:
-    params: dict[str, Any] = {"offset": offset}
-    if q:
-        params["q"] = q
-    if tag:
-        params["tag"] = tag
-    if limit != PAGE_SIZE:
-        params["limit"] = limit
-    return f"/runs/{run_id}?{urlencode(params)}"
+def page_url(
+    run_id: int, view: results_svc.RowView, fragment: bool = False, **overrides: Any
+) -> str:
+    """URL of the run page (or the rows fragment) for a view, e.g. with another offset/sort."""
+    params = view.to_params(**overrides)
+    if params.get("limit") == PAGE_SIZE:
+        params.pop("limit")
+    base = f"/ui/runs/{run_id}/rows" if fragment else f"/runs/{run_id}"
+    return f"{base}?{urlencode(params)}" if params else base
 
 
 templates.env.globals.update(page_url=page_url)
@@ -430,12 +442,12 @@ def run_page(
     run_id: int,
     offset: int = 0,
     limit: int = PAGE_SIZE,
-    q: str | None = None,
     row: int | None = None,
-    tag: str | None = None,
 ) -> HTMLResponse:
+    """Query parameters: q, tag, sort, desc, f.<column> (see RowView), offset, limit, row."""
     run = get_run_or_404(session, run_id)
-    return _render_run_page(request, session, run, offset, limit, q, row, tag=tag)
+    view = results_svc.RowView.from_params(request.query_params)
+    return _render_run_page(request, session, run, offset, limit, row, view=view)
 
 
 def _render_run_page(
@@ -444,16 +456,15 @@ def _render_run_page(
     run: Run,
     offset: int = 0,
     limit: int = PAGE_SIZE,
-    q: str | None = None,
     row: int | None = None,
     summary: AIMessage | None = None,
-    tag: str | None = None,
     message: str | None = None,
+    view: results_svc.RowView | None = None,
 ) -> HTMLResponse:
+    view = view or results_svc.RowView()
     if row is not None:
-        # Open the (unfiltered) page containing the requested row.
-        q = None
-        tag = None
+        # Open the (unfiltered, unsorted) page containing the requested row.
+        view = results_svc.RowView()
         before = session.scalar(
             select(func.count(ResultRow.id)).where(
                 ResultRow.run_id == run.id, ResultRow.row_idx < row
@@ -461,7 +472,7 @@ def _render_run_page(
         )
         limit = max(1, min(limit, MAX_PAGE_SIZE))
         offset = ((before or 0) // limit) * limit
-    ctx = rows_context(session, run, offset, limit, q, row, tag)
+    ctx = rows_context(session, run, view, offset, limit, row)
     follow_ups = list(
         session.scalars(select(Run).where(Run.parent_run_id == run.id).order_by(Run.id))
     )
@@ -682,13 +693,28 @@ def ui_rows(
     run_id: int,
     offset: int = 0,
     limit: int = PAGE_SIZE,
-    q: str | None = None,
-    tag: str | None = None,
 ) -> Response:
+    """Query parameters as for the run page (q, tag, sort, desc, f.<column>, offset, limit)."""
     run = get_run_or_404(session, run_id)
+    view = results_svc.RowView.from_params(request.query_params)
     if not is_htmx(request):
-        return redirect(page_url(run_id, offset, (q or "").strip(), limit, (tag or "").strip()))
-    return render(request, "_rows.html", **rows_context(session, run, offset, limit, q, None, tag))
+        return redirect(page_url(run_id, view, offset=offset or None, limit=limit))
+    return render(request, "_rows.html", **rows_context(session, run, view, offset, limit))
+
+
+@router.get("/ui/runs/{run_id}/export")
+def ui_export(
+    request: Request, run_id: int, session: SessionDep, choice: str = "csv:view"
+) -> Response:
+    """Export dialog target: choice = "<csv|jsonl>:<view|all>" or "raw"."""
+    from app.api.runs import export_response
+
+    run = get_run_or_404(session, run_id)
+    fmt, _, scope = choice.partition(":")
+    if fmt not in ("csv", "jsonl", "raw"):
+        raise HTTPException(422, "unknown export format")
+    params = request.query_params if scope == "view" else {}
+    return export_response(session, run, params, fmt)
 
 
 @router.post("/ui/runs/{run_id}/hooks/rerun", dependencies=[Depends(same_origin_post)])

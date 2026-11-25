@@ -6,7 +6,17 @@ import enum
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -88,6 +98,13 @@ class Run(Base):
     integrity_warning: Mapped[str | None] = mapped_column(Text, default=None)
     # What a RUNNING run is doing: "hashing" | "verifying" | "running" | "post-processing".
     phase: Mapped[str | None] = mapped_column(String, default=None)
+    # Output columns in first-seen order with an inferred type, computed at ingest:
+    # [{"name": "PID", "type": "int"}, ...]; type is int|float|bool|str|json|null|mixed.
+    columns: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
+    # True when this run's rows are in the full-text search index (FT_SEARCH_INDEX).
+    search_indexed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

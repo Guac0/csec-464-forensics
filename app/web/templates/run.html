@@ -133,24 +133,29 @@
 </section>
 {% endif %}
 
-<section class="panel">
-  <div class="panel-head">
-    <h2>Results</h2>
-    <form class="filter" method="get" action="/runs/{{ run.id }}"
-          hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML">
-      <input type="search" name="q" value="{{ q }}" placeholder="Filter rows…" hx-include="closest form"
-             hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML"
-             hx-trigger="input changed delay:400ms, search">
-      {% if tags %}
-      <select name="tag" hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML" hx-include="closest form" title="Filter by hook annotation">
-        <option value="">All rows</option>
-        <option value="*"{% if tag == "*" %} selected{% endif %}>Any annotation</option>
-        {% for t, n in tags %}<option value="{{ t }}"{% if tag == t %} selected{% endif %}>{{ t }} ({{ n }})</option>{% endfor %}
-      </select>
-      {% endif %}
-      <button type="submit" class="small">Filter</button>
-    </form>
-  </div>
-  {% include "_rows.html" %}
+<section class="panel" id="results">
+  {# One form holds the search box, tag filter and (inside #rows) the per-column filters and
+     sort state, so every control sends the whole current view. #}
+  <form id="view-form" method="get" action="/runs/{{ run.id }}"
+        hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML" hx-push-url="true"
+        hx-trigger="submit, change from:.view-control, input changed delay:400ms from:#view-q, search from:#view-q">
+    <div class="panel-head">
+      <h2>Results</h2>
+      <div class="filter">
+        <input type="search" id="view-q" name="q" value="{{ q }}" placeholder="Search all columns…">
+        {% if tags %}
+        <select name="tag" class="view-control" title="Filter by hook annotation">
+          <option value="">All rows</option>
+          <option value="*"{% if tag == "*" %} selected{% endif %}>Any annotation</option>
+          {% for t, n in tags %}<option value="{{ t }}"{% if tag == t %} selected{% endif %}>{{ t }} ({{ n }})</option>{% endfor %}
+        </select>
+        {% endif %}
+        <button type="submit" class="small">Filter</button>
+        <button type="button" class="small" onclick="document.getElementById('export-dialog').showModal()">Export…</button>
+      </div>
+    </div>
+    {% include "_rows.html" %}
+  </form>
+  {% include "_export_dialog.html" %}
 </section>
 {% endblock %}

@@ -1,0 +1,20 @@
+<dialog id="export-dialog" class="export-dialog">
+  {# Plain GET form: the browser downloads the file. The current view (search, tag, column
+     filters, sort) is read from the results form when the dialog is submitted. #}
+  <form method="get" action="/ui/runs/{{ run.id }}/export"
+        onsubmit="for (const el of document.getElementById('view-form').elements) { if (el.name && el.value && !el.disabled) { const i = document.createElement('input'); i.type = 'hidden'; i.name = el.name; i.value = el.value; i.className = 'copied-view'; this.appendChild(i); } } setTimeout(() => { this.querySelectorAll('.copied-view').forEach(e => e.remove()); this.closest('dialog').close(); }, 0);">
+    <h3>Export run {{ run.id }}</h3>
+    <fieldset>
+      <label><input type="radio" name="choice" value="csv:view" checked> CSV, current view <span class="muted small-text">(search, filters and sort as shown; opens in Excel / Timeline Explorer)</span></label>
+      <label><input type="radio" name="choice" value="csv:all"> CSV, all {{ run.row_count }} rows</label>
+      <label><input type="radio" name="choice" value="jsonl:view"> JSON Lines, current view <span class="muted small-text">(keeps types and nesting)</span></label>
+      <label><input type="radio" name="choice" value="jsonl:all"> JSON Lines, all rows</label>
+      <label><input type="radio" name="choice" value="raw"{% if not run.stdout_path %} disabled{% endif %}> Raw tool output <span class="muted small-text">(volatility's original output file; SHA-256 checked)</span></label>
+    </fieldset>
+    <p class="muted small-text">Exports are recorded in the activity log. In CSV, cells starting with = + - @ get a leading apostrophe so spreadsheets don't run them as formulas.</p>
+    <div class="dialog-buttons">
+      <button type="submit">Download</button>
+      <button type="button" class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>

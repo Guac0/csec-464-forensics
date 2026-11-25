@@ -21,6 +21,14 @@ from app.db import Base
 config = context.config
 target_metadata = Base.metadata
 
+# Tables managed by raw SQL in migrations, invisible to the ORM (autogenerate must ignore them):
+# the FTS5 search index and the shadow tables SQLite creates for it.
+UNMANAGED_TABLE_PREFIXES = ("result_rows_fts",)
+
+
+def include_object(obj, name, type_, reflected, compare_to) -> bool:  # noqa: ANN001
+    return not (type_ == "table" and name and name.startswith(UNMANAGED_TABLE_PREFIXES))
+
 
 def _configure(connection) -> None:  # noqa: ANN001
     context.configure(
@@ -28,6 +36,7 @@ def _configure(connection) -> None:  # noqa: ANN001
         target_metadata=target_metadata,
         render_as_batch=True,
         compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
