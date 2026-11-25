@@ -149,6 +149,12 @@ Team workflow, branch rules and guidance for AI coding assistants:
   validated one-click query suggestions.
 - _TODO: describe the analysis approach, what context is sent, and known limitations._
 
+### AI evaluation (developers)
+- `python -m evals.run` replays fixed questions against recorded tool output and scores the AI's
+  answers (valid citations, expected rows cited, required/forbidden terms, valid suggestions,
+  optional AI-judge grade), compared with a committed baseline. See
+  [evals/README.md](evals/README.md).
+
 ### Notes and export
 - **Status:** notes done (with full version history), export TODO
 - Every note edit is kept; "history" on a note shows all versions, even after deletion.

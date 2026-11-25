@@ -72,4 +72,5 @@ vol-output/
 Thumbs.db
 desktop.ini
 
-Claude outputs/
+# AI evaluation reports (baselines in evals/baselines/ ARE committed)
+evals/reports/

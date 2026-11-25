@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.ai.citations import validate_citations
 from app.ai.client import AIClient, AIError
 from app.ai.context import NotFoundError, build_context
-from app.ai.prompts import SUMMARIZE_RUN_QUESTION, build_system_prompt
+from app.ai.prompts import PROMPT_VERSION, SUMMARIZE_RUN_QUESTION, build_system_prompt
 from app.ai.suggestions import parse_suggestions, strip_suggestions_block, validate_suggestions
 from app.config import get_settings
 from app.models import AIMessage, Evidence, Run
@@ -105,6 +105,7 @@ def _run_pipeline(
             "context_refs": context_refs,
             "model": params.get("model"),
             "provider_base_url": client.base_url,
+            "prompt_version": PROMPT_VERSION,
             "request_sha256": _sha256_json(messages),
         },
     )
@@ -115,7 +116,8 @@ def _run_pipeline(
         "role": "assistant",
         "model_requested": str(params["model"]),
         "provider_base_url": client.base_url,
-        "params": params,
+        # What was sent to the provider, plus the prompt version (not sent; for provenance).
+        "params": {**params, "prompt_version": PROMPT_VERSION},
         "request_messages": messages,
         "context_refs": context_refs,
     }
