@@ -23,6 +23,7 @@ class NoteOut(BaseModel):
 
     id: int
     evidence_id: int | None
+    case_id: int | None = None
     body: str
     created_at: datetime
     updated_at: datetime
@@ -30,7 +31,9 @@ class NoteOut(BaseModel):
 
 class NoteCreate(BaseModel):
     body: str
+    # Exactly one of these.
     evidence_id: int | None = None
+    case_id: int | None = None
 
 
 class NoteUpdate(BaseModel):
@@ -44,14 +47,16 @@ def _http_error(exc: Exception) -> HTTPException:
 
 
 @router.get("", response_model=list[NoteOut])
-def list_notes(session: SessionDep, evidence_id: int | None = None) -> list[Note]:
-    return notes_service.list_notes(session, evidence_id)
+def list_notes(
+    session: SessionDep, evidence_id: int | None = None, case_id: int | None = None
+) -> list[Note]:
+    return notes_service.list_notes(session, evidence_id, case_id)
 
 
 @router.post("", response_model=NoteOut, status_code=201)
 def create_note(body: NoteCreate, session: SessionDep) -> Note:
     try:
-        return notes_service.create_note(session, body.body, body.evidence_id)
+        return notes_service.create_note(session, body.body, body.evidence_id, body.case_id)
     except (LookupError, ValueError) as exc:
         raise _http_error(exc) from exc
 
@@ -90,6 +95,7 @@ class NoteVersionOut(BaseModel):
     action: str
     body: str
     evidence_id: int | None
+    case_id: int | None = None
     actor: str
     created_at: datetime
 

@@ -186,12 +186,15 @@ class ResultRow(Base):
 
 
 class Note(Base):
-    """Free-form analyst notes. evidence_id None = global/investigation-level note."""
+    """Free-form analyst notes, attached to exactly one evidence item OR one case."""
 
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     evidence_id: Mapped[int | None] = mapped_column(ForeignKey("evidence.id"), default=None)
+    case_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cases.id", name="fk_notes_case_id"), default=None, index=True
+    )
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -235,6 +238,7 @@ class NoteVersion(Base):
     action: Mapped[str] = mapped_column(String)  # "create" | "edit" | "delete"
     body: Mapped[str] = mapped_column(Text)  # text after the action (last text for "delete")
     evidence_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    case_id: Mapped[int | None] = mapped_column(Integer, default=None)
     actor: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -322,3 +326,77 @@ class DerivedArtifact(Base):
     # Result row that names this file (e.g. pslist's "File output" column), if any.
     source_row_idx: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Case(Base):
+    """A group of evidence items investigated together (e.g. before/after snapshots of one
+    machine, or several machines hit by the same actor). Membership is the only link between
+    images: things are shared between images only by explicitly sharing them to a case."""
+
+    __tablename__ = "cases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    members: Mapped[list[CaseEvidence]] = relationship(
+        back_populates="case", cascade="all, delete-orphan", order_by="CaseEvidence.added_at"
+    )
+
+
+class CaseEvidence(Base):
+    """An evidence item in a case. An image can be in several cases."""
+
+    __tablename__ = "case_evidence"
+
+    case_id: Mapped[int] = mapped_column(
+        ForeignKey("cases.id", ondelete="CASCADE"), primary_key=True
+    )
+    evidence_id: Mapped[int] = mapped_column(
+        ForeignKey("evidence.id"), primary_key=True, index=True
+    )
+    # Optional role of the image in this case, e.g. "before", "after", "laptop-2".
+    label: Mapped[str] = mapped_column(String, default="")
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    case: Mapped[Case] = relationship(back_populates="members")
+    evidence: Mapped[Evidence] = relationship()
+
+
+class SharedKind(enum.StrEnum):
+    ROW = "row"  # a result row (run_id, row_idx)
+    FINDING = "finding"  # a hook finding on a run (run_id, finding title + hook)
+    NOTE = "note"  # an evidence note (note_id)
+    AI_ANSWER = "ai_answer"  # an AI answer (ai_message_id), shared as an AI lead
+
+
+class SharedItem(Base):
+    """Something from one image deliberately shared with the other images of a case.
+
+    It is a pointer: the UI and reports show the source's LATEST state (app/services/sharing.py),
+    plus whether it changed since it was shared (``source_sha256``) or no longer exists. It is
+    never copied into the other images' runs, rows, hooks or AI context.
+    """
+
+    __tablename__ = "shared_items"
+    __table_args__ = (UniqueConstraint("case_id", "kind", "source_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[SharedKind] = mapped_column(Enum(SharedKind))
+    # The image it came from (must be a member of the case when shared).
+    source_evidence_id: Mapped[int] = mapped_column(ForeignKey("evidence.id"), index=True)
+    # Stable identity of the source within its kind, e.g. "R12:34", "F12:hook/title", "N7", "A9".
+    source_key: Mapped[str] = mapped_column(String)
+    run_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    row_idx: Mapped[int | None] = mapped_column(Integer, default=None)
+    note_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    ai_message_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Short description of the source when shared (shown if the source is gone).
+    title: Mapped[str] = mapped_column(Text, default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    # SHA-256 of the source's content when shared, to flag "changed since shared".
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    shared_by: Mapped[str] = mapped_column(String, default="")
+    shared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -6,7 +6,8 @@
 {% else %}
 {% set ev_id = msg.evidence_id or evidence_id %}
 <div class="ai-message" id="ai-msg-{{ msg.id }}">
-  <div class="ai-label">AI-generated lead — not evidence <span class="muted">{{ msg.created_at | dt }}</span></div>
+  <div class="ai-label">AI-generated lead — not evidence <span class="muted">{{ msg.created_at | dt }}</span>
+    {% if msg.content and not msg.error and ev_id %}{% set sc = share_ctx(ev_id, active_case_id) %}{% set share_key = "A" ~ msg.id %}{% set share_attrs = {"kind": "ai_answer", "ai-message-id": msg.id, "what": "AI answer " ~ msg.id ~ " (shared as an AI lead, not evidence)"} %}{% include "_share_button.html" %}{% endif %}</div>
   {% if msg.error %}<p class="flash error">AI error: {{ msg.error }}</p>{% endif %}
   {% if msg.content %}<div class="ai-content">{{ msg.content | ai_content(msg.citations) }}</div>{% endif %}
 

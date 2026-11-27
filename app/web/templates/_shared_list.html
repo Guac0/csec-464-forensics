@@ -1,0 +1,29 @@
+{# `items`: list of sharing.Resolved; `case_labels`: {evidence_id: label}; `unshare_next`: URL. #}
+{% if items %}
+<ul class="shared-list">
+  {% for r in items %}
+  {% set i = r.item %}
+  <li class="shared-item shared-{{ r.status }}" id="shared-{{ i.id }}">
+    <div class="shared-head">
+      <span class="badge {{ 'ai-badge' if i.kind.value == 'ai_answer' else '' }}">{{ r.kind_label }}</span>
+      {% if r.link %}<a href="{{ r.link }}">{{ i.title }}</a>{% else %}{{ i.title }}{% endif %}
+      {% if r.status == "changed" %}<span class="badge sev-medium" title="the source changed after it was shared">changed since shared</span>{% endif %}
+      {% if r.status == "gone" %}<span class="badge status-deleted">source gone</span>{% endif %}
+    </div>
+    <div class="small-text muted">from <a href="/evidence/{{ i.source_evidence_id }}?case={{ i.case_id }}" class="mono">{{ r.source.rel_path if r.source else i.source_evidence_id }}</a>{% if case_labels and case_labels.get(i.source_evidence_id) %} ({{ case_labels[i.source_evidence_id] }}){% endif %}
+      · shared {{ i.shared_at | dt }} by {{ i.shared_by }}</div>
+    {% if i.comment %}<div class="shared-comment prewrap">“{{ i.comment }}”</div>{% endif %}
+    {% if r.status == "gone" %}<div class="small-text error-text">{{ r.status_text }}</div>
+    {% elif r.text %}<div class="shared-text prewrap{{ ' ai-content' if i.kind.value == 'ai_answer' else '' }}">{{ r.text }}</div>{% endif %}
+    {% if unshare_next is defined %}
+    <form class="inline" method="post" action="/ui/shared/{{ i.id }}/remove">
+      <input type="hidden" name="next" value="{{ unshare_next }}">
+      <button type="submit" class="small secondary">Un-share</button>
+    </form>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">{{ empty_text or "Nothing shared yet." }}</p>
+{% endif %}

@@ -72,6 +72,15 @@ def install_fake_runner(monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
     return runner
 
 
+def _case_id(session: Session) -> int:
+    from app.models import Case
+
+    case = Case(name="Seed case")
+    session.add(case)
+    session.flush()
+    return case.id
+
+
 def seed(session: Session, n_rows: int = 3) -> tuple[Evidence, Run]:
     """One evidence item with one succeeded pslist run (n_rows rows), one failed run, notes."""
     ev = Evidence(
@@ -97,7 +106,7 @@ def seed(session: Session, n_rows: int = 3) -> tuple[Evidence, Run]:
     session.add_all(
         [
             Note(evidence_id=ev.id, body="evidence note"),
-            Note(evidence_id=None, body="global note"),
+            Note(evidence_id=None, case_id=_case_id(session), body="case note"),
         ]
     )
     session.commit()

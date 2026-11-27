@@ -3,7 +3,7 @@
   {% if message %}<p class="flash">{{ message }}</p>{% endif %}
   {% if evidence %}
   <table class="data">
-    <thead><tr><th>Image</th><th>Size</th><th>Integrity</th><th>SHA-256</th><th>OS info</th><th>Runs</th></tr></thead>
+    <thead><tr><th>Image</th><th>Size</th><th>Integrity</th><th>SHA-256</th><th>OS info</th><th>Runs</th><th>Cases</th></tr></thead>
     <tbody>
     {% for ev in evidence %}
       <tr>
@@ -22,6 +22,7 @@
         </td>
         <td>{{ ev.os_info | os_info }}</td>
         <td class="num">{{ run_counts.get(ev.id, 0) }}</td>
+        <td>{% for c, label in (evidence_cases or {}).get(ev.id, []) %}<a class="badge case-chip" href="/evidence/{{ ev.id }}?case={{ c.id }}" title="open in case {{ c.name }}">{{ c.name }}{% if label %}: {{ label }}{% endif %}</a> {% endfor %}</td>
       </tr>
     {% endfor %}
     </tbody>

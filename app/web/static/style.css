@@ -68,7 +68,7 @@ table.data th { background: #eef1f5; position: sticky; top: 0; }
 table.results td { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 .table-wrap { overflow: auto; max-height: 75vh; }
 tr.highlight td, tr:target td { background: var(--hl); }
-.cite-key { white-space: nowrap; }
+.cite-key, table.results td.cite-key { white-space: nowrap; }
 .tree { color: var(--muted); }
 .hash { word-break: break-all; }
 
@@ -184,3 +184,20 @@ table.kv td { padding: .1rem 0; word-break: break-all; }
 #test-volatility, #test-ai { margin-bottom: .8rem; }
 .badge.status-deleted { background: #e4e7ec; color: #475467; text-decoration: line-through; }
 a.cite-deleted { text-decoration: line-through; color: #667085; }
+
+/* Cases and sharing */
+.badge.case-chip { background: #e0eaff; color: #2d31a6; font-weight: 500; text-decoration: none; }
+.badge.case-chip.active { background: #2d31a6; color: #fff; }
+.case-bar { margin: .3rem 0 0; }
+.shared-list { list-style: none; padding: 0; margin: .3rem 0; }
+.shared-item { border-left: 3px solid #a4bcfd; padding: .35rem .6rem; margin-bottom: .5rem; background: #f8f9fc; }
+.shared-item.shared-changed { border-left-color: #f79009; }
+.shared-item.shared-gone { border-left-color: #98a2b3; opacity: .8; }
+.shared-head { display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+.shared-text { font-size: 13px; margin-top: .2rem; max-height: 10em; overflow: auto; }
+.shared-comment { font-style: italic; font-size: 13px; }
+.badge.ai-badge { background: #fef0c7; color: #93370d; }
+button.share-btn, button.shared-badge { padding: 0 .4rem; font-size: 11px; margin-left: .3rem; }
+button.shared-badge { background: #d1fadf; color: #05603a; }
+form.stack { display: flex; flex-direction: column; gap: .4rem; max-width: 40rem; }
+.add-member { margin-top: .6rem; display: flex; gap: .4rem; flex-wrap: wrap; }

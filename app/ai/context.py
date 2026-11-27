@@ -10,7 +10,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.citations import parse_key
@@ -174,7 +174,9 @@ def build_context(
     notes = (
         session.execute(
             select(Note)
-            .where(or_(Note.evidence_id == evidence_id, Note.evidence_id.is_(None)))
+            # Only this image's notes: case notes span several images and are not mixed into
+            # one image's AI context.
+            .where(Note.evidence_id == evidence_id)
             .order_by(Note.created_at, Note.id)
         )
         .scalars()

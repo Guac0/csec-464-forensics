@@ -12,7 +12,7 @@ project wraps it in a local web app so an analyst can:
 
 - pick a RAM image and run volatility plugins from a guided form instead of the CLI,
 - browse, filter and keep every result, with the exact command, tool version and hashes recorded,
-- keep investigation notes next to the evidence,
+- keep notes next to the evidence, and group related images into cases,
 - ask an AI assistant questions about the results, where every claim cites the specific result
   rows it relies on and the full prompt/model/parameters are recorded,
 - run the follow-up queries the AI suggests with one click, after they pass the same argument
@@ -155,10 +155,33 @@ Team workflow, branch rules and guidance for AI coding assistants:
   optional AI-judge grade), compared with a committed baseline. See
   [evals/README.md](evals/README.md).
 
+### Cases (several images)
+- **Status:** cases and sharing done; indicator matching and comparison view next
+- A **case** groups images investigated together, e.g. before/after snapshots of one machine,
+  or several machines hit by the same actor. Create one on the home page and add images with an
+  optional label ("before", "after", "laptop-2"). An image can be in several cases; cases are
+  optional and images outside any case work as before.
+- Images in a case stay **separate**: each keeps its own runs, rows, notes, hooks and AI
+  history. Open an image *from its case* (case chips on the home page, or the case page) to work
+  in that case: the breadcrumb shows the case, and a **Shared in case** panel lists what the
+  other images shared.
+- **Share** (on a result row, hook finding, image note or AI answer) points the other images of
+  the active case to that item, with an optional comment. Shared items are pointers, shown as
+  their source is *now* ("changed since shared" / "source gone" when it was edited or deleted),
+  always naming the image they came from. AI answers are shared as labelled AI leads. Nothing
+  shared is ever added to another image's runs, notes, hook input or AI context. Click
+  "shared ✕" to un-share; removing an image from a case un-shares what it shared there.
+- Each case has its own **case notes** (they replace the old investigation-wide notes; existing
+  ones were moved into a "General" case containing every image).
+- Exports: **Export case…** gives a case report (images and labels, case notes, everything
+  shared, then each image's section). A single image's report gets a separate, labelled
+  "Leads from linked evidence" section listing what other images in its cases shared.
+
 ### Notes and export
 - **Status:** done
-- Every note edit is kept; "history" on a note shows all versions, even after deletion.
-- **Export…** on an evidence page (or **Export investigation…** on the home page) downloads a case
+- Notes belong to one image or one case. Every note edit is kept; "history" on a note shows all
+  versions, even after deletion.
+- **Export…** on an evidence page (or **Export investigation…** on the home page) downloads a
   report: a Markdown file with hashes and integrity history, notes, every run with its exact
   command and findings, AI answers (labelled as leads, with model/prompt provenance) and the
   activity log. The ZIP option adds each run's rows as CSV, the raw tool output and a

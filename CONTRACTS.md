@@ -178,7 +178,24 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `artifact_zip_password` when dumped files are included), `record_export(...)` (audit
   `case.export`, KEY_READ, includes the report SHA-256).
 - `app/api/export.py`: `GET /api/export?evidence_id=&format=md|zip&include_dumped=` ; UI `/ui/export`.
-- `evidence_id=None` exports the whole investigation (all evidence + global notes).
+- `evidence_id=None` exports the whole investigation (all evidence + every case section);
+  `case_id=` exports one case (`build_report/build_bundle(..., case_id=)`). Per-image reports add
+  a labelled "Leads from linked evidence" section when the image is in a case.
+
+### Cases and sharing
+- Models `Case`, `CaseEvidence` (case_id, evidence_id, label; many-to-many), `SharedItem`
+  (case_id, kind row|finding|note|ai_answer, source_evidence_id, source_key "R12:3"/"F12:hook/
+  title"/"N7"/"A9", comment, source_sha256 at share time). `Note.case_id` (a note has exactly one
+  of evidence_id / case_id), `NoteVersion.case_id`. Migration `0009_cases` moves global notes
+  into a "General" case.
+- `app/services/cases.py`: create/update/delete (empty only)/list, add_evidence, set_label,
+  remove_evidence (un-shares its items), cases_for_evidence, member_evidence, labels.
+- `app/services/sharing.py`: `share(session, case_id, kind, ...)`, `unshare`, `list_items`,
+  `resolve(item) -> Resolved` (latest state: ok | changed | gone), `resolved_for_case`,
+  `shared_keys`. Shared items are never part of AI context, hooks or another image's data.
+- API `/api/cases` (CRUD, `/{id}/evidence`, `/{id}/shared`); notes API takes `case_id`.
+- UI: `/cases/{id}`; image and run pages take `?case=<id>` (active case; HTMX fragments read it
+  from HX-Current-URL via `pages.request_case_id`); `/ui/share`, `/ui/shared/{id}/remove`.
 
 ### Post-run hooks
 - `app/tools/hooks.py` (engine, frozen interface): `@post_run(*plugins, tool, name, version)`,

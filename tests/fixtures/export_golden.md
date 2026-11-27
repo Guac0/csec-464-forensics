@@ -12,11 +12,12 @@
 | Tool versions | 2\.28\.2 |
 | AI prompt version (current) | `placeholder-1` |
 | Integrity mode | `strict` |
-| Audit log | verified, 11 events, head #11 `<HEAD>` |
+| Audit log | verified, 16 events, head #16 `<HEAD>` |
 
 ## Contents
 
 - Evidence 2: sample\.raw
+- Leads from linked evidence
 - Activity log
 
 ## Evidence 2: sample\.raw
@@ -114,6 +115,26 @@ PID 666 [R1:1] and [R1:99]. <script>alert(1)</script> | `tick` ``` *bold* [link]
 | Prompt SHA-256 | `<PROMPT-SHA256>` |
 | Usage | `{"total_tokens": 42}` |
 
+## Leads from linked evidence
+
+Shared by an analyst from other images in the cases sample\.raw belongs to. They are NOT findings on this image: each points to its source image.
+
+### Case 1: Intrusion (this image: before)
+
+#### Note: Note 2
+
+|  |  |
+|---|---|
+| From | other\.raw (after \<script\>alert\(1\)\</script\> \| \`tick\` \`\`\` \*bold\* \[link\]\(http://x\) \# head) |
+| Source | `N2` |
+| Shared | <TIME> by local |
+| State | current |
+| Comment | see \<script\>alert\(1\)\</script\> \| \`tick\` \`\`\` \*bold\* \[link\]\(http://x\) \# head |
+
+```text
+Note on the other image
+```
+
 ## Activity log
 
 Changes and key reads for this evidence; page and API requests are not included. Event numbers are the audit log's sequence numbers (gaps here are other evidence or requests, not deletions).
@@ -125,8 +146,10 @@ Changes and key reads for this evidence; page and API requests are not included.
 | 5 | <TIME> | system | change | `evidence.hash` | Hashed sample\.raw \(initial\): ok |
 | 6 | <TIME> | system | change | `evidence.expected_hashes` | Expected hashes for sample\.raw set; status mismatch |
 | 7 | <TIME> | system | change | `note.create` | Note 1 created \(version 1\) |
-| 10 | <TIME> | system | change | `ai.ask.request` | AI question asked |
-| 11 | <TIME> | system | change | `ai.ask.response` | AI responded \(test\-model\) |
+| 10 | <TIME> | system | change | `case.add_evidence` | Added sample\.raw to case Intrusion |
+| 14 | <TIME> | system | change | `ai.ask.request` | AI question asked |
+| 15 | <TIME> | system | change | `ai.ask.response` | AI responded \(test\-model\) |
+| 16 | <TIME> | system | change | `share.create` | Shared result row R1:1 to case Intrusion |
 
 ## About this report
 

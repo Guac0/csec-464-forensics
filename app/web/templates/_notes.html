@@ -1,10 +1,12 @@
 <div id="notes" class="notes">
+  {% set sc = share_ctx(evidence_id, active_case_id) if evidence_id else none %}
   {% for note in notes %}
   <div class="note" id="note-{{ note.id }}">
     <div class="note-body">{{ note.body }}</div>
     <div class="note-meta muted">
       {{ note.created_at | dt }}{% if note.updated_at and note.updated_at != note.created_at %} · edited {{ note.updated_at | dt }}{% endif %}
       · <a href="/notes/{{ note.id }}/history">history</a>
+      {% if sc %}{% set share_key = "N" ~ note.id %}{% set share_attrs = {"kind": "note", "note-id": note.id, "what": "Note " ~ note.id} %}{% include "_share_button.html" %}{% endif %}
     </div>
     <details class="note-edit">
       <summary>Edit</summary>
@@ -26,6 +28,7 @@
   <form class="note-add" method="post" action="/ui/notes"
         hx-post="/ui/notes" hx-target="#notes" hx-swap="outerHTML">
     {% if evidence_id %}<input type="hidden" name="evidence_id" value="{{ evidence_id }}">{% endif %}
+    {% if note_case_id and not evidence_id %}<input type="hidden" name="case_id" value="{{ note_case_id }}">{% endif %}
     <textarea name="body" rows="3" placeholder="Add a note…" required></textarea>
     <button type="submit">Add note</button>
   </form>

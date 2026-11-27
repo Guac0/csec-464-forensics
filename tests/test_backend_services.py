@@ -189,11 +189,19 @@ def test_get_rows_paging_and_filter(session: Session, evidence: Evidence) -> Non
 
 
 def test_notes_crud(session: Session, evidence: Evidence) -> None:
-    g = notes_service.create_note(session, "global note")
+    from app.services import cases as cases_service
+
+    case = cases_service.create_case(session, "c")
+    g = notes_service.create_note(session, "case note", case_id=case.id)
     n = notes_service.create_note(session, "  evidence note ", evidence_id=evidence.id)
     assert n.body == "evidence note"
     assert [x.id for x in notes_service.list_notes(session)] == [g.id, n.id]
     assert [x.id for x in notes_service.list_notes(session, evidence.id)] == [n.id]
+    assert [x.id for x in notes_service.list_notes(session, case_id=case.id)] == [g.id]
+    with pytest.raises(ValueError, match="exactly one"):
+        notes_service.create_note(session, "nowhere")
+    with pytest.raises(ValueError, match="exactly one"):
+        notes_service.create_note(session, "both", evidence_id=evidence.id, case_id=case.id)
 
     before = n.updated_at
     time.sleep(0.01)

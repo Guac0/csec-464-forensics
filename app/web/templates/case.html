@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Case {{ case.name }}{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a> / Case <strong>{{ case.name }}</strong>{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Case: {{ case.name }}</h2>
+    <div class="actions">
+      <button type="button" class="small secondary" onclick="document.getElementById('case-export-dialog').showModal()">Export case…</button>
+    </div>
+  </div>
+  {% set export_case = case %}{% include "_case_export_dialog.html" %}
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+  {% if case.description %}<p class="prewrap">{{ case.description }}</p>{% endif %}
+  <p class="muted small-text">Images in a case stay separate: each keeps its own runs, notes and AI history. Only what an analyst shares (below) is visible across them, always labelled with the image it came from.</p>
+  <details>
+    <summary class="small-text">Edit name / description, delete</summary>
+    <form method="post" action="/ui/cases/{{ case.id }}/edit" class="stack">
+      <label>Name <input name="name" value="{{ case.name }}" required></label>
+      <label>Description <textarea name="description" rows="2">{{ case.description }}</textarea></label>
+      <button type="submit" class="small">Save</button>
+    </form>
+    <form method="post" action="/ui/cases/{{ case.id }}/delete" class="inline">
+      <button type="submit" class="small danger" title="Only an empty case (no images, notes or shared items) can be deleted">Delete case</button>
+    </form>
+  </details>
+</section>
+
+<div class="columns">
+  <div class="col-main">
+    <section class="panel" id="images">
+      <h2>Images</h2>
+      {% if members %}
+      <table class="data">
+        <thead><tr><th>Image</th><th>Label in this case</th><th>Integrity</th><th></th></tr></thead>
+        <tbody>
+        {% for ev, label in members %}
+          <tr>
+            <td><a class="mono" href="/evidence/{{ ev.id }}?case={{ case.id }}">{{ ev.rel_path }}</a></td>
+            <td>
+              <form method="post" action="/ui/cases/{{ case.id }}/members/{{ ev.id }}/label" class="inline">
+                <input name="label" value="{{ label }}" placeholder="e.g. before, after, laptop-2" size="18">
+                <button type="submit" class="small secondary">Save</button>
+              </form>
+            </td>
+            <td>{% include "_integrity_badge.html" %}</td>
+            <td>
+              <form method="post" action="/ui/cases/{{ case.id }}/members/{{ ev.id }}/remove" class="inline"
+                    onsubmit="return confirm('Remove this image from the case? Items it shared in this case are un-shared. Its own data is not touched.')">
+                <button type="submit" class="small danger">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No images in this case yet.</p>
+      {% endif %}
+      {% if other_evidence %}
+      <form method="post" action="/ui/cases/{{ case.id }}/members" class="inline add-member">
+        <select name="evidence_id" required>
+          <option value="">— add an image —</option>
+          {% for ev in other_evidence %}<option value="{{ ev.id }}">{{ ev.rel_path }}</option>{% endfor %}
+        </select>
+        <input name="label" placeholder="label (optional)" size="16">
+        <button type="submit" class="small">Add to case</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel" id="shared">
+      <h2>Shared in this case ({{ shared | length }})</h2>
+      {% set items = shared %}{% set unshare_next = "/cases/" ~ case.id ~ "#shared" %}
+      {% set empty_text = "Nothing shared yet. Open an image in this case and use Share on a row, hook finding, note or AI answer." %}
+      {% include "_shared_list.html" %}
+    </section>
+  </div>
+  <div class="col-side">
+    <section class="panel" id="notes-section">
+      <h2>Case notes</h2>
+      {% include "_notes.html" %}
+    </section>
+  </div>
+</div>
+{% endblock %}

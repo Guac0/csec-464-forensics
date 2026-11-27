@@ -98,6 +98,10 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
       to both volumes could still rewrite both. Copy backups/anchors off-machine for stronger
       guarantees.
 
+- [ ] Multi-evidence, part 2: indicator watchlist with matching across a case's images, and a
+      before/after comparison view (needs key columns per plugin from the forensics team).
+- [ ] Moving global notes into the "General" case during migration 0009 is not itself an audit
+      event (the notes' own history is unchanged).
 - [ ] Case export: the report has no row data inline (it is in the ZIP's CSVs), skips page/API
       request events, note edit history and full AI prompts. Revisit if reviewers need them.
 - [ ] Case export ZIPs are built in a temp file; very large runs or dumped files make big
