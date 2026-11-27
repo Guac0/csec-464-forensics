@@ -26,6 +26,7 @@ import importlib.metadata
 import json
 import logging
 import re
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -194,6 +195,15 @@ def check_argspec(spec: ArgSpec) -> None:
         raise ArgValidationError(f"unknown arg type in plugin catalog: {spec.type!r}")
 
 
+def vol_command(executable: str) -> list[str]:
+    """The command that starts volatility: ``FT_VOL_EXECUTABLE``, except that a ``.py`` script
+    is run with the current Python interpreter. (Windows cannot execute scripts directly; this
+    is how tests run tests/fixtures/fake_vol.py, and works the same on Linux/macOS.)"""
+    if executable.lower().endswith(".py"):
+        return [sys.executable, executable]
+    return [executable]
+
+
 class VolatilityRunner(ToolRunner):
     name = "volatility3"
 
@@ -248,7 +258,7 @@ class VolatilityRunner(ToolRunner):
         cache_dir.mkdir(parents=True, exist_ok=True)  # vol requires it to exist
 
         argv = [
-            settings.vol_executable,
+            *vol_command(settings.vol_executable),
             "-q",
             "-r", "jsonl",
             "-s", str(settings.symbols_dir),

@@ -18,6 +18,7 @@ from app.services import evidence as evidence_service
 from app.services import notes as notes_service
 from app.services import runs as runs_service
 from app.tools.base import ArgValidationError, ToolRequest
+from tests.conftest import symlinks_supported
 from tests.test_backend_fakes import FakeRunner, install_fake_runner, make_fake_execute
 
 
@@ -38,13 +39,17 @@ def test_scan_finds_files_and_skips_hidden_and_escaping_links(
     (ev_dir / ".hidden").write_bytes(b"x")
     (ev_dir / ".dir").mkdir()
     (ev_dir / ".dir" / "c.raw").write_bytes(b"x")
-    outside = tmp_path / "outside.raw"
-    outside.write_bytes(b"secret")
-    os.symlink(outside, ev_dir / "escape.raw")
-    os.symlink(ev_dir / "sample.raw", ev_dir / "inside-link.raw")
+    expected = ["sample.raw", "sub/b.mem"]
+    # Symlinks need admin rights or Developer Mode on Windows: check them only where possible.
+    if symlinks_supported(tmp_path):
+        outside = tmp_path / "outside.raw"
+        outside.write_bytes(b"secret")
+        os.symlink(outside, ev_dir / "escape.raw")
+        os.symlink(ev_dir / "sample.raw", ev_dir / "inside-link.raw")
+        expected = ["inside-link.raw", *expected]
 
     found = evidence_service.scan_evidence(session)
-    assert sorted(e.rel_path for e in found) == ["inside-link.raw", "sample.raw", "sub/b.mem"]
+    assert sorted(e.rel_path for e in found) == expected
     sample = next(e for e in found if e.rel_path == "sample.raw")
     assert sample.size_bytes == 4096
 
