@@ -201,3 +201,8 @@ button.share-btn, button.shared-badge { padding: 0 .4rem; font-size: 11px; margi
 button.shared-badge { background: #d1fadf; color: #05603a; }
 form.stack { display: flex; flex-direction: column; gap: .4rem; max-width: 40rem; }
 .add-member { margin-top: .6rem; display: flex; gap: .4rem; flex-wrap: wrap; }
+.hit-list { list-style: none; padding: 0; margin: .3rem 0; }
+.hit-list li { padding: .2rem 0; border-bottom: 1px solid #eef0f3; }
+label.inline-check { display: flex; gap: .4rem; align-items: center; }
+dialog.export-dialog label.inline-check { display: flex; flex-direction: row; gap: .4rem; align-items: center; }
+dialog.export-dialog label.inline-check input { width: auto; margin: 0; }

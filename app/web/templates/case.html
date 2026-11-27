@@ -69,6 +69,55 @@
       {% endif %}
     </section>
 
+    <section class="panel" id="indicators">
+      <div class="panel-head">
+        <h2>Indicators ({{ indicators | length }})</h2>
+        <form method="post" action="/ui/cases/{{ case.id }}/indicators/check" class="inline"
+              hx-post="/ui/cases/{{ case.id }}/indicators/check" hx-target="#indicator-check" hx-swap="outerHTML">
+          <button type="submit" class="small" title="Re-check every run of every image in this case (can take a while on big runs)">Check all images</button>
+        </form>
+      </div>
+      <p class="muted small-text">The case's watchlist. Each image's own results are searched for these values; a hit always points to a row of that image. New runs are checked automatically; press "Check all images" after adding indicators or images.</p>
+      {% set job = check_job %}{% set case_id = case.id %}{% include "_indicator_check.html" %}
+      {% if unchecked and indicators %}<p class="flash warn small-text">{{ unchecked }} indicator(s) not yet checked against existing runs (added after those runs, or images were added since). Press "Check all images".</p>{% endif %}
+      {% if indicators %}
+      <table class="data small-text">
+        <thead><tr><th>Type</th><th>Indicator</th><th>Hits</th><th></th></tr></thead>
+        <tbody>
+        {% for ind in indicators %}
+          {% set counts = hit_counts.get(ind.id, {}) %}
+          <tr>
+            <td>{{ ind.type.value }}</td>
+            <td><span class="mono">{{ ind.value }}</span>
+              {% if ind.match_mode.value == "contains" %} <span class="badge">contains</span>{% endif %}
+              {% if ind.column %} <span class="badge" title="only in this column">{{ ind.column }}</span>{% endif %}
+              {% if ind.comment %}<div class="muted">{{ ind.comment }}</div>{% endif %}
+              {% if ind.source_key %}<div class="muted">from {{ ind.source_key }}</div>{% endif %}</td>
+            <td>{% for ev, label in members %}{% set n = counts.get(ev.id, 0) %}
+              <a class="badge {{ 'sev-high' if n else '' }}" href="/evidence/{{ ev.id }}?case={{ case.id }}#indicator-hits" title="{{ ev.rel_path }}">{{ label or ev.rel_path }}: {{ n }}</a>
+              {% endfor %}
+              {% if not ind.checked_at %}<div class="muted">existing runs not checked yet</div>{% endif %}</td>
+            <td><form method="post" action="/ui/indicators/{{ ind.id }}/remove" class="inline"><button type="submit" class="small danger">Remove</button></form></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <details{% if not indicators %} open{% endif %}>
+        <summary class="small-text">Add an indicator</summary>
+        <form method="post" action="/ui/indicators" class="add-member">
+          <input type="hidden" name="case_id" value="{{ case.id }}">
+          <select name="type">{% for t in indicator_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select>
+          <input name="value" required placeholder="e.g. updater.exe, 203.0.113.45, C:\Users\Public\x.dll" size="34">
+          <select name="match_mode"><option value="exact">exact</option><option value="contains">contains</option></select>
+          <input name="column" placeholder="only in column (optional)" size="18">
+          <input type="hidden" name="only_column" value="1">
+          <input name="comment" placeholder="comment (optional)" size="18">
+          <button type="submit" class="small">Add</button>
+        </form>
+      </details>
+    </section>
+
     <section class="panel" id="shared">
       <h2>Shared in this case ({{ shared | length }})</h2>
       {% set items = shared %}{% set unshare_next = "/cases/" ~ case.id ~ "#shared" %}

@@ -322,6 +322,7 @@ def _case_section(session: Session, case: Case) -> list[str]:
         out.append("No images.")
     out.append("")
     out += _notes_section_case(session, case.id)
+    out += _indicators_section(session, case.id, members)
     items = sharing.list_items(session, case.id)
     out += ["### Shared in this case", ""]
     if not items:
@@ -332,6 +333,58 @@ def _case_section(session: Session, case: Case) -> list[str]:
         "",
     ]
     return out + _shared_lines(session, items, labels(session, case.id))
+
+
+def _indicators_section(session: Session, case_id: int, members: list[Any]) -> list[str]:
+    from app.services import indicators
+
+    inds = indicators.list_indicators(session, case_id)
+    out = ["### Indicators", ""]
+    if not inds:
+        return [*out, "No indicators.", ""]
+    counts = indicators.hit_counts(session, case_id)
+    out += _table(
+        ["Type", "Indicator", "Match", "Hits per image", "Checked against all runs"],
+        [
+            [
+                esc(i.type.value),
+                code(i.value),
+                esc(i.match_mode.value + (f", column {i.column}" if i.column else "")),
+                esc(
+                    ", ".join(
+                        f"{label or ev.rel_path}: {counts.get(i.id, {}).get(ev.id, 0)}"
+                        for ev, label in members
+                    )
+                    or "—"
+                ),
+                _ts(i.checked_at) if i.checked_at else "no (new runs only)",
+            ]
+            for i in inds
+        ],
+    )
+    out.append("")
+    return out + _hit_lines(indicators.hits(session, case_id))
+
+
+def _hit_lines(hits: list[Any]) -> list[str]:
+    if not hits:
+        return ["No hits.", ""]
+    return [
+        *_table(
+            ["Indicator", "Image", "Row", "Column", "Value"],
+            [
+                [
+                    code(h.indicator.value),
+                    esc(h.evidence.rel_path),
+                    code(f"R{h.run.id}:{h.hit.row_idx}"),
+                    esc(h.hit.column),
+                    code(h.hit.cell),
+                ]
+                for h in hits
+            ],
+        ),
+        "",
+    ]
 
 
 def _notes_section_case(session: Session, case_id: int) -> list[str]:
@@ -359,10 +412,18 @@ def _leads_section(session: Session, ev: Evidence) -> list[str]:
         "They are NOT findings on this image: each points to its source image.",
         "",
     ]
+    from app.services import indicators
+
     for case, label in cases:
         items = sharing.list_items(session, case.id, exclude_evidence_id=ev.id)
         title = f"### Case {case.id}: {esc(case.name)}"
         out += [title + (f" (this image: {esc(label)})" if label else ""), ""]
+        if indicators.list_indicators(session, case.id):
+            out += [
+                "Rows of THIS image matching the case's indicator watchlist:",
+                "",
+                *_hit_lines(indicators.hits(session, case.id, evidence_id=ev.id)),
+            ]
         if not items:
             out += ["Nothing shared from other images.", ""]
             continue

@@ -98,8 +98,11 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
       to both volumes could still rewrite both. Copy backups/anchors off-machine for stronger
       guarantees.
 
-- [ ] Multi-evidence, part 2: indicator watchlist with matching across a case's images, and a
-      before/after comparison view (needs key columns per plugin from the forensics team).
+- [ ] Multi-evidence, part 2b: before/after comparison view (catalog `compare_keys` per plugin,
+      analyst can override).
+- [ ] Indicators: no regex mode, no import/export of watchlists (e.g. STIX/CSV), and "Check all
+      images" re-reads every row (no incremental index). Indicator types are generic; columns
+      per plugin (e.g. which column holds a remote IP) are not used yet.
 - [ ] Moving global notes into the "General" case during migration 0009 is not itself an audit
       event (the notes' own history is unchanged).
 - [ ] Case export: the report has no row data inline (it is in the ZIP's CSVs), skips page/API

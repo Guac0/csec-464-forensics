@@ -506,6 +506,24 @@ def share_ctx(evidence_id: int | None, case_id: int | None) -> dict[str, Any]:
 
 
 templates.env.globals.update(share_ctx=share_ctx)
+
+
+def ioc_rows(case_id: int | None, run_id: int) -> dict[int, list[str]]:
+    """{row_idx: [indicator, ...]} of the ACTIVE case's indicator hits on a run (other cases'
+    watchlists are not shown, to keep investigations apart)."""
+    if not case_id:
+        return {}
+    from app.db import SessionLocal
+    from app.services import indicators
+
+    try:
+        with SessionLocal() as s:
+            return indicators.row_hits(s, case_id, run_id)
+    except Exception:
+        return {}
+
+
+templates.env.globals.update(ioc_rows=ioc_rows)
 templates.env.globals.update(zip_password=lambda: get_settings().artifact_zip_password)
 
 
@@ -573,6 +591,7 @@ def case_context(session: Session, ev: Evidence, case_id: int | None) -> dict[st
         "case_warning": None,
         "shared_in_case": [],
         "shared_from_here": [],
+        "indicator_hits": [],
     }
     if case_id and active is None:
         ctx["case_warning"] = f"This image is not in case {case_id}; showing it without a case."
@@ -589,6 +608,9 @@ def case_context(session: Session, ev: Evidence, case_id: int | None) -> dict[st
             for i in sharing.list_items(session, case_id, only_evidence_id=ev.id)
         ]
         ctx["case_labels"] = cases_svc.labels(session, case_id)
+        from app.services import indicators
+
+        ctx["indicator_hits"] = indicators.hits(session, case_id, evidence_id=ev.id)
     return ctx
 
 

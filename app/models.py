@@ -400,3 +400,61 @@ class SharedItem(Base):
     source_sha256: Mapped[str] = mapped_column(String(64))
     shared_by: Mapped[str] = mapped_column(String, default="")
     shared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class IndicatorType(enum.StrEnum):
+    PROCESS = (
+        "process"  # process / executable name, e.g. updater.exe (also matches a path ending in it)
+    )
+    PATH = "path"  # file path (case-insensitive, / and \\ treated alike)
+    IP = "ip"  # IPv4 / IPv6 address
+    DOMAIN = "domain"  # host or domain name
+    HASH = "hash"  # MD5 / SHA-1 / SHA-256 (hex)
+    REGISTRY = "registry"  # registry key or value path
+    TEXT = "text"  # anything else (mutex, service name, user name...), case-insensitive
+
+
+class MatchMode(enum.StrEnum):
+    EXACT = "exact"  # whole cell equals the indicator (after normalising for its type)
+    CONTAINS = "contains"  # indicator appears anywhere in the cell (slower, more false positives)
+
+
+class Indicator(Base):
+    """An indicator on a case's watchlist, checked against the rows of the case's images."""
+
+    __tablename__ = "indicators"
+    __table_args__ = (UniqueConstraint("case_id", "type", "normalized", "match_mode", "column"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    type: Mapped[IndicatorType] = mapped_column(Enum(IndicatorType))
+    value: Mapped[str] = mapped_column(Text)  # as entered
+    normalized: Mapped[str] = mapped_column(Text)  # what is compared
+    match_mode: Mapped[MatchMode] = mapped_column(Enum(MatchMode), default=MatchMode.EXACT)
+    # Only look in this result column ("" = any column).
+    column: Mapped[str] = mapped_column(String, default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    # Where it was taken from, if made from a result row ("R12:3"), else "".
+    source_key: Mapped[str] = mapped_column(String, default="")
+    created_by: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Last time every run of the case's images was checked for it (None = only new runs so far).
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class IndicatorHit(Base):
+    """A result row (of one image's run) that matches an indicator."""
+
+    __tablename__ = "indicator_hits"
+    __table_args__ = (UniqueConstraint("indicator_id", "run_id", "row_idx", "column"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    indicator_id: Mapped[int] = mapped_column(
+        ForeignKey("indicators.id", ondelete="CASCADE"), index=True
+    )
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    evidence_id: Mapped[int] = mapped_column(Integer, index=True)
+    row_idx: Mapped[int] = mapped_column(Integer)
+    column: Mapped[str] = mapped_column(String)
+    cell: Mapped[str] = mapped_column(Text)  # the matching cell value (truncated)
+    found_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

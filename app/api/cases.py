@@ -199,3 +199,126 @@ def unshare(case_id: int, item_id: int, session: SessionDep) -> Response:
         raise HTTPException(404, "shared item not found in this case")
     sharing.unshare(session, item_id)
     return Response(status_code=204)
+
+
+# --------------------------------------------------------------------------------- indicators
+
+
+class IndicatorIn(BaseModel):
+    type: str
+    value: str
+    match_mode: str = "exact"
+    column: str = ""
+    comment: str = ""
+    source_key: str = ""
+
+
+def _indicator_out(i: Any, counts: dict[int, int] | None = None) -> dict[str, Any]:
+    return {
+        "id": i.id,
+        "case_id": i.case_id,
+        "type": i.type.value,
+        "value": i.value,
+        "normalized": i.normalized,
+        "match_mode": i.match_mode.value,
+        "column": i.column,
+        "comment": i.comment,
+        "source_key": i.source_key,
+        "created_by": i.created_by,
+        "created_at": i.created_at.isoformat(),
+        "checked_at": i.checked_at.isoformat() if i.checked_at else None,
+        "hits_by_evidence": counts or {},
+    }
+
+
+@router.get("/{case_id}/indicators")
+def list_indicators(case_id: int, session: SessionDep) -> dict[str, Any]:
+    """The case's watchlist with hit counts per image, and the state of any running check."""
+    from app.services import indicators
+
+    try:
+        cases_service.get_case(session, case_id)
+    except LookupError as exc:
+        raise _err(exc) from exc
+    counts = indicators.hit_counts(session, case_id)
+    return {
+        "indicators": [
+            _indicator_out(i, counts.get(i.id))
+            for i in indicators.list_indicators(session, case_id)
+        ],
+        "check": indicators.job_state(case_id),
+    }
+
+
+@router.post("/{case_id}/indicators", status_code=201)
+def add_indicator(case_id: int, body: IndicatorIn, session: SessionDep) -> dict[str, Any]:
+    """Add an indicator. New runs are checked automatically; to check existing runs, POST
+    /{case_id}/indicators/check."""
+    from app.services import indicators
+
+    try:
+        ind = indicators.add_indicator(
+            session,
+            case_id,
+            body.type,
+            body.value,
+            mode=body.match_mode,
+            column=body.column,
+            comment=body.comment,
+            source_key=body.source_key,
+        )
+    except LookupError as exc:
+        raise _err(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _indicator_out(ind)
+
+
+@router.delete("/{case_id}/indicators/{indicator_id}", status_code=204)
+def remove_indicator(case_id: int, indicator_id: int, session: SessionDep) -> Response:
+    from app.models import Indicator
+    from app.services import indicators
+
+    ind = session.get(Indicator, indicator_id)
+    if ind is None or ind.case_id != case_id:
+        raise HTTPException(404, "indicator not found in this case")
+    indicators.remove_indicator(session, indicator_id)
+    return Response(status_code=204)
+
+
+@router.post("/{case_id}/indicators/check", status_code=202)
+def check_indicators(case_id: int, session: SessionDep) -> dict[str, Any]:
+    """Re-check every run of the case's images against its indicators, in the background
+    (can take a while on big runs). Poll GET /{case_id}/indicators for progress."""
+    from app.services import indicators
+
+    try:
+        cases_service.get_case(session, case_id)
+    except LookupError as exc:
+        raise _err(exc) from exc
+    if not indicators.start_case_check(case_id):
+        raise HTTPException(409, "a check of this case is already running")
+    return {"started": True}
+
+
+@router.get("/{case_id}/indicators/hits")
+def indicator_hits(
+    case_id: int, session: SessionDep, evidence_id: int | None = None
+) -> list[dict[str, Any]]:
+    from app.services import indicators
+
+    return [
+        {
+            "indicator_id": h.indicator.id,
+            "indicator": h.indicator.value,
+            "type": h.indicator.type.value,
+            "evidence_id": h.evidence.id,
+            "rel_path": h.evidence.rel_path,
+            "run_id": h.run.id,
+            "plugin": h.run.plugin,
+            "row": f"R{h.run.id}:{h.hit.row_idx}",
+            "column": h.hit.column,
+            "cell": h.hit.cell,
+        }
+        for h in indicators.hits(session, case_id, evidence_id=evidence_id)
+    ]
