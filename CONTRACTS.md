@@ -80,6 +80,27 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `run_ai_test()`, `badge(session)`, `settings_summary()`. `app/api/system.py`:
   `GET /api/system/health`, `POST /api/system/health/{volatility,ai}`; UI `/system`.
 
+### Catalog check, stall watchdog, run deletion, backups
+- `ArgSpec.writes_files`, `PluginSpec.writes_files`, `PluginSpec.may_write_files`.
+  `app/tools/volatility/runner.py`: `catalog_problems(plugins) -> {name: [problem]}`;
+  `VolatilityRunner.plugins()` returns only valid entries, `.catalog_problems()` the rest
+  (`ToolRunner.catalog_problems()` defaults to `{}`).
+- Worker: one thread per run; `Worker.touch(run_id)` records progress (executor heartbeat, row
+  ingest, before each hook via `hooks.run_hooks(..., on_progress=)`); `_watchdog()` gives up on
+  runs idle for `FT_RUN_STALL_SECONDS` (audit `run.stalled` / `run.hooks_stalled`). `_finish`
+  only updates a run that is still RUNNING.
+- `Run.deleted_at`, `Run.delete_reason` (migration 0008). `app/services/run_deletion.py`:
+  `preview`, `delete_run(session, run_id, reason)`, `delete_runs(session, evidence_id, reason,
+  statuses)`, `cleanup_candidates`, `biggest_runs`. Audit `run.delete`. API
+  `GET /api/runs/{id}/delete-preview`, `POST /api/runs/{id}/delete`,
+  `POST /api/evidence/{id}/cleanup`; raw export of a deleted run is 410. Deleted runs are
+  excluded from AI context, hook `latest_run`, follow-up and auto-enumerate de-duplication.
+- `app/services/backup.py`: `create_backup(trigger)`, `list_backups`, `verify_backup`,
+  `restore_backup`, `prune`, `last_anchor`, `BackupScheduler`, `hold_app_lock`. CLI
+  `python -m app.backup`. Settings `FT_BACKUP_DIR`, `FT_BACKUP_INTERVAL_HOURS`,
+  `FT_BACKUP_KEEP`. API `GET/POST /api/system/backups`, `POST /api/system/backups/{name}/verify`,
+  `GET /api/system/biggest-runs`. Audit `backup.create|failed|prune|restore`.
+
 ### AI evaluation harness
 - `evals/` (dev tooling, not shipped in the image): `python -m evals.run` (CLI), `evals/cases/*.yaml`
   (cases), `evals/scoring.py` (pure scoring/aggregation/baseline comparison), `evals/judge.py`

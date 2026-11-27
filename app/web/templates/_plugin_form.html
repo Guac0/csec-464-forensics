@@ -2,6 +2,7 @@
 {% if selected_plugin %}
   {% set p = selected_plugin %}
   <p class="plugin-desc"><span class="mono">{{ p.name }}</span>{% if p.description %} — {{ p.description }}{% endif %}</p>
+  {% if p.writes_files %}<p class="flash warn small-text">This plugin writes files extracted from the image (possible malware). They are hashed and offered as an encrypted download.</p>{% endif %}
   {% if p.presets %}
   <div class="presets">
     <span class="muted">Presets:</span>
@@ -25,9 +26,9 @@
       {% set fid = "arg-" ~ a.name %}
       {% if a.type == "bool" %}
         <label><input type="checkbox" id="{{ fid }}" name="arg_{{ a.name }}" {% if values.get(a.name) %}checked{% endif %}>
-          <span class="mono">{{ a.flag }}</span></label>
+          <span class="mono">{{ a.flag }}</span>{% if a.writes_files %} <span class="badge sev-medium" title="Writes files extracted from the image (possible malware). They are hashed and offered as an encrypted download.">writes files</span>{% endif %}</label>
       {% else %}
-        <label for="{{ fid }}"><span class="mono">{{ a.flag }}</span>{% if a.required %} <span class="req">*</span>{% endif %}</label>
+        <label for="{{ fid }}"><span class="mono">{{ a.flag }}</span>{% if a.required %} <span class="req">*</span>{% endif %}{% if a.writes_files %} <span class="badge sev-medium" title="Writes files extracted from the image (possible malware).">writes files</span>{% endif %}</label>
         <input id="{{ fid }}" name="arg_{{ a.name }}" value="{{ values.get(a.name, '') }}"
           {% if a.type == "int" %}type="number" step="1"{% else %}type="text"{% endif %}
           {% if a.type == "int_list" %}placeholder="1, 2, 3" pattern="[0-9,\s]*"{% endif %}

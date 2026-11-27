@@ -5,19 +5,24 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Run {{ run.id }}: <span class="mono">{{ run.plugin }}</span>
-      <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>{% if run.phase %} <span class="badge">{{ run.phase }}</span>{% endif %}</h2>
+      <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>{% if run.deleted_at %} <span class="badge status-deleted">deleted</span>{% endif %}{% if run.phase %} <span class="badge">{{ run.phase }}</span>{% endif %}</h2>
     <div class="actions">
     {% if can_rerun %}
     <form method="post" action="/ui/runs/{{ run.id }}/rerun" class="inline">
       <button type="submit" title="Queue a new run with the same plugin and args">Re-run</button>
     </form>
     {% endif %}
+    {% if not run.deleted_at %}
     <form method="post" action="/ui/runs/{{ run.id }}/summarize"
           hx-post="/ui/runs/{{ run.id }}/summarize" hx-target="#run-summary" hx-swap="innerHTML"
           hx-indicator="#summary-spinner" hx-disabled-elt="find button">
       <button type="submit">Summarize with AI</button>
       <span id="summary-spinner" class="htmx-indicator spinner">Asking AI...</span>
     </form>
+    {% endif %}
+    {% if delete_preview and not delete_preview.problem %}
+    <button type="button" class="danger" onclick="document.getElementById('delete-run-dialog').showModal()">Delete…</button>
+    {% endif %}
     </div>
   </div>
   <dl class="meta">
@@ -35,6 +40,7 @@
     <dt>Rows</dt><dd>{{ run.row_count }}</dd>
     <dt>Activity</dt><dd><a href="/activity?object_type=run&object_id={{ run.id }}">Audit log for this run</a></dd>
   </dl>
+  {% if run.deleted_at %}<p class="flash warn">Deleted {{ run.deleted_at | dt }}: {{ run.delete_reason }}. The rows, raw output and dumped files of this run were removed to free space; the record, its hashes and its <a href="/activity?object_type=run&object_id={{ run.id }}">audit history</a> are kept.</p>{% endif %}
   {% if run.error %}<div class="small-label">Error</div><pre class="error-block">{{ run.error }}</pre>{% endif %}
   {% if stderr_tail %}<div class="small-label">stderr (tail)</div><pre class="error-block">{{ stderr_tail }}</pre>{% endif %}
   {% if message %}<p class="flash">{{ message }}</p>{% endif %}
@@ -44,7 +50,7 @@
 {% if run.artifacts %}
 <section class="panel" id="artifacts">
   <div class="panel-head"><h2>Dumped files ({{ run.artifacts | length }})</h2></div>
-  <p class="flash warn">These files were extracted from the memory image and may be live malware. The default download is an encrypted zip (password <span class="mono">{{ zip_password }}</span>); open it only in an analysis environment.</p>
+  {% if not run.deleted_at %}<p class="flash warn">These files were extracted from the memory image and may be live malware. The default download is an encrypted zip (password <span class="mono">{{ zip_password }}</span>); open it only in an analysis environment.</p>{% endif %}
   <div class="table-wrap">
   <table class="data">
     <thead><tr><th>File</th><th>Type</th><th>Size</th><th>Hashes</th><th>Row</th><th>Download</th></tr></thead>
@@ -57,11 +63,13 @@
         <td class="mono small-text">SHA-256 {{ a.sha256 }}<br>MD5 {{ a.md5 }}<br>SHA-1 {{ a.sha1 }}</td>
         <td>{% if a.source_row_idx is not none %}<a class="mono" href="/runs/{{ run.id }}?row={{ a.source_row_idx }}#row-{{ run.id }}-{{ a.source_row_idx }}">R{{ run.id }}:{{ a.source_row_idx }}</a>{% endif %}</td>
         <td>
+          {% if run.deleted_at %}<span class="muted">deleted (hashes kept)</span>{% else %}
           <a class="button small" href="/ui/artifacts/{{ a.id }}/download?format=zip">Encrypted zip</a>
           <details class="small-text"><summary>Raw file</summary>
             <p>Downloads the file itself. Antivirus may delete it and it could run if opened. Recorded in the audit log.</p>
             <a class="danger-link" href="/ui/artifacts/{{ a.id }}/download?format=raw">Download raw file anyway</a>
           </details>
+          {% endif %}
         </td>
       </tr>
     {% endfor %}
@@ -140,6 +148,35 @@
 </section>
 {% endif %}
 
+{% if delete_preview and not delete_preview.problem %}
+<dialog id="delete-run-dialog" class="export-dialog">
+  <form method="post" action="/ui/runs/{{ run.id }}/delete">
+    <h3>Delete the data of run {{ run.id }}?</h3>
+    <p>This permanently removes:</p>
+    <ul>
+      <li>{{ delete_preview.rows }} result row{{ "s" if delete_preview.rows != 1 }}{% if run.findings %} (hook annotations on them too){% endif %}</li>
+      <li>the raw tool output{% if delete_preview.dumped_files %} and {{ delete_preview.dumped_files }} dumped file{{ "s" if delete_preview.dumped_files != 1 }}{% endif %} — {{ delete_preview.bytes_on_disk | humansize }} on disk</li>
+    </ul>
+    <p class="small-text">Kept: the run record (plugin, args, exact command, status, findings), the SHA-256 of the raw output and of every dumped file, and the audit history. Backups made before now still contain the rows and raw output.</p>
+    {% if delete_preview.ai_answers_citing or delete_preview.notes_citing %}
+    <p class="flash warn small-text">Cited by {{ delete_preview.ai_answers_citing }} AI answer(s) and {{ delete_preview.notes_citing }} note(s); those citations will point to a deleted run.</p>
+    {% endif %}
+    <label for="delete-reason">Reason (recorded in the audit log)</label>
+    <textarea id="delete-reason" name="reason" rows="2" required placeholder="e.g. failed run, superseded by run 12; freeing space"></textarea>
+    <div class="dialog-buttons">
+      <button type="submit" class="danger">Delete permanently</button>
+      <button type="button" class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% if run.deleted_at %}
+<section class="panel" id="results">
+  <h2>Results</h2>
+  <p class="muted">This run's {{ run.row_count }} row{{ "s" if run.row_count != 1 }} were deleted. Re-run it to get them back.</p>
+</section>
+{% else %}
 <section class="panel" id="results">
   {# One form holds the search box, tag filter and (inside #rows) the per-column filters and
      sort state, so every control sends the whole current view. #}
@@ -165,4 +202,5 @@
   </form>
   {% include "_export_dialog.html" %}
 </section>
+{% endif %}
 {% endblock %}

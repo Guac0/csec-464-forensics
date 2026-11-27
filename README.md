@@ -75,8 +75,8 @@ All settings are `FT_`-prefixed environment variables in `.env`; every one is do
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev,volatility]"
 pytest -q
-mkdir -p data symbols
-FT_EVIDENCE_DIR=./evidence FT_DATA_DIR=./data FT_SYMBOLS_DIR=./symbols \
+mkdir -p data symbols backups
+FT_EVIDENCE_DIR=./evidence FT_DATA_DIR=./data FT_SYMBOLS_DIR=./symbols FT_BACKUP_DIR=./backups \
   uvicorn app.main:create_app --factory --reload
 ```
 
@@ -169,7 +169,7 @@ Team workflow, branch rules and guidance for AI coding assistants:
 ### Activity (audit) log
 - **Status:** done
 - Every action is recorded in an append-only, tamper-evident log: evidence scans and hashing,
-  runs (queued, started, finished, cancelled, interrupted), post-processing, notes, AI questions and answers,
+  runs (queued, started, finished, cancelled, interrupted, deleted), backups, post-processing, notes, AI questions and answers,
   and (for now) every page and API request. "Activity" in the top bar shows and filters it;
   "Verify integrity" checks that nothing was edited or deleted. Evidence and run pages link to
   their own activity.
@@ -186,12 +186,46 @@ Team workflow, branch rules and guidance for AI coding assistants:
   See the `FT_*_DISK_BYTES` / `FT_MAX_DATA_BYTES` settings in `.env.example`.
 - Each plugin in the catalog can have its own timeout (`timeout_seconds`); the default is
   `FT_RUN_TIMEOUT_SECONDS`.
+- A run that shows no progress for 10 minutes (`FT_RUN_STALL_SECONDS`) — e.g. a post-processing
+  hook stuck in a loop — is marked interrupted ("stalled") or its hooks failed, and the next
+  queued run starts.
+
+### Deleting runs
+- **Status:** done
+- **Delete…** on a finished run removes its rows, raw output and dumped files, with a required
+  reason. The run stays listed as **deleted** with its command, its hashes and its audit
+  history, so reports and the activity log still account for it; AI answers that cite it show
+  the citation struck through. **Clean up…** on an evidence page does the same for all its
+  failed, interrupted and cancelled runs at once. The System page lists the runs using the most
+  disk. Re-run a deleted run to get its data back.
+
+### Backups
+- **Status:** done
+- A backup is one ZIP in `FT_BACKUP_DIR` (the `forensics-backups` Docker volume): a consistent
+  database snapshot plus every run's raw output, with a `manifest.json` of SHA-256 hashes.
+  Dumped files are **not** included (possible malware, often large); after a restore, ones still
+  on disk are reused if their hashes match, others can be re-dumped by re-running the plugin.
+- Automatic every 24 h (`FT_BACKUP_INTERVAL_HOURS`), keeping the last 7 (`FT_BACKUP_KEEP`);
+  **Back up now** and **Verify** on the System page; manual backups are never auto-deleted.
+- Each backup also writes the audit log's latest hash to `audit-anchors.jsonl` next to the
+  backups. The System page fails if the live audit log no longer contains it (log rebuilt, or
+  the database swapped).
+- Command line (safe while the app runs, except restore):
+
+  ```bash
+  docker compose exec app python -m app.backup create          # or: list, verify <name>
+  docker compose cp app:/backups ./backups-copy                 # copy them off this machine
+  # restore: stop the app first; the current data is moved to /data/pre-restore-<time>/
+  docker compose stop app
+  docker compose run --rm app python -m app.backup restore <name>
+  docker compose start app
+  ```
 
 ### System page
 - **Status:** done
 - **System** in the top bar (with a warning badge when something is wrong) checks disk space,
-  the evidence/data/symbol folders, the run worker, the database, the audit chain, hooks and
-  the AI settings, and lists all active settings (API key hidden). **Test volatility** runs
+  the evidence/data/symbol folders, the run worker, the database, the audit chain, hooks, the
+  plugin catalog, backups and the AI settings, and lists all active settings (API key hidden). **Test volatility** runs
   `vol -h` and checks every catalog plugin exists in the installed version; **Test AI** sends one
   tiny request to the provider. Start here when something does not work on a new machine.
   JSON: `GET /api/system/health` (`/health` stays a simple liveness check).

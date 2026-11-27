@@ -105,6 +105,13 @@ report on purpose, regenerate it with `UPDATE_GOLDEN=1 pytest tests/test_export.
 diff in your PR. Any evidence-sourced text must go through `esc()`, `code()` or `fenced()` in
 `app/services/export.py`; `test_export.py` renders the report to check nothing gets through.
 
+## Plugin catalog
+
+`tests/test_catalog.py::test_shipped_catalog_is_valid` fails if an entry in
+`app/tools/volatility/plugins.py` is invalid (wrong plugin name, clashing or duplicate flags,
+an undeclared file-writing option, a broken preset). At runtime such entries are skipped and
+shown on the System page instead of stopping the app.
+
 ## Disk guards in tests
 
 `tests/conftest.py` sets `FT_MIN_FREE_DISK_BYTES=0` and `FT_HARD_MIN_FREE_DISK_BYTES=0` so the

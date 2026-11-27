@@ -29,7 +29,11 @@ How to add a plugin
    Think twice before exposing options that write files (e.g. ``--dump``): output lands in
    ``<data_dir>/runs/<run_id>/output``, can be large (capped per run by FT_MAX_ARTIFACT_BYTES)
    and may be live malware. Such files are registered as derived artifacts: hashed, linked to
-   the row naming them, and downloadable as an encrypted zip.
+   the row naming them, and downloadable as an encrypted zip. Every option that writes files
+   MUST be declared ``writes_files=True`` (or the whole PluginSpec, for plugins that always
+   write, e.g. windows.dumpfiles.DumpFiles); the catalog check skips undeclared known ones.
+   Entries that fail the catalog check (see ``catalog_problems`` in runner.py) are skipped,
+   logged and shown on the System page; tests/test_catalog.py fails CI for them.
 3. ``auto_enumerate=True`` puts the plugin in the "auto-enumerate" batch that is queued for
    each evidence item on request (one Run per plugin, no args). Choose cheap, high-value
    plugins; ``max_concurrent_runs`` defaults to 1 so the batch runs sequentially.
@@ -79,6 +83,7 @@ PLUGINS: list[PluginSpec] = [
                 flag="--dump",
                 type="bool",
                 help="Extract the listed processes to files (can be large; combine with PID)",
+                writes_files=True,
             ),
         ),
         presets=(("EXAMPLE: PID 4 (System)", {"pid": [4]}),),

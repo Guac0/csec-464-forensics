@@ -5,7 +5,7 @@
 #
 # Why no database container: the app is single-user and keeps its state in one SQLite file
 # (/data/forensics.db) on the `forensics-data` volume. No server, no credentials, trivial
-# backup (copy the volume). Revisit only if this ever becomes multi-user.
+# backup (see "Backups" in the README). Revisit only if this ever becomes multi-user.
 
 name: forensics-tool
 
@@ -27,6 +27,10 @@ services:
       # volatility3 symbol cache (Windows PDB-derived ISF downloads). Persisting it avoids
       # re-downloading symbols for every run/container.
       - vol-symbols:/symbols
+      # Backups (database snapshot + raw tool output), separate from forensics-data so losing
+      # one volume does not lose both. Copy them off this machine regularly:
+      #   docker compose cp app:/backups ./backups-copy
+      - forensics-backups:/backups
     env_file:
       # Optional: works without a .env file (compose >= 2.24). All settings have defaults.
       - path: .env
@@ -36,6 +40,7 @@ services:
       FT_EVIDENCE_DIR: /evidence
       FT_DATA_DIR: /data
       FT_SYMBOLS_DIR: /symbols
+      FT_BACKUP_DIR: /backups
     # volatility3 is memory hungry; cap the container so a runaway plugin can't take down
     # the workstation. Override with FT_MEM_LIMIT in your shell or .env (e.g. 12g).
     mem_limit: ${FT_MEM_LIMIT:-8g}
@@ -47,3 +52,4 @@ services:
 volumes:
   forensics-data:
   vol-symbols:
+  forensics-backups:

@@ -142,6 +142,10 @@ class Run(Base):
     )
     # OS process id of the tool while it runs (used to stop an orphaned process after a crash).
     pid: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Tombstone: set when the run's rows, raw output and dumped files were deleted (the record,
+    # its hashes and its audit history stay). Status keeps the value it had before deletion.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    delete_reason: Mapped[str | None] = mapped_column(Text, default=None)
 
     evidence: Mapped[Evidence] = relationship(back_populates="runs")
     artifacts: Mapped[list[DerivedArtifact]] = relationship(

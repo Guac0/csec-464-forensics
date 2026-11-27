@@ -102,6 +102,21 @@ _CITE_BRACKET_RE = re.compile(r"\[\s*(R\d+:\d+(?:\s*[,;]\s*R\d+:\d+)*)\s*\]")
 _CITE_KEY_RE = re.compile(r"R(\d+):(\d+)")
 
 
+def _deleted_run_ids(run_ids: set[int]) -> set[int]:
+    """Which of ``run_ids`` are deleted (tombstoned) runs."""
+    if not run_ids:
+        return set()
+    from app.db import SessionLocal
+
+    try:
+        with SessionLocal() as s:
+            return set(
+                s.scalars(select(Run.id).where(Run.id.in_(run_ids), Run.deleted_at.is_not(None)))
+            )
+    except Exception:
+        return set()
+
+
 def render_ai_content(content: str | None, citations: list[dict[str, Any]] | None = None) -> Markup:
     """Escape AI text completely, then turn citation tokens like [R12:34] into row links.
 
@@ -113,12 +128,18 @@ def render_ai_content(content: str | None, citations: list[dict[str, Any]] | Non
         if isinstance(c, dict) and c.get("valid") is False
     }
     escaped = str(escape(content or ""))
+    deleted = _deleted_run_ids({int(m.group(1)) for m in _CITE_KEY_RE.finditer(escaped)})
 
     def _key(m: re.Match[str]) -> str:
         run_id, row_idx = int(m.group(1)), int(m.group(2))
         key = f"R{run_id}:{row_idx}"
         if key in invalid:
             return f'<span class="cite-invalid" title="citation not found in database">{key}</span>'
+        if run_id in deleted:
+            return (
+                f'<a class="cite cite-deleted" href="/runs/{run_id}" '
+                f'title="run {run_id} was deleted; this row no longer exists">{key}</a>'
+            )
         href = f"/runs/{run_id}?row={row_idx}#row-{run_id}-{row_idx}"
         return f'<a class="cite" href="{href}">{key}</a>'
 
@@ -326,6 +347,19 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "integrity_mode": get_settings().integrity_mode,
         "verify_on_run": get_settings().verify_on_run,
         "hashing": evidence_svc.is_hashing(ev.id),
+        "cleanup": _cleanup_summary(session, ev.id),
+    }
+
+
+def _cleanup_summary(session: Session, evidence_id: int) -> dict[str, Any]:
+    """Failed / interrupted / cancelled runs that bulk clean-up would delete."""
+    from app.services import run_deletion
+
+    runs = run_deletion.cleanup_candidates(session, evidence_id)
+    return {
+        "count": len(runs),
+        "bytes": sum(run_deletion.dir_bytes(run_deletion.run_dir(r.id)) for r in runs),
+        "statuses": sorted({r.status.value for r in runs}),
     }
 
 
@@ -453,6 +487,14 @@ def run_page(
     return _render_run_page(request, session, run, offset, limit, row, view=view)
 
 
+def _delete_preview(session: Session, run: Run) -> Any:
+    from app.services import run_deletion
+
+    if run.deleted_at is not None or run.status in ACTIVE_STATUSES:
+        return None
+    return run_deletion.preview(session, run.id)
+
+
 def _render_run_page(
     request: Request,
     session: Session,
@@ -486,6 +528,7 @@ def _render_run_page(
         if run.status in (RunStatus.FAILED, RunStatus.INTERRUPTED)
         else None,
         can_rerun=run.status in RERUNNABLE_STATUSES,
+        delete_preview=_delete_preview(session, run),
         summary=summary,
         evidence_id=run.evidence_id,
         hook_specs=hooks_mod.hooks_for(run.tool, run.plugin),
@@ -1007,12 +1050,17 @@ def system_page(request: Request, session: SessionDep) -> HTMLResponse:
 
     checks = health.quick_checks(session)
     health.clear_badge_cache()
+    from app.services import backup, run_deletion
+
     return render(
         request,
         "system.html",
         checks=checks,
         overall=health.overall(checks),
         settings_rows=health.settings_summary(),
+        backups=backup.list_backups()[:15],
+        backup_state=backup.manual_state(),
+        biggest_runs=run_deletion.biggest_runs(session),
     )
 
 
@@ -1027,3 +1075,79 @@ def ui_system_test(request: Request, kind: str) -> Response:
     if not is_htmx(request):
         return redirect("/system")
     return render(request, "_health_check.html", check=check)
+
+
+# --------------------------------------------------------------------------- run deletion
+
+
+@router.post("/ui/runs/{run_id}/delete", dependencies=[Depends(same_origin_post)])
+def ui_delete_run(request: Request, run_id: int, form: FormDep, session: SessionDep) -> Response:
+    from app.services import run_deletion
+
+    run = get_run_or_404(session, run_id)
+    try:
+        result = run_deletion.delete_run(session, run_id, form.get("reason") or "")
+    except ValueError as exc:
+        session.rollback()
+        return _render_run_page(request, session, run, message=f"Delete failed: {exc}")
+    if not result.files_removed:
+        session.refresh(run)
+        return _render_run_page(
+            request,
+            session,
+            run,
+            message="Deleted, but some files could not be removed; see the log.",
+        )
+    return redirect(f"/runs/{run_id}")
+
+
+@router.post("/ui/evidence/{evidence_id}/cleanup", dependencies=[Depends(same_origin_post)])
+def ui_cleanup(request: Request, evidence_id: int, form: FormDep, session: SessionDep) -> Response:
+    from app.services import run_deletion
+
+    get_evidence_or_404(session, evidence_id)
+    try:
+        results = run_deletion.delete_runs(session, evidence_id, form.get("reason") or "")
+    except ValueError as exc:
+        session.rollback()
+        return runs_response(request, session, evidence_id, error=f"Clean-up failed: {exc}")
+    freed = sum(r.bytes_freed for r in results)
+    message = f"Deleted the data of {len(results)} run(s), freeing {humansize(freed)}."
+    if not is_htmx(request):
+        return redirect(f"/evidence/{evidence_id}#runs")
+    return runs_response(request, session, evidence_id, message=message)
+
+
+@router.post("/ui/system/backup", dependencies=[Depends(same_origin_post)])
+def ui_backup_now(request: Request) -> Response:
+    from app.services import backup
+
+    started = backup.start_manual_backup()
+    if not is_htmx(request):
+        return redirect("/system#backups")
+    return render(
+        request,
+        "_backup_status.html",
+        state=backup.manual_state() | ({} if started else {"busy": True}),
+    )
+
+
+@router.get("/ui/system/backup-status", response_class=HTMLResponse)
+def ui_backup_status(request: Request) -> HTMLResponse:
+    from app.services import backup
+
+    return render(request, "_backup_status.html", state=backup.manual_state())
+
+
+@router.post("/ui/system/backups/{name}/verify", dependencies=[Depends(same_origin_post)])
+def ui_verify_backup(request: Request, name: str) -> Response:
+    from app.services import backup
+
+    try:
+        backup.get_backup(name)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    report = backup.verify_backup(name)
+    if not is_htmx(request):
+        return redirect("/system#backups")
+    return render(request, "_backup_verify.html", report=report)

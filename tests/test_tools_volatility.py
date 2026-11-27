@@ -19,7 +19,7 @@ TEST_PLUGIN = PluginSpec(
     args=(
         ArgSpec(name="pid", flag="--pid", type="int_list"),
         ArgSpec(name="offset", flag="--offset", type="int"),
-        ArgSpec(name="dump", flag="--dump", type="bool"),
+        ArgSpec(name="dump", flag="--dump", type="bool", writes_files=True),
         ArgSpec(name="name", flag="--name", type="str"),
     ),
 )

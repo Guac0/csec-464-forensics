@@ -288,6 +288,7 @@ class HookContext:
                 Run.tool == self.tool,
                 Run.plugin == plugin,
                 Run.status == RunStatus.SUCCEEDED,
+                Run.deleted_at.is_(None),
             )
             .order_by(Run.id.desc())
         )
@@ -394,7 +395,9 @@ def _check_severity(severity: str) -> str:
 # --------------------------------------------------------------------------------------------
 
 
-def run_hooks(session: Session, run_id: int) -> list[dict[str, Any]]:
+def run_hooks(
+    session: Session, run_id: int, on_progress: Callable[[], None] | None = None
+) -> list[dict[str, Any]]:
     """Run every matching hook for a SUCCEEDED run and store the results on the run.
 
     Safe to call again (re-run): previous annotations/findings/results are cleared first.
@@ -421,6 +424,8 @@ def run_hooks(session: Session, run_id: int) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     followup_budget = [settings.hook_max_followups_per_run]
     for spec in specs:
+        if on_progress is not None:
+            on_progress()  # the worker's stall watchdog: each hook gets a fresh timer
         ctx = HookContext(session, run, evidence, spec)
         started = time.perf_counter()
         result: dict[str, Any] = {"hook": spec.name, "version": spec.version}
@@ -577,6 +582,7 @@ def _queue_follow_ups(
                         Run.tool == run.tool,
                         Run.plugin == request.plugin,
                         Run.status.in_(_DEDUPE_STATUSES),
+                        Run.deleted_at.is_(None),
                     )
                 )
                 if (r.args or {}) == normalized

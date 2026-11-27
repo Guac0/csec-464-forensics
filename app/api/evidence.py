@@ -169,3 +169,27 @@ def auto_enumerate(evidence_id: int, session: SessionDep) -> list[RunOut]:
     except runs_service.DiskSpaceError as exc:
         raise HTTPException(status.HTTP_507_INSUFFICIENT_STORAGE, str(exc)) from exc
     return [RunOut.model_validate(r) for r in runs]
+
+
+class CleanupIn(BaseModel):
+    reason: str
+    statuses: list[str] = ["failed", "interrupted", "cancelled"]
+
+
+@router.post("/{evidence_id}/cleanup")
+def cleanup(evidence_id: int, body: CleanupIn, session: SessionDep) -> dict[str, Any]:
+    """Delete the data of every failed / interrupted / cancelled run of this evidence (one
+    reason for all), keeping tombstones. Returns the runs deleted and the bytes freed."""
+    from app.models import RunStatus
+    from app.services import run_deletion
+
+    _get_or_404(session, evidence_id)
+    try:
+        statuses = tuple(RunStatus(s) for s in body.statuses)
+        results = run_deletion.delete_runs(session, evidence_id, body.reason, statuses)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {
+        "deleted_run_ids": [r.run_id for r in results],
+        "bytes_freed": sum(r.bytes_freed for r in results),
+    }

@@ -207,6 +207,15 @@ def artifact_path(artifact: DerivedArtifact) -> Path:
 
 
 def _verified_path(artifact: DerivedArtifact) -> Path:
+    from sqlalchemy.orm import object_session
+
+    session = object_session(artifact)
+    run = session.get(Run, artifact.run_id) if session is not None else None
+    if run is not None and run.deleted_at is not None:
+        raise ArtifactIntegrityError(
+            f"{artifact.filename} was deleted with run {artifact.run_id} "
+            f"({run.delete_reason}); only its hashes are kept"
+        )
     path = artifact_path(artifact)
     if not path.is_file():
         raise ArtifactIntegrityError(f"{artifact.filename} is missing from disk")
