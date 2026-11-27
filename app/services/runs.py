@@ -8,15 +8,17 @@ from sqlalchemy import func, literal_column, select, update
 from sqlalchemy.orm import Session
 
 from app.models import ResultRow, Run, RunOrigin, RunStatus, utcnow
-from app.services import audit, integrity, results
+from app.services import audit, integrity, resources, results
 from app.services.evidence import get_evidence
 from app.services.integrity import IntegrityError
+from app.services.resources import DiskSpaceError
 from app.tools.base import ArgValidationError, ToolRequest, ToolRunner
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "ArgValidationError",
+    "DiskSpaceError",
     "IntegrityError",
     "cancel_run",
     "create_run",
@@ -26,7 +28,16 @@ __all__ = [
     "annotation_tags",
     "get_runner",
     "list_runs",
+    "rerun",
 ]
+
+# Statuses a run can be re-run from (anything that is no longer queued or running).
+RERUNNABLE_STATUSES = (
+    RunStatus.SUCCEEDED,
+    RunStatus.FAILED,
+    RunStatus.CANCELLED,
+    RunStatus.INTERRUPTED,
+)
 
 # Statuses for which an auto-enumeration run is considered already done or in progress.
 _AUTO_SKIP_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.SUCCEEDED)
@@ -68,14 +79,17 @@ def create_run(
     parent_run_id: int | None = None,
     triggered_by_hook: str | None = None,
     chain_depth: int = 0,
+    rerun_of_id: int | None = None,
 ) -> Run:
     """Validate the request against the tool's allowlist and queue a run.
 
     The keyword-only arguments record follow-up provenance for runs queued by post-run hooks.
     Raises ArgValidationError for disallowed plugins/args, LookupError for unknown evidence and
-    IntegrityError (strict mode) if the image changed or mismatches its expected hashes.
+    IntegrityError (strict mode) if the image changed or mismatches its expected hashes and
+    DiskSpaceError if the data volume is (nearly) full.
     """
     integrity.check_can_run(get_evidence(session, evidence_id))
+    resources.check_can_start_run()
     runner = get_runner(tool)
     args = runner.validate(request)
     run = Run(
@@ -88,6 +102,7 @@ def create_run(
         parent_run_id=parent_run_id,
         triggered_by_hook=triggered_by_hook,
         chain_depth=chain_depth,
+        rerun_of_id=rerun_of_id,
     )
     session.add(run)
     session.flush()  # assign run.id for the audit event
@@ -106,6 +121,7 @@ def create_run(
             "parent_run_id": parent_run_id,
             "triggered_by_hook": triggered_by_hook,
             "chain_depth": chain_depth,
+            "rerun_of_id": rerun_of_id,
         },
     )
     session.commit()
@@ -113,9 +129,29 @@ def create_run(
     return run
 
 
+def rerun(session: Session, run_id: int) -> Run:
+    """Queue a new run with the same tool, plugin and args as a finished run (e.g. one that was
+    interrupted or failed). The new run is a manual run that records ``rerun_of_id``; hook
+    follow-up provenance is not copied. Raises ValueError if the run is still active."""
+    original = get_run(session, run_id)
+    if original.status not in RERUNNABLE_STATUSES:
+        raise ValueError(
+            f"run {run_id} is {original.status.value}; only finished runs can be re-run"
+        )
+    return create_run(
+        session,
+        original.evidence_id,
+        ToolRequest(plugin=original.plugin, args=dict(original.args or {})),
+        RunOrigin.MANUAL,
+        original.tool,
+        rerun_of_id=original.id,
+    )
+
+
 def enqueue_auto(session: Session, evidence_id: int, tool: str = "volatility3") -> list[Run]:
     """Queue one run per auto_enumerate plugin, skipping ones already queued/running/succeeded."""
     get_evidence(session, evidence_id)
+    resources.check_can_start_run()  # all or nothing: don't queue half a batch
     runner = get_runner(tool)
     created: list[Run] = []
     for spec in runner.plugins():

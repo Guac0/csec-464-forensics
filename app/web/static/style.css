@@ -51,6 +51,7 @@ button.small { padding: .15rem .5rem; font-size: 12px; }
 button.danger { background: #fff; color: var(--danger); border-color: var(--danger); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 form.inline { display: inline; }
+.panel-head .actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 input[type=text], input[type=number], input[type=search], select, textarea {
   font: inherit; padding: .3rem .45rem; border: 1px solid var(--border); border-radius: 4px; width: 100%;
 }
@@ -77,6 +78,7 @@ tr.highlight td, tr:target td { background: var(--hl); }
 .status-succeeded { background: #d1fadf; color: #05603a; }
 .status-failed { background: #fee4e2; color: #912018; }
 .status-cancelled { background: #fef0c7; color: #93370d; }
+.status-interrupted { background: #ebe9fe; color: #5925dc; }
 
 .flash { padding: .4rem .6rem; background: #eef4ff; border-left: 3px solid var(--accent); margin: .4rem 0; }
 .flash.error { background: #fef3f2; border-color: var(--danger); color: var(--danger); }
@@ -167,3 +169,16 @@ dialog.export-dialog fieldset { border: 0; padding: 0; display: flex; flex-direc
 .dialog-buttons { display: flex; gap: .5rem; justify-content: flex-end; }
 button.secondary { background: #f2f4f7; color: #344054; }
 dialog.export-dialog label.indent { margin-left: 1.5rem; }
+.topbar .nav-right { display: flex; gap: 1rem; align-items: center; }
+
+/* System checks */
+.health-check { border-top: 1px solid #e4e7ec; padding: .5rem 0; }
+.health-head { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+.badge.health-ok { background: #d1fadf; color: #05603a; }
+.badge.health-info { background: #e0eaff; color: #2d31a6; }
+.badge.health-warn { background: #fef0c7; color: #93370d; }
+.badge.health-fail { background: #fee4e2; color: #912018; }
+table.kv { border-collapse: collapse; margin: .3rem 0 .3rem 1rem; }
+table.kv th { text-align: left; font-weight: 500; padding: .1rem 1rem .1rem 0; color: #475467; vertical-align: top; }
+table.kv td { padding: .1rem 0; word-break: break-all; }
+#test-volatility, #test-ai { margin-bottom: .8rem; }

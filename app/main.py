@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db import SessionLocal, init_engine, migrate
-from app.jobs.worker import get_worker, recover_stale_runs
+from app.jobs.worker import get_worker, recover_interrupted_runs
 from app.services import audit
 from app.tools import hooks
 
@@ -34,6 +34,7 @@ ROUTER_MODULES = (
     "app.api.audit",
     "app.api.artifacts",
     "app.api.export",
+    "app.api.system",
     "app.api.ai",
     "app.web.pages",
 )
@@ -94,7 +95,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
             },
         )
         with SessionLocal() as session:
-            recover_stale_runs(session)
+            recover_interrupted_runs(session)
         worker = get_worker() if start_worker else None
         if worker is not None:
             worker.start()
@@ -110,6 +111,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
+        """Liveness probe (Docker). Detailed checks: /api/system/health and the System page."""
         return {"status": "ok"}
 
     for module_name in ROUTER_MODULES:

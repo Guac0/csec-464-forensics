@@ -66,6 +66,8 @@ class RunStatus(enum.StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # The app stopped (crash, restart, shutdown) while the run was in progress.
+    INTERRUPTED = "interrupted"
 
 
 class RunOrigin(enum.StrEnum):
@@ -134,6 +136,12 @@ class Run(Base):
     triggered_by_hook: Mapped[str | None] = mapped_column(String, default=None)
     # 0 for user/auto runs; parent's depth + 1 for hook follow-ups (loop guard).
     chain_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Set when the run was created with "Re-run" from another run.
+    rerun_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL", name="fk_runs_rerun_of_id"), default=None
+    )
+    # OS process id of the tool while it runs (used to stop an orphaned process after a crash).
+    pid: Mapped[int | None] = mapped_column(Integer, default=None)
 
     evidence: Mapped[Evidence] = relationship(back_populates="runs")
     artifacts: Mapped[list[DerivedArtifact]] = relationship(

@@ -309,7 +309,7 @@ def test_worker_and_restart_events(
     stale = runs_service.create_run(session, ev.id, ToolRequest("windows.info.Info"))
     stale.status = RunStatus.RUNNING
     session.commit()
-    worker_mod.recover_stale_runs(session)
+    worker_mod.recover_interrupted_runs(session)
     (interrupted,) = events(session, action="run.interrupted")
     assert interrupted.object_id == stale.id
 

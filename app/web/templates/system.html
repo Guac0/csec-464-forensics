@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}System{% endblock %}
+{% block crumbs %}System{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>System checks <span class="badge health-{{ overall }}">{{ {"ok": "all OK", "warn": "warnings", "fail": "problems"}[overall] }}</span></h2>
+    <a class="button" href="/system">Re-check</a>
+  </div>
+  <p class="muted small-text">Checked when this page loads. The JSON version is at <a href="/api/system/health">/api/system/health</a>.</p>
+  {% for check in checks %}{% include "_health_check.html" %}{% endfor %}
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>On-demand tests</h2></div>
+  <p class="muted small-text">These are slower or cost a little, so they only run when you click.</p>
+  <div id="test-volatility">
+    <form method="post" action="/ui/system/test/volatility" class="inline"
+          hx-post="/ui/system/test/volatility" hx-target="#test-volatility-result" hx-swap="innerHTML"
+          hx-indicator="#vol-spinner" hx-disabled-elt="find button">
+      <button type="submit">Test volatility</button>
+      <span class="small-text muted">Runs <span class="mono">vol -h</span> (a few seconds) and checks every catalog plugin exists.</span>
+      <span id="vol-spinner" class="htmx-indicator spinner">Running...</span>
+    </form>
+    <div id="test-volatility-result"></div>
+  </div>
+  <div id="test-ai">
+    <form method="post" action="/ui/system/test/ai" class="inline"
+          hx-post="/ui/system/test/ai" hx-target="#test-ai-result" hx-swap="innerHTML"
+          hx-indicator="#ai-spinner" hx-disabled-elt="find button">
+      <button type="submit">Test AI</button>
+      <span class="small-text muted">Sends one tiny request to the AI provider (uses a few tokens).</span>
+      <span id="ai-spinner" class="htmx-indicator spinner">Asking...</span>
+    </form>
+    <div id="test-ai-result"></div>
+  </div>
+</section>
+
+<section class="panel">
+  <details>
+    <summary><strong>Active settings</strong> <span class="small-text muted">(secrets hidden)</span></summary>
+    <table class="kv small-text">
+      {% for name, value in settings_rows %}<tr><th class="mono">{{ name }}</th><td class="mono">{{ value }}</td></tr>{% endfor %}
+    </table>
+  </details>
+</section>
+{% endblock %}

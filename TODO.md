@@ -81,7 +81,14 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] Large results: decide whether to enable `FT_SEARCH_INDEX` after measuring real runs on the
       team's machines (`python -m scripts.bench_rows --rows 1000000`); existing runs can be
       indexed later with `POST /api/runs/{id}/search-index`.
-- [ ] Dumped files are never deleted and there is no total disk quota (only a per-run limit).
+- [ ] Dumped files are never deleted. There is now an optional total cap (`FT_MAX_DATA_BYTES`)
+      and free-space checks, but nothing cleans up old runs.
+- [ ] Set real `timeout_seconds` per catalog plugin once the catalog is final (filescan/dumpfiles
+      on big images may need more than the 1 h default).
+- [ ] Orphaned `vol` processes are only found after a crash on Linux (uses /proc); in Docker a
+      container restart ends them anyway.
+- [ ] A worker thread that hangs without crashing is not detected (heartbeats are recorded but
+      nothing acts on a stale one).
 - [ ] Decide which plugins may write files (`--dump` etc.); only the EXAMPLE pslist entry does.
 - [ ] The audit chain head lives in the same DB file; someone with write access to the file
       could rebuild the whole chain. Optionally anchor the head hash elsewhere (exports now print

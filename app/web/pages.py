@@ -32,6 +32,8 @@ from app.services import integrity as integrity_svc
 from app.services import notes as notes_svc
 from app.services import results as results_svc
 from app.services import runs as runs_svc
+from app.services.resources import DiskSpaceError
+from app.services.runs import RERUNNABLE_STATUSES
 from app.tools import hooks as hooks_mod
 from app.tools import registry
 from app.tools.base import ArgValidationError, PluginSpec, ToolRequest
@@ -480,7 +482,10 @@ def _render_run_page(
     return render(
         request,
         "run.html",
-        stderr_tail=stderr_tail(run) if run.status == RunStatus.FAILED else None,
+        stderr_tail=stderr_tail(run)
+        if run.status in (RunStatus.FAILED, RunStatus.INTERRUPTED)
+        else None,
+        can_rerun=run.status in RERUNNABLE_STATUSES,
         summary=summary,
         evidence_id=run.evidence_id,
         hook_specs=hooks_mod.hooks_for(run.tool, run.plugin),
@@ -635,7 +640,7 @@ def ui_create_run(
         session.rollback()
         error = (
             str(exc)
-            if isinstance(exc, ArgValidationError | integrity_svc.IntegrityError)
+            if isinstance(exc, ArgValidationError | integrity_svc.IntegrityError | DiskSpaceError)
             else f"invalid request: {exc}"
         )
 
@@ -659,10 +664,11 @@ def ui_auto(request: Request, evidence_id: int, session: SessionDep) -> Response
     get_evidence_or_404(session, evidence_id)
     try:
         runs = runs_svc.enqueue_auto(session, evidence_id)
-    except integrity_svc.IntegrityError as exc:
+    except (integrity_svc.IntegrityError, DiskSpaceError) as exc:
         session.rollback()
         if not is_htmx(request):
-            return redirect(f"/evidence/{evidence_id}#integrity")
+            anchor = "integrity" if isinstance(exc, integrity_svc.IntegrityError) else "runs"
+            return redirect(f"/evidence/{evidence_id}#{anchor}")
         return runs_response(request, session, evidence_id, error=str(exc))
     session.commit()
     if not is_htmx(request):
@@ -685,6 +691,29 @@ def ui_cancel(request: Request, run_id: int, session: SessionDep) -> Response:
     if not is_htmx(request):
         return redirect(request.headers.get("referer") or f"/evidence/{run.evidence_id}#runs")
     return runs_response(request, session, run.evidence_id, error=error)
+
+
+@router.post("/ui/runs/{run_id}/rerun", dependencies=[Depends(same_origin_post)])
+def ui_rerun(request: Request, run_id: int, session: SessionDep) -> Response:
+    """Queue a copy of a finished run. From the runs table (HTMX) the table is refreshed; from
+    the run page the browser goes to the new run."""
+    run = get_run_or_404(session, run_id)
+    try:
+        new_run = runs_svc.rerun(session, run_id)
+    except (ValueError, LookupError) as exc:  # integrity, disk space, allowlist, still active
+        session.rollback()
+        error = f"Re-run failed: {exc}"
+        if is_htmx(request):
+            return runs_response(request, session, run.evidence_id, error=error)
+        return _render_run_page(request, session, run, message=error)
+    if is_htmx(request):
+        return runs_response(
+            request,
+            session,
+            run.evidence_id,
+            message=f"Queued run {new_run.id} (re-run of {run_id}).",
+        )
+    return redirect(f"/runs/{new_run.id}")
 
 
 @router.get("/ui/runs/{run_id}/rows", response_class=HTMLResponse)
@@ -952,3 +981,49 @@ def ui_case_export(
     if ev_id is not None:
         get_evidence_or_404(session, ev_id)
     return export_response(session, ev_id, format, include_dumped and format == "zip")
+
+
+# --------------------------------------------------------------------------- system / health
+
+
+def _health_badge() -> tuple[str, str] | None:
+    """(status, tooltip) for the top-bar System link; None if the checks cannot run."""
+    from app.db import SessionLocal
+    from app.services import health
+
+    try:
+        with SessionLocal() as s:
+            return health.badge(s)
+    except Exception:
+        return None
+
+
+templates.env.globals.update(health_badge=_health_badge)
+
+
+@router.get("/system", response_class=HTMLResponse)
+def system_page(request: Request, session: SessionDep) -> HTMLResponse:
+    from app.services import health
+
+    checks = health.quick_checks(session)
+    health.clear_badge_cache()
+    return render(
+        request,
+        "system.html",
+        checks=checks,
+        overall=health.overall(checks),
+        settings_rows=health.settings_summary(),
+    )
+
+
+@router.post("/ui/system/test/{kind}", dependencies=[Depends(same_origin_post)])
+def ui_system_test(request: Request, kind: str) -> Response:
+    from app.services import health
+
+    tests = {"volatility": health.run_volatility_test, "ai": health.run_ai_test}
+    if kind not in tests:
+        raise HTTPException(404, "unknown test")
+    check = tests[kind]()
+    if not is_htmx(request):
+        return redirect("/system")
+    return render(request, "_health_check.html", check=check)

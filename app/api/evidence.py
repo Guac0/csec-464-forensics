@@ -166,4 +166,6 @@ def auto_enumerate(evidence_id: int, session: SessionDep) -> list[RunOut]:
         raise HTTPException(422, str(exc)) from exc
     except integrity.IntegrityError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except runs_service.DiskSpaceError as exc:
+        raise HTTPException(status.HTTP_507_INSUFFICIENT_STORAGE, str(exc)) from exc
     return [RunOut.model_validate(r) for r in runs]
