@@ -1,0 +1,12 @@
+{# Needs `sc` (share_ctx), `share_key` (source key) and `share_attrs` ({"kind": ..., "run-id": ...,
+   "what": ...}), rendered as escaped data-* attributes for openShare(). #}
+{% if sc and sc.cases %}
+  {% if share_key in sc.shared %}
+  <form class="inline" method="post" action="/ui/shared/{{ sc.shared[share_key] }}/remove" onsubmit="this.elements.next.value = location.pathname + location.search + location.hash">
+    <input type="hidden" name="next" value="">
+    <button type="submit" class="small shared-badge" title="Shared in {{ sc.active[1] }}; click to un-share">shared ✕</button>
+  </form>
+  {% else %}
+  <button type="button" class="small share-btn" title="Share with the other images of a case" onclick="openShare(this)"{% for k, v in share_attrs.items() %} data-{{ k }}="{{ v }}"{% endfor %}>Share</button>
+  {% endif %}
+{% endif %}

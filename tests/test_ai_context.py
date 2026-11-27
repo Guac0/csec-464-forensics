@@ -15,7 +15,8 @@ def test_context_contents_and_refs(session: Session) -> None:
     assert "ab" * 32 in text
     assert '"build": "19041"' in text
     assert "Test image" in text
-    assert "evidence note" in text and "global note" in text
+    assert "evidence note" in text
+    assert "case note" not in text  # case notes span several images: never in one image's context
     assert f"## Run R{run.id}: windows.pslist.PsList" in text
     assert f'[R{run.id}:0] {{"PID": 100' in text
     assert "boom" not in text  # failed runs are excluded by default

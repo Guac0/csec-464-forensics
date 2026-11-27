@@ -63,7 +63,7 @@ def test_create_list_verify(session: Session, settings: Settings, evidence: Evid
         "dumped_bytes": 400,
         "active_runs": [active.id],
     }
-    assert manifest["audit_chain"]["ok"] and manifest["schema"].startswith("0008")
+    assert manifest["audit_chain"]["ok"] and manifest["schema"].startswith("0009")
 
     report = backup.verify_backup(info.name)
     assert report.ok, report.problems

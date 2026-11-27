@@ -158,14 +158,16 @@ def _make_fakes(session: Session) -> dict[str, SimpleNamespace]:
                 counts[t] = counts.get(t, 0) + 1
         return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
-    def list_notes(sess, evidence_id=None):
+    def list_notes(sess, evidence_id=None, case_id=None):
         stmt = select(Note).order_by(Note.id)
         if evidence_id is not None:
             stmt = stmt.where(Note.evidence_id == evidence_id)
+        if case_id is not None:
+            stmt = stmt.where(Note.case_id == case_id)
         return list(sess.scalars(stmt))
 
-    def create_note(sess, body, evidence_id=None):
-        note = Note(body=body, evidence_id=evidence_id)
+    def create_note(sess, body, evidence_id=None, case_id=None):
+        note = Note(body=body, evidence_id=evidence_id, case_id=case_id)
         sess.add(note)
         sess.commit()
         return note
@@ -289,7 +291,12 @@ def test_static_assets_served(web: TestClient) -> None:
 
 
 def test_index_renders(web: TestClient, session: Session, ev: Evidence) -> None:
-    session.add(Note(body="global <i>note</i>"))
+    from app.models import Case, CaseEvidence
+
+    case = Case(name="APT <i>X</i>")
+    session.add(case)
+    session.flush()
+    session.add(CaseEvidence(case_id=case.id, evidence_id=ev.id, label="before"))
     session.add(Note(body="evidence note", evidence_id=ev.id))
     session.commit()
     _run(session, ev)
@@ -302,8 +309,9 @@ def test_index_renders(web: TestClient, session: Session, ev: Evidence) -> None:
     assert "not hashed" in html and 'action="/ui/evidence/1/hash"' in html
     assert "os=windows" in html
     assert 'hx-post="/ui/scan"' in html
-    assert "global &lt;i&gt;note&lt;/i&gt;" in html
-    assert "evidence note" not in html  # only global notes on the index
+    assert "APT &lt;i&gt;X&lt;/i&gt;" in html and f'href="/cases/{case.id}"' in html
+    assert f'href="/evidence/{ev.id}?case={case.id}"' in html  # case chip on the image
+    assert "evidence note" not in html and "Investigation notes" not in html
     assert '<script src="/static/htmx.min.js"' in html
 
 

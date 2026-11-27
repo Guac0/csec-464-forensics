@@ -115,7 +115,10 @@ def test_notes_api(client: TestClient) -> None:
     resp = client.post("/api/notes", json={"body": "pid 666 looks odd", "evidence_id": ev_id})
     assert resp.status_code == 201
     note = resp.json()
-    client.post("/api/notes", json={"body": "global"})
+    case_id = client.post("/api/cases", json={"name": "c"}).json()["id"]
+    assert client.post("/api/notes", json={"body": "global"}).status_code == 422
+    client.post("/api/notes", json={"body": "case note", "case_id": case_id})
+    assert [n["body"] for n in client.get(f"/api/notes?case_id={case_id}").json()] == ["case note"]
 
     assert len(client.get("/api/notes").json()) == 2
     assert [n["id"] for n in client.get(f"/api/notes?evidence_id={ev_id}").json()] == [note["id"]]

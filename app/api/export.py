@@ -26,27 +26,39 @@ def export_case(
     evidence_id: int | None = None,
     format: Literal["md", "zip"] = "md",  # noqa: A002
     include_dumped: bool = False,
+    case_id: int | None = None,
 ) -> Response:
-    """``evidence_id`` set: that evidence item; omitted: everything. ``format=md``: report only;
+    """``case_id`` set: that case (its images, case notes, shared items); ``evidence_id`` set:
+    that evidence item; neither: everything. ``format=md``: report only;
     ``format=zip``: report + per-run CSV and raw output + manifest.json (SHA-256 of every file).
     ``include_dumped`` (zip only) adds dumped files and AES-encrypts the ZIP with
     FT_ARTIFACT_ZIP_PASSWORD. Every export is recorded in the audit log."""
-    return export_response(session, evidence_id, format, include_dumped)
+    return export_response(session, evidence_id, format, include_dumped, case_id)
 
 
 def export_response(
-    session: Session, evidence_id: int | None, fmt: str, include_dumped: bool
+    session: Session,
+    evidence_id: int | None,
+    fmt: str,
+    include_dumped: bool,
+    case_id: int | None = None,
 ) -> Response:
     if fmt not in ("md", "zip"):
         raise HTTPException(422, "format must be md or zip")
     now = datetime.now(UTC)
     try:
         if fmt == "md":
-            report = export_service.build_report(session, evidence_id, generated_at=now)
+            report = export_service.build_report(
+                session, evidence_id, case_id=case_id, generated_at=now
+            )
             body = report.encode("utf-8")
-            scope = export_service.get_scope(session, evidence_id)
+            scope = export_service.get_scope(session, evidence_id, case_id)
             export_service.record_export(
-                session, evidence_id, "md", report_sha256=hashlib.sha256(body).hexdigest()
+                session,
+                evidence_id,
+                "md",
+                report_sha256=hashlib.sha256(body).hexdigest(),
+                case_id=case_id,
             )
             stamp = now.strftime("%Y%m%dT%H%M%SZ")
             return Response(
@@ -58,7 +70,7 @@ def export_response(
                 },
             )
         bundle = export_service.build_bundle(
-            session, evidence_id, include_dumped=include_dumped, generated_at=now
+            session, evidence_id, case_id=case_id, include_dumped=include_dumped, generated_at=now
         )
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
@@ -69,6 +81,7 @@ def export_response(
         include_dumped=include_dumped,
         report_sha256=bundle.report_sha256,
         files=len(bundle.files),
+        case_id=case_id,
     )
     return FileResponse(
         bundle.path,

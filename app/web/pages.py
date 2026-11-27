@@ -213,7 +213,22 @@ SessionDep = Annotated[Session, Depends(get_session)]
 FormDep = Annotated[dict[str, str], Depends(form_data)]
 
 
+def request_case_id(request: Request) -> int | None:
+    """The active case: ``?case=<id>`` on the page, or (for HTMX fragment requests) on the page
+    that made the request (HX-Current-URL). Membership is checked where it matters."""
+    from urllib.parse import parse_qs, urlparse
+
+    raw = request.query_params.get("case")
+    if not raw and request.headers.get("HX-Current-URL"):
+        raw = (parse_qs(urlparse(request.headers["HX-Current-URL"]).query).get("case") or [""])[0]
+    return int(raw) if raw and raw.isdigit() else None
+
+
 def render(request: Request, name: str, status_code: int = 200, **context: Any) -> HTMLResponse:
+    # Case context travels in the URL (?case=<id>) so links keep it.
+    case_id = context.setdefault("active_case_id", request_case_id(request))
+    context.setdefault("case_q", f"?case={case_id}" if case_id else "")
+    context.setdefault("case_amp", f"case={case_id}&" if case_id else "")
     return templates.TemplateResponse(request, name, context, status_code=status_code)
 
 
@@ -271,9 +286,15 @@ def list_runs(session: Session, evidence_id: int) -> list[Run]:
     return list(session.scalars(stmt))
 
 
-def list_scoped_notes(session: Session, evidence_id: int | None) -> list[Note]:
+def list_scoped_notes(
+    session: Session, evidence_id: int | None, case_id: int | None = None
+) -> list[Note]:
+    """Notes of one image, or of one case."""
+    if case_id is not None:
+        return [n for n in notes_svc.list_notes(session, case_id=case_id) if n.case_id == case_id]
+    if evidence_id is None:
+        return []
     notes = notes_svc.list_notes(session, evidence_id=evidence_id)
-    # Robust to list_notes(None) meaning either "global only" or "all notes".
     return [n for n in notes if n.evidence_id == evidence_id]
 
 
@@ -306,7 +327,14 @@ def evidence_list_response(request: Request, session: Session, **extra: Any) -> 
     counts = dict(
         session.execute(select(Run.evidence_id, func.count(Run.id)).group_by(Run.evidence_id)).all()
     )
-    return render(request, "_evidence_list.html", evidence=evidence, run_counts=counts, **extra)
+    return render(
+        request,
+        "_evidence_list.html",
+        evidence=evidence,
+        run_counts=counts,
+        evidence_cases=_evidence_cases(session),
+        **extra,
+    )
 
 
 def runs_response(
@@ -323,9 +351,13 @@ def runs_response(
     )
 
 
-def notes_response(request: Request, session: Session, evidence_id: int | None) -> HTMLResponse:
-    notes = list_scoped_notes(session, evidence_id)
-    return render(request, "_notes.html", notes=notes, evidence_id=evidence_id)
+def notes_response(
+    request: Request, session: Session, evidence_id: int | None, case_id: int | None = None
+) -> HTMLResponse:
+    notes = list_scoped_notes(session, evidence_id, case_id)
+    return render(
+        request, "_notes.html", notes=notes, evidence_id=evidence_id, note_case_id=case_id
+    )
 
 
 def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) -> dict[str, Any]:
@@ -428,10 +460,16 @@ def _row_artifacts(run: Run) -> dict[int, list[Any]]:
 
 
 def page_url(
-    run_id: int, view: results_svc.RowView, fragment: bool = False, **overrides: Any
+    run_id: int,
+    view: results_svc.RowView,
+    fragment: bool = False,
+    case: int | None = None,
+    **overrides: Any,
 ) -> str:
     """URL of the run page (or the rows fragment) for a view, e.g. with another offset/sort."""
     params = view.to_params(**overrides)
+    if case:
+        params = {"case": case, **params}
     if params.get("limit") == PAGE_SIZE:
         params.pop("limit")
     base = f"/ui/runs/{run_id}/rows" if fragment else f"/runs/{run_id}"
@@ -439,6 +477,35 @@ def page_url(
 
 
 templates.env.globals.update(page_url=page_url)
+
+
+def share_ctx(evidence_id: int | None, case_id: int | None) -> dict[str, Any]:
+    """Sharing context for templates: the active case (if the image is in it), the cases a
+    "Share" can go to, and which items of this image are already shared in the active case."""
+    from app.db import SessionLocal
+    from app.services import cases as cases_svc
+    from app.services import sharing
+
+    empty: dict[str, Any] = {"active": None, "label": "", "cases": [], "shared": {}}
+    if not evidence_id:
+        return empty
+    try:
+        with SessionLocal() as s:
+            mine = [
+                (c.id, c.name, label) for c, label in cases_svc.cases_for_evidence(s, evidence_id)
+            ]
+            active = next((m for m in mine if m[0] == case_id), None)
+            return {
+                "active": active,
+                "label": active[2] if active else "",
+                "cases": [active] if active else mine,
+                "shared": sharing.shared_keys(s, active[0], evidence_id) if active else {},
+            }
+    except Exception:
+        return empty
+
+
+templates.env.globals.update(share_ctx=share_ctx)
 templates.env.globals.update(zip_password=lambda: get_settings().artifact_zip_password)
 
 
@@ -451,14 +518,31 @@ def index(request: Request, session: SessionDep) -> HTMLResponse:
     counts = dict(
         session.execute(select(Run.evidence_id, func.count(Run.id)).group_by(Run.evidence_id)).all()
     )
+    from app.services import cases as cases_svc
+
     return render(
         request,
         "index.html",
         evidence=evidence,
         run_counts=counts,
-        notes=list_scoped_notes(session, None),
+        cases=cases_svc.list_cases(session),
+        evidence_cases=_evidence_cases(session),
         evidence_id=None,
     )
+
+
+def _evidence_cases(session: Session) -> dict[int, list[Any]]:
+    """{evidence_id: [(case, label), ...]} for the evidence list's case chips."""
+    from app.models import Case, CaseEvidence
+
+    out: dict[int, list[Any]] = {}
+    for ev_id, case, label in session.execute(
+        select(CaseEvidence.evidence_id, Case, CaseEvidence.label)
+        .join(Case, Case.id == CaseEvidence.case_id)
+        .order_by(Case.name)
+    ):
+        out.setdefault(ev_id, []).append((case, label))
+    return out
 
 
 @router.get("/evidence/{evidence_id}", response_class=HTMLResponse)
@@ -467,9 +551,45 @@ def evidence_page(
     session: SessionDep,
     evidence_id: int,
     plugin: str | None = None,
+    case: int | None = None,
 ) -> HTMLResponse:
     ev = get_evidence_or_404(session, evidence_id)
-    return render(request, "evidence.html", **evidence_context(session, ev, plugin))
+    ctx = {**evidence_context(session, ev, plugin), **case_context(session, ev, case)}
+    return render(request, "evidence.html", **ctx)
+
+
+def case_context(session: Session, ev: Evidence, case_id: int | None) -> dict[str, Any]:
+    """Case panel of an image page: its cases, and (with an active case) what OTHER images
+    shared in it plus what this image shared."""
+    from app.services import cases as cases_svc
+    from app.services import sharing
+
+    image_cases = cases_svc.cases_for_evidence(session, ev.id)
+    active = next(((c, label) for c, label in image_cases if c.id == case_id), None)
+    ctx: dict[str, Any] = {
+        "image_cases": image_cases,
+        "active_case": active[0] if active else None,
+        "active_label": active[1] if active else "",
+        "case_warning": None,
+        "shared_in_case": [],
+        "shared_from_here": [],
+    }
+    if case_id and active is None:
+        ctx["case_warning"] = f"This image is not in case {case_id}; showing it without a case."
+        ctx["active_case_id"] = None
+        ctx["case_q"] = ""
+        ctx["case_amp"] = ""
+        return ctx
+    if active:
+        ctx["shared_in_case"] = sharing.resolved_for_case(
+            session, case_id, exclude_evidence_id=ev.id
+        )
+        ctx["shared_from_here"] = [
+            sharing.resolve(session, i, case_id)
+            for i in sharing.list_items(session, case_id, only_evidence_id=ev.id)
+        ]
+        ctx["case_labels"] = cases_svc.labels(session, case_id)
+    return ctx
 
 
 @router.get("/runs/{run_id}", response_class=HTMLResponse)
@@ -485,6 +605,16 @@ def run_page(
     run = get_run_or_404(session, run_id)
     view = results_svc.RowView.from_params(request.query_params)
     return _render_run_page(request, session, run, offset, limit, row, view=view)
+
+
+def _active_case(session: Session, request: Request, evidence_id: int) -> Any:
+    """The active case object if the request names one this image belongs to."""
+    from app.services import cases as cases_svc
+
+    case_id = request_case_id(request)
+    if case_id and cases_svc.membership(session, case_id, evidence_id):
+        return session.get(cases_svc.Case, case_id)
+    return None
 
 
 def _delete_preview(session: Session, run: Run) -> Any:
@@ -536,6 +666,7 @@ def _render_run_page(
         follow_ups=follow_ups,
         message=message,
         zip_password=get_settings().artifact_zip_password,
+        active_case=_active_case(session, request, run.evidence_id),
         **ctx,
     )
 
@@ -568,15 +699,24 @@ def ui_hash(request: Request, evidence_id: int, session: SessionDep) -> Response
 
 
 @router.get("/ui/notes", response_class=HTMLResponse)
-def ui_notes(request: Request, session: SessionDep, evidence_id: int | None = None) -> HTMLResponse:
-    return notes_response(request, session, evidence_id)
+def ui_notes(
+    request: Request,
+    session: SessionDep,
+    evidence_id: int | None = None,
+    case_id: int | None = None,
+) -> HTMLResponse:
+    return notes_response(request, session, evidence_id, case_id)
 
 
-def _notes_done(request: Request, session: Session, evidence_id: int | None) -> Response:
+def _notes_done(
+    request: Request, session: Session, evidence_id: int | None, case_id: int | None = None
+) -> Response:
     session.commit()
     if not is_htmx(request):
-        return redirect(f"/evidence/{evidence_id}#notes" if evidence_id else "/#notes")
-    return notes_response(request, session, evidence_id)
+        if case_id:
+            return redirect(f"/cases/{case_id}#notes")
+        return redirect(f"/evidence/{evidence_id}#notes" if evidence_id else "/")
+    return notes_response(request, session, evidence_id, case_id)
 
 
 @router.post("/ui/notes", dependencies=[Depends(same_origin_post)])
@@ -587,12 +727,19 @@ def ui_note_create(
 ) -> Response:
     raw_ev = (form.get("evidence_id") or "").strip()
     evidence_id = int(raw_ev) if raw_ev.isdigit() else None
+    raw_case = (form.get("case_id") or "").strip()
+    case_id = int(raw_case) if raw_case.isdigit() and evidence_id is None else None
     if evidence_id is not None:
         get_evidence_or_404(session, evidence_id)
+    if evidence_id is None and case_id is None:
+        raise HTTPException(422, "a note belongs to an image or a case")
     body = (form.get("body") or "").strip()
     if body:
-        notes_svc.create_note(session, body, evidence_id=evidence_id)
-    return _notes_done(request, session, evidence_id)
+        try:
+            notes_svc.create_note(session, body, evidence_id=evidence_id, case_id=case_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+    return _notes_done(request, session, evidence_id, case_id)
 
 
 @router.post("/ui/notes/{note_id}/edit", dependencies=[Depends(same_origin_post)])
@@ -605,11 +752,11 @@ def ui_note_edit(
     note = session.get(Note, note_id)
     if note is None:
         raise HTTPException(404, "note not found")
-    evidence_id = note.evidence_id
+    evidence_id, case_id = note.evidence_id, note.case_id
     body = (form.get("body") or "").strip()
     if body:
         notes_svc.update_note(session, note_id, body)
-    return _notes_done(request, session, evidence_id)
+    return _notes_done(request, session, evidence_id, case_id)
 
 
 @router.post("/ui/notes/{note_id}/delete", dependencies=[Depends(same_origin_post)])
@@ -617,9 +764,9 @@ def ui_note_delete(request: Request, note_id: int, session: SessionDep) -> Respo
     note = session.get(Note, note_id)
     if note is None:
         raise HTTPException(404, "note not found")
-    evidence_id = note.evidence_id
+    evidence_id, case_id = note.evidence_id, note.case_id
     notes_svc.delete_note(session, note_id)
-    return _notes_done(request, session, evidence_id)
+    return _notes_done(request, session, evidence_id, case_id)
 
 
 @router.get("/ui/evidence/{evidence_id}/plugin-form", response_class=HTMLResponse)
@@ -1016,14 +1163,17 @@ def ui_case_export(
     evidence_id: str | None = None,
     format: str = "md",  # noqa: A002
     include_dumped: bool = False,
+    case_id: str | None = None,
 ) -> Response:
-    """Target of the export dialogs on the home and evidence pages."""
+    """Target of the export dialogs on the home, case and evidence pages."""
     from app.api.export import export_response
 
     ev_id = _int_or_none(evidence_id)
     if ev_id is not None:
         get_evidence_or_404(session, ev_id)
-    return export_response(session, ev_id, format, include_dumped and format == "zip")
+    return export_response(
+        session, ev_id, format, include_dumped and format == "zip", _int_or_none(case_id)
+    )
 
 
 # --------------------------------------------------------------------------- system / health

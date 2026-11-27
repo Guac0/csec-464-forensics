@@ -29,11 +29,15 @@ def get_note(session: Session, note_id: int) -> Note:
     return note
 
 
-def list_notes(session: Session, evidence_id: int | None = None) -> list[Note]:
-    """All notes (oldest first), or only those attached to ``evidence_id`` when given."""
+def list_notes(
+    session: Session, evidence_id: int | None = None, case_id: int | None = None
+) -> list[Note]:
+    """All notes (oldest first), or only those of ``evidence_id`` / ``case_id`` when given."""
     stmt = select(Note).order_by(Note.created_at, Note.id)
     if evidence_id is not None:
         stmt = stmt.where(Note.evidence_id == evidence_id)
+    if case_id is not None:
+        stmt = stmt.where(Note.case_id == case_id)
     return list(session.scalars(stmt))
 
 
@@ -57,6 +61,7 @@ def _add_version(session: Session, note: Note, action: str, body: str) -> NoteVe
         action=action,
         body=body,
         evidence_id=note.evidence_id,
+        case_id=note.case_id,
         actor=audit.current_context().actor,
     )
     session.add(version)
@@ -86,15 +91,25 @@ def _add_version(session: Session, note: Note, action: str, body: str) -> NoteVe
             if previous is not None
             else None,
             "chars": len(body),
+            "case_id": note.case_id,
         },
     )
     return version
 
 
-def create_note(session: Session, body: str, evidence_id: int | None = None) -> Note:
+def create_note(
+    session: Session, body: str, evidence_id: int | None = None, case_id: int | None = None
+) -> Note:
+    """A note on exactly one image (``evidence_id``) or one case (``case_id``)."""
+    if (evidence_id is None) == (case_id is None):
+        raise ValueError("a note belongs to exactly one image or one case")
     if evidence_id is not None:
         get_evidence(session, evidence_id)
-    note = Note(body=_clean_body(body), evidence_id=evidence_id)
+    else:
+        from app.services.cases import get_case
+
+        get_case(session, case_id)  # type: ignore[arg-type]
+    note = Note(body=_clean_body(body), evidence_id=evidence_id, case_id=case_id)
     session.add(note)
     session.flush()
     _add_version(session, note, "create", note.body)

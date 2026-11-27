@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ ev.rel_path }}{% endblock %}
-{% block crumbs %}<a href="/">Evidence</a> / <span class="mono">{{ ev.rel_path }}</span>{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a> / {% if active_case %}<a href="/cases/{{ active_case.id }}">Case {{ active_case.name }}</a> / {% endif %}<span class="mono">{{ ev.rel_path }}</span>{% if active_label %} <span class="badge case-chip">{{ active_label }}</span>{% endif %}{% endblock %}
 {% block content %}
 <section class="panel">
   <div class="panel-head">
@@ -8,6 +8,19 @@
     <button type="button" class="small secondary" onclick="document.getElementById('case-export-dialog').showModal()">Export…</button>
   </div>
   {% set export_evidence = ev %}{% include "_case_export_dialog.html" %}
+  {% if case_warning %}<p class="flash warn">{{ case_warning }}</p>{% endif %}
+  <p class="case-bar small-text">
+    {% if image_cases %}
+      Cases:
+      {% for c, label in image_cases %}
+        {% if active_case and c.id == active_case.id %}<span class="badge case-chip active" title="active case">{{ c.name }}{% if label %}: {{ label }}{% endif %}</span>
+        {% else %}<a class="badge case-chip" href="/evidence/{{ ev.id }}?case={{ c.id }}">{{ c.name }}{% if label %}: {{ label }}{% endif %}</a>{% endif %}
+      {% endfor %}
+      {% if active_case %}· <a href="/evidence/{{ ev.id }}">view without a case</a>{% else %}<span class="muted">· open the image in a case to see what its other images shared</span>{% endif %}
+    {% else %}
+      <span class="muted">Not in any case. Add it to a case (from the case's page) to share findings with other images.</span>
+    {% endif %}
+  </p>
   <dl class="meta">
     <dt>Size</dt><dd>{{ ev.size_bytes | humansize }} ({{ ev.size_bytes }} bytes)</dd>
     <dt>Integrity</dt><dd>{% include "_integrity_badge.html" %} <a class="small-text" href="#integrity">details</a></dd>
@@ -81,7 +94,7 @@
           <td><span class="badge {{ 'status-succeeded' if c.result == 'ok' else 'status-failed' }}">{{ c.result }}</span></td>
           <td class="mono small-text">{{ c.sha256 or "—" }}</td>
           <td class="mono small-text">{{ "%.1f s" | format(c.seconds) if c.seconds is not none else "" }}</td>
-          <td>{% if c.run_id %}<a href="/runs/{{ c.run_id }}">{{ c.run_id }}</a>{% endif %}</td>
+          <td>{% if c.run_id %}<a href="/runs/{{ c.run_id }}{{ case_q }}">{{ c.run_id }}</a>{% endif %}</td>
           <td class="small-text">{{ c.detail }}</td>
         </tr>
       {% endfor %}
@@ -146,6 +159,21 @@
   </div>
 
   <div class="col-side">
+    {% if active_case %}
+    <section class="panel shared-panel" id="shared">
+      <h2>Shared in case {{ active_case.name }} ({{ shared_in_case | length }})</h2>
+      <p class="muted small-text">Leads other images in this case shared. They are not findings on this image: each names the image it came from and is shown as its source is now.</p>
+      {% set items = shared_in_case %}{% set empty_text = "Nothing shared from the other images yet." %}
+      {% include "_shared_list.html" %}
+      {% if shared_from_here %}
+      <details>
+        <summary class="small-text">Shared from this image ({{ shared_from_here | length }})</summary>
+        {% set items = shared_from_here %}{% set unshare_next = "/evidence/" ~ ev.id ~ "?case=" ~ active_case.id ~ "#shared" %}
+        {% include "_shared_list.html" %}
+      </details>
+      {% endif %}
+    </section>
+    {% endif %}
     <section class="panel ai-panel" id="ai">
       <h2>AI assistant</h2>
       {% include "_ai_history.html" %}
@@ -168,4 +196,5 @@
     </section>
   </div>
 </div>
+{% set sc = share_ctx(ev.id, active_case_id) %}{% include "_share_dialog.html" %}
 {% endblock %}
