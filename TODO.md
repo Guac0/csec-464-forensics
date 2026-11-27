@@ -98,8 +98,10 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
       to both volumes could still rewrite both. Copy backups/anchors off-machine for stronger
       guarantees.
 
-- [ ] Multi-evidence, part 2b: before/after comparison view (catalog `compare_keys` per plugin,
-      analyst can override).
+- [ ] Comparison: set real `compare_keys` / `compare_ignore` for each catalog plugin (only EXAMPLE
+      keys for pslist and info exist). Comparisons hold both runs' key values in memory: fine
+      for typical runs, heavy for multi-million-row filescan runs. Values are compared exactly
+      (no case-insensitivity or path normalisation yet).
 - [ ] Indicators: no regex mode, no import/export of watchlists (e.g. STIX/CSV), and "Check all
       images" re-reads every row (no incremental index). Indicator types are generic; columns
       per plugin (e.g. which column holds a remote IP) are not used yet.

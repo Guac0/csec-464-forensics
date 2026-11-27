@@ -156,7 +156,7 @@ Team workflow, branch rules and guidance for AI coding assistants:
   [evals/README.md](evals/README.md).
 
 ### Cases (several images)
-- **Status:** cases, sharing and indicators done; comparison view next
+- **Status:** done (cases, sharing, indicators, comparison view)
 - A **case** groups images investigated together, e.g. before/after snapshots of one machine,
   or several machines hit by the same actor. Create one on the home page and add images with an
   optional label ("before", "after", "laptop-2"). An image can be in several cases; cases are
@@ -179,6 +179,13 @@ Team workflow, branch rules and guidance for AI coding assistants:
   canonical IPs; a process name also matches a path ending in it); **contains** and "only in
   column X" are per-indicator options. New runs are checked automatically as they finish;
   **Check all images** re-checks existing runs (on demand: it reads every row of every run).
+- **Compare** two images of a case (case page → Compare…): pick a plugin with finished runs on
+  both, and the rows are paired by the columns that identify "the same thing" (the catalog's
+  `compare_keys`, e.g. process name; otherwise every non-volatile column). Results: **only in
+  A**, **only in B**, **changed** (with the columns that differ, A → B) and a count of identical
+  rows. PIDs, offsets, times and thread/handle counts are ignored by default; tick other columns
+  to change that. Download everything as CSV, or **Save to case** to list it on the case page
+  and in the case report (re-opened with current data).
 - Each case has its own **case notes** (they replace the old investigation-wide notes; existing
   ones were moved into a "General" case containing every image).
 - Exports: **Export case…** gives a case report (images and labels, case notes, everything

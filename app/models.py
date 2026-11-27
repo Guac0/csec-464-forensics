@@ -458,3 +458,26 @@ class IndicatorHit(Base):
     column: Mapped[str] = mapped_column(String)
     cell: Mapped[str] = mapped_column(Text)  # the matching cell value (truncated)
     found_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SavedComparison(Base):
+    """A before/after comparison saved to a case. Stores the settings and the counts when it was
+    saved; opening it recomputes the diff from the (pinned) runs' current rows."""
+
+    __tablename__ = "saved_comparisons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String)
+    plugin: Mapped[str] = mapped_column(String)
+    evidence_a_id: Mapped[int] = mapped_column(Integer)
+    evidence_b_id: Mapped[int] = mapped_column(Integer)
+    run_a_id: Mapped[int] = mapped_column(Integer)
+    run_b_id: Mapped[int] = mapped_column(Integer)
+    keys: Mapped[list[str]] = mapped_column(JSON)
+    ignore: Mapped[list[str]] = mapped_column(JSON)
+    # {"only_a": n, "only_b": n, "changed": n, "same": n} when saved.
+    counts: Mapped[dict[str, int]] = mapped_column(JSON)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

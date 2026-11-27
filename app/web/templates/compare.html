@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Compare — {{ case.name }}{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a> / <a href="/cases/{{ case.id }}">Case {{ case.name }}</a> / Compare{% endblock %}
+{% macro img(ev_id) %}{% for ev, label in members if ev.id == ev_id %}<span class="mono">{{ ev.rel_path }}</span>{% if label %} <span class="badge case-chip">{{ label }}</span>{% endif %}{% endfor %}{% endmacro %}
+{% macro cite(run, idx) %}<a class="mono" href="/runs/{{ run.id }}?case={{ case.id }}&row={{ idx }}#row-{{ run.id }}-{{ idx }}">R{{ run.id }}:{{ idx }}</a>{% endmacro %}
+{% block content %}
+<section class="panel">
+  <h2>Compare two images</h2>
+  <p class="muted small-text">Pairs the rows of one plugin's results on two images by the columns that identify a row (PIDs and offsets change between captures, so they are not used). Nothing is changed on either image.</p>
+  <form method="get" action="/cases/{{ case.id }}/compare" class="add-member">
+    <label>A <select name="a" required>{% for ev, label in members %}<option value="{{ ev.id }}"{% if ev.id == a %} selected{% endif %}>{{ ev.rel_path }}{% if label %} ({{ label }}){% endif %}</option>{% endfor %}</select></label>
+    <label>B <select name="b" required>{% for ev, label in members %}<option value="{{ ev.id }}"{% if ev.id == b or (not b and loop.index == 2) %} selected{% endif %}>{{ ev.rel_path }}{% if label %} ({{ label }}){% endif %}</option>{% endfor %}</select></label>
+    {% if plugins is defined %}
+    <label>Plugin <select name="plugin">{% for p in plugins %}<option value="{{ p }}"{% if p == plugin %} selected{% endif %}>{{ p }}</option>{% else %}<option value="">— no plugin has finished runs on both —</option>{% endfor %}</select></label>
+    {% endif %}
+    <button type="submit" class="small">{{ "Compare" if plugins is defined else "Next" }}</button>
+  </form>
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+</section>
+
+{% if cmp %}
+<section class="panel" id="settings">
+  <h2>{{ cmp.run_a.plugin }}</h2>
+  <form method="get" action="/cases/{{ case.id }}/compare">
+    <input type="hidden" name="custom" value="1">
+    <dl class="meta">
+      <dt>A</dt><dd>{{ img(cmp.run_a.evidence_id) }} run
+        <select name="run_a">{% for r in runs_a %}<option value="{{ r.id }}"{% if r.id == cmp.run_a.id %} selected{% endif %}>{{ r.id }} {{ r.args | args }} ({{ r.finished_at | dt }})</option>{% endfor %}</select></dd>
+      <dt>B</dt><dd>{{ img(cmp.run_b.evidence_id) }} run
+        <select name="run_b">{% for r in runs_b %}<option value="{{ r.id }}"{% if r.id == cmp.run_b.id %} selected{% endif %}>{{ r.id }} {{ r.args | args }} ({{ r.finished_at | dt }})</option>{% endfor %}</select></dd>
+      <dt title="Rows with the same values in these columns are the same thing">Identify rows by</dt>
+      <dd class="checks">{% for c in common %}<label><input type="checkbox" name="keys" value="{{ c }}"{% if c in cmp.keys %} checked{% endif %}> {{ c }}</label>{% endfor %}</dd>
+      <dt title="Not used to decide whether a row changed">Ignore</dt>
+      <dd class="checks">{% for c in common if c not in cmp.keys %}<label><input type="checkbox" name="ignore" value="{{ c }}"{% if c in cmp.ignored %} checked{% endif %}> {{ c }}</label>{% endfor %}</dd>
+    </dl>
+    <button type="submit" class="small">Recompute</button>
+  </form>
+  {% for w in cmp.warnings %}<p class="flash warn small-text">{{ w }}</p>{% endfor %}
+  <p class="compare-counts">
+    <span class="badge sev-high">only in A: {{ cmp.only_a | length }}</span>
+    <span class="badge sev-high">only in B: {{ cmp.only_b | length }}</span>
+    <span class="badge sev-medium">changed: {{ cmp.changed | length }}</span>
+    <span class="badge">same: {{ cmp.same }}</span>
+    · <a href="{{ csv_url }}">Download all as CSV</a>
+  </p>
+  <details>
+    <summary class="small-text">Save to case</summary>
+    <form method="post" action="/ui/cases/{{ case.id }}/comparisons" class="stack">
+      <input type="hidden" name="run_a" value="{{ cmp.run_a.id }}"><input type="hidden" name="run_b" value="{{ cmp.run_b.id }}">
+      <input type="hidden" name="keys_json" value="{{ keys_json }}"><input type="hidden" name="ignore_json" value="{{ ignore_json }}">
+      <label>Title <input name="title" placeholder="e.g. new processes after infection"></label>
+      <label>Comment <textarea name="comment" rows="2"></textarea></label>
+      <button type="submit" class="small">Save</button>
+      <p class="muted small-text">Saves these runs and settings, with today's counts, to the case page and case report. Opening it later recomputes it from the runs' current rows.</p>
+    </form>
+  </details>
+</section>
+
+{% for title, idxs, run, data, id_ in [("Only in A", cmp.only_a, cmp.run_a, data_a, "only-a"), ("Only in B", cmp.only_b, cmp.run_b, data_b, "only-b")] %}
+<section class="panel" id="{{ id_ }}">
+  <h2>{{ title }} ({{ idxs | length }}) <span class="small-text muted">{{ img(run.evidence_id) }}</span></h2>
+  {% if idxs %}
+  <div class="table-wrap"><table class="data results">
+    <thead><tr><th>Row</th>{% for c in cmp.keys %}<th>{{ c }}</th>{% endfor %}{% for c in cmp.compared %}<th class="muted">{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for idx in idxs[:limit] %}{% set d = data.get(idx, {}) %}
+      <tr><td class="cite-key">{{ cite(run, idx) }}</td>{% for c in cmp.keys %}<td>{{ d.get(c) | cell }}</td>{% endfor %}{% for c in cmp.compared %}<td class="muted">{{ d.get(c) | cell }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if idxs | length > limit %}<p class="muted small-text">Showing {{ limit }} of {{ idxs | length }}; download the CSV for all.</p>{% endif %}
+  {% else %}<p class="muted">None.</p>{% endif %}
+</section>
+{% endfor %}
+
+<section class="panel" id="changed">
+  <h2>Changed ({{ cmp.changed | length }})</h2>
+  {% if cmp.changed %}
+  <div class="table-wrap"><table class="data results">
+    <thead><tr><th>Rows (A / B)</th>{% for c in cmp.keys %}<th>{{ c }}</th>{% endfor %}<th>What changed (A → B)</th></tr></thead>
+    <tbody>
+    {% for a_idx, b_idx, cols in cmp.changed[:limit] %}{% set da = data_a.get(a_idx, {}) %}{% set db = data_b.get(b_idx, {}) %}
+      <tr><td class="cite-key">{{ cite(cmp.run_a, a_idx) }} / {{ cite(cmp.run_b, b_idx) }}</td>
+        {% for c in cmp.keys %}<td>{{ da.get(c) | cell }}</td>{% endfor %}
+        <td>{% for c in cols %}<div><strong>{{ c }}</strong>: {{ da.get(c) | cell }} → {{ db.get(c) | cell }}</div>{% endfor %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if cmp.changed | length > limit %}<p class="muted small-text">Showing {{ limit }} of {{ cmp.changed | length }}; download the CSV for all.</p>{% endif %}
+  {% else %}<p class="muted">None.</p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

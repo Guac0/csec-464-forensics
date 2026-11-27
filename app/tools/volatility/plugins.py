@@ -37,6 +37,10 @@ How to add a plugin
 3. ``auto_enumerate=True`` puts the plugin in the "auto-enumerate" batch that is queued for
    each evidence item on request (one Run per plugin, no args). Choose cheap, high-value
    plugins; ``max_concurrent_runs`` defaults to 1 so the batch runs sequentially.
+4b. ``compare_keys`` / ``compare_ignore``: for the before/after comparison view. Keys are the
+   result columns that identify "the same" row in two images (PIDs and offsets change between
+   captures, so never use those); ignore lists extra columns that should not count as a change.
+   Analysts can override both on the comparison page.
 4. ``timeout_seconds``: set this for slow plugins (e.g. filescan/dumpfiles on big images);
    otherwise FT_RUN_TIMEOUT_SECONDS (1 h) applies.
 5. ``presets``: (label, args) pairs shown as one-click suggested queries in the UI. The args
@@ -63,6 +67,8 @@ PLUGINS: list[PluginSpec] = [
         name="windows.info.Info",
         description="EXAMPLE: OS & kernel details of the memory sample.",
         auto_enumerate=True,
+        # EXAMPLE comparison keys: a row is one variable; "changed" = its value differs.
+        compare_keys=("Variable",),
     ),
     # EXAMPLE entry - TODO(forensics): review/replace.
     PluginSpec(
@@ -87,5 +93,8 @@ PLUGINS: list[PluginSpec] = [
             ),
         ),
         presets=(("EXAMPLE: PID 4 (System)", {"pid": [4]}),),
+        # EXAMPLE comparison keys - TODO(forensics): a better identity is name + path + parent
+        # name, which needs pstree/cmdline data joined in.
+        compare_keys=("ImageFileName",),
     ),
 ]

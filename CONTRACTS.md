@@ -203,6 +203,12 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `row_hits`. API `/api/cases/{id}/indicators` (GET/POST, DELETE `/{ind}`, POST `/check`,
   GET `/hits`). Hits are removed with their run's data, indicator or case membership; they never
   enter AI context or hooks.
+- Comparison: `PluginSpec.compare_keys` / `compare_ignore` (catalog). `app/services/compare.py`:
+  `default_settings`, `compare(session, run_a, run_b, keys=None, ignore=None) -> Comparison`
+  (only_a, only_b, changed [(a, b, columns)], same, warnings), `to_csv`, `save` /
+  `list_saved` / `delete_saved` / `recompute` (`SavedComparison`, migration `0011_comparisons`).
+  UI `/cases/{id}/compare` (+ `.csv`); API `POST /api/cases/{id}/compare`,
+  `/api/cases/{id}/comparisons` (GET/POST/DELETE). Both images must be in the case.
 - UI: `/cases/{id}`; image and run pages take `?case=<id>` (active case; HTMX fragments read it
   from HX-Current-URL via `pages.request_case_id`); `/ui/share`, `/ui/shared/{id}/remove`.
 

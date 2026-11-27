@@ -44,6 +44,11 @@ class PluginSpec:
     timeout_seconds: int | None = None
     # True if the plugin always writes files (e.g. windows.dumpfiles.DumpFiles), whatever args.
     writes_files: bool = False
+    # Comparison view (app/services/compare.py): the columns that identify "the same" row in two
+    # images (e.g. process name + path), and extra columns to ignore when deciding whether a
+    # row changed. Defaults when empty: all non-volatile columns identify a row.
+    compare_keys: tuple[str, ...] = ()
+    compare_ignore: tuple[str, ...] = ()
 
     @property
     def may_write_files(self) -> bool:

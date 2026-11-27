@@ -323,6 +323,7 @@ def _case_section(session: Session, case: Case) -> list[str]:
     out.append("")
     out += _notes_section_case(session, case.id)
     out += _indicators_section(session, case.id, members)
+    out += _comparisons_section(session, case.id)
     items = sharing.list_items(session, case.id)
     out += ["### Shared in this case", ""]
     if not items:
@@ -364,6 +365,78 @@ def _indicators_section(session: Session, case_id: int, members: list[Any]) -> l
     )
     out.append("")
     return out + _hit_lines(indicators.hits(session, case_id))
+
+
+REPORT_COMPARE_ROWS = 20
+
+
+def _comparisons_section(session: Session, case_id: int) -> list[str]:
+    """Saved comparisons, recomputed with current data (first rows of each difference)."""
+    from app.services import compare
+
+    saved = compare.list_saved(session, case_id)
+    if not saved:
+        return []
+    out = ["### Comparisons", ""]
+    for s in saved:
+        ev_a, ev_b = session.get(Evidence, s.evidence_a_id), session.get(Evidence, s.evidence_b_id)
+        out += [f"#### {esc(s.title)}", ""]
+        rows = [
+            ["Plugin", code(s.plugin)],
+            ["A", f"{esc(ev_a.rel_path if ev_a else s.evidence_a_id)}, run {s.run_a_id}"],
+            ["B", f"{esc(ev_b.rel_path if ev_b else s.evidence_b_id)}, run {s.run_b_id}"],
+            ["Rows identified by", esc(", ".join(s.keys))],
+            ["Ignored columns", esc(", ".join(s.ignore) or "—")],
+            ["Saved", f"{_ts(s.created_at)} by {esc(s.created_by)}"],
+            ["Counts when saved", esc(_counts(s.counts))],
+        ]
+        cmp = compare.recompute(session, s)
+        rows.append(
+            ["Counts now", esc(_counts(cmp.counts)) if not isinstance(cmp, str) else esc(cmp)]
+        )
+        if s.comment:
+            rows.append(["Comment", esc(s.comment)])
+        out += [*_table(["", ""], rows), ""]
+        if isinstance(cmp, str):
+            continue
+        data_a = compare.rows(session, cmp.run_a.id, cmp.only_a[:REPORT_COMPARE_ROWS])
+        data_b = compare.rows(session, cmp.run_b.id, cmp.only_b[:REPORT_COMPARE_ROWS])
+        listing = (
+            [
+                ["only in A", code(f"R{cmp.run_a.id}:{i}"), code(_keyvals(data_a.get(i), cmp.keys))]
+                for i in cmp.only_a[:REPORT_COMPARE_ROWS]
+            ]
+            + [
+                ["only in B", code(f"R{cmp.run_b.id}:{i}"), code(_keyvals(data_b.get(i), cmp.keys))]
+                for i in cmp.only_b[:REPORT_COMPARE_ROWS]
+            ]
+            + [
+                [
+                    "changed",
+                    code(f"R{cmp.run_a.id}:{a} / R{cmp.run_b.id}:{b}"),
+                    esc(", ".join(cols)),
+                ]
+                for a, b, cols in cmp.changed[:REPORT_COMPARE_ROWS]
+            ]
+        )
+        if listing:
+            out += [*_table(["Difference", "Row", "Identity / changed columns"], listing), ""]
+            if max(len(cmp.only_a), len(cmp.only_b), len(cmp.changed)) > REPORT_COMPARE_ROWS:
+                out += [f"First {REPORT_COMPARE_ROWS} of each kind; the full list is on the "
+                        "comparison page (CSV download).", ""]  # fmt: skip
+    return out
+
+
+def _counts(counts: dict[str, int]) -> str:
+    return (
+        f"only in A {counts.get('only_a', 0)}, only in B {counts.get('only_b', 0)}, "
+        f"changed {counts.get('changed', 0)}, same {counts.get('same', 0)}"
+    )
+
+
+def _keyvals(data: dict[str, Any] | None, keys: list[str]) -> str:
+    data = data or {}
+    return ", ".join(f"{k}={data.get(k)}" for k in keys)
 
 
 def _hit_lines(hits: list[Any]) -> list[str]:
