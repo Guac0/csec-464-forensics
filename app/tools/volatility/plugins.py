@@ -2,11 +2,6 @@
 
 Only plugins listed here can ever be run, and only with the args declared in their ArgSpecs.
 
-=====================================================================================
-TODO(forensics): this catalog is owned by the forensic analysts. The two entries below
-are EXAMPLES that prove the mechanism works; replace/extend them with the real catalog.
-=====================================================================================
-
 How to add a plugin
 -------------------
 1. ``name`` must be the FULL volatility3 plugin name exactly as listed by ``vol -h``
@@ -57,27 +52,24 @@ from app.tools.base import ArgSpec, PluginSpec
 #   - windows.pslist.PsList: `--pid [PID ...]` is ListRequirement(name="pid", element_type=int,
 #     optional=True); `--dump` is BooleanRequirement(name="dump", default=False) ("Extract listed
 #     processes"); dumped files are named in the "File output" column. --physical not exposed.
+_PID_FILTER = ArgSpec(
+    name="pid",
+    flag="--pid",
+    type="int_list",
+    help="Only include these process IDs",
+)
+
 PLUGINS: list[PluginSpec] = [
-    # EXAMPLE entry - TODO(forensics): review/replace.
     PluginSpec(
         name="windows.info.Info",
-        description="EXAMPLE: OS & kernel details of the memory sample.",
+        description="Show Windows version and kernel details from the memory image.",
         auto_enumerate=True,
     ),
-    # EXAMPLE entry - TODO(forensics): review/replace.
     PluginSpec(
         name="windows.pslist.PsList",
-        description="EXAMPLE: processes from the active process list.",
+        description="List processes from the active process list.",
         args=(
-            ArgSpec(
-                name="pid",
-                flag="--pid",
-                type="int_list",
-                help="Only include these process IDs",
-            ),
-            # EXAMPLE of a file-writing option - TODO(forensics): decide which plugins may dump.
-            # Output goes to runs/<id>/output, is hashed and downloadable (see
-            # app/services/artifacts.py), and is capped by FT_MAX_ARTIFACT_BYTES.
+            _PID_FILTER,
             ArgSpec(
                 name="dump",
                 flag="--dump",
@@ -86,6 +78,46 @@ PLUGINS: list[PluginSpec] = [
                 writes_files=True,
             ),
         ),
-        presets=(("EXAMPLE: PID 4 (System)", {"pid": [4]}),),
+        presets=(("PID 4 (System)", {"pid": [4]}),),
+    ),
+    PluginSpec(
+        name="windows.pstree.PsTree",
+        description="Show processes in a tree grouped by parent process.",
+    ),
+    PluginSpec(
+        name="windows.psscan.PsScan",
+        description="Scan memory for process objects, including remnants of exited processes.",
+    ),
+    PluginSpec(
+        name="windows.cmdline.CmdLine",
+        description="Show the command line used to start each process.",
+        args=(_PID_FILTER,),
+    ),
+    PluginSpec(
+        name="windows.dlllist.DllList",
+        description="List loaded DLLs and their paths by process.",
+        args=(_PID_FILTER,),
+    ),
+    PluginSpec(
+        name="windows.handles.Handles",
+        description="List open object handles by process.",
+        args=(_PID_FILTER,),
+    ),
+    PluginSpec(
+        name="windows.malware.malfind.Malfind",
+        description="Flag process memory regions that may contain injected code.",
+        args=(_PID_FILTER,),
+    ),
+    PluginSpec(
+        name="windows.netscan.NetScan",
+        description="Scan for TCP connections, TCP listeners, and UDP endpoints.",
+    ),
+    PluginSpec(
+        name="windows.svcscan.SvcScan",
+        description="Scan for Windows service records, including service names and states.",
+    ),
+    PluginSpec(
+        name="windows.filescan.FileScan",
+        description="Scan memory for Windows file objects and report their paths.",
     ),
 ]

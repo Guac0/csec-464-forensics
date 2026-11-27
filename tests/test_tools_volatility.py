@@ -10,7 +10,7 @@ from app.config import Settings
 from app.tools import registry
 from app.tools.base import ArgSpec, ArgValidationError, ParsedRow, PluginSpec, ToolRequest
 from app.tools.volatility import plugins as plugin_catalog
-from app.tools.volatility.runner import VolatilityRunner, check_argspec
+from app.tools.volatility.runner import VolatilityRunner, check_argspec, vol_command
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -44,7 +44,7 @@ def req(args: dict, plugin: str = TEST_PLUGIN.name) -> ToolRequest:
 # --- catalog -------------------------------------------------------------------------------
 
 
-def test_catalog_examples_are_well_formed() -> None:
+def test_catalog_is_well_formed() -> None:
     names = [p.name for p in plugin_catalog.PLUGINS]
     assert len(names) == len(set(names))
     runner = VolatilityRunner()
@@ -137,7 +137,7 @@ def test_build_argv_exact(runner: VolatilityRunner, settings: Settings, tmp_path
         ev, req({"name": "lsass.exe", "dump": True, "pid": "1 2", "offset": 0}), out
     )
     assert argv == [
-        "vol",
+        vol_command(settings.vol_executable)[0],
         "-q",
         "-r", "jsonl",
         "-s", str(settings.symbols_dir),
@@ -161,6 +161,31 @@ def test_build_argv_bool_false_and_offline(settings: Settings, tmp_path: Path) -
     assert argv[-1] == "windows.info.Info"
 
 
+def test_build_argv_resolves_paths_before_executor_changes_directory(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(settings, "data_dir", Path("data"))
+    monkeypatch.setattr(settings, "symbols_dir", Path("symbols"))
+    monkeypatch.setattr(settings, "vol_executable", "./bin/vol.exe")
+
+    argv = VolatilityRunner().build_argv(
+        Path("evidence/sample.raw"),
+        ToolRequest("windows.pstree.PsTree"),
+        Path("data/runs/1/output"),
+    )
+
+    assert argv[0] == str(tmp_path / "bin" / "vol.exe")
+    for flag, path in (
+        ("-s", "symbols"),
+        ("--cache-path", "data/vol_cache"),
+        ("-o", "data/runs/1/output"),
+        ("-f", "evidence/sample.raw"),
+    ):
+        assert argv[argv.index(flag) + 1] == str(tmp_path / path)
+    assert (tmp_path / "data" / "vol_cache").is_dir()
+
+
 def test_build_argv_omits_false_bool(
     runner: VolatilityRunner, settings: Settings, tmp_path: Path
 ) -> None:
@@ -174,19 +199,19 @@ def test_build_argv_uses_vol_executable(
 ) -> None:
     from app.config import get_settings
 
-    monkeypatch.setenv("FT_VOL_EXECUTABLE", "/opt/vol/bin/vol")
+    executable = str(tmp_path / "bin" / "vol")
+    monkeypatch.setenv("FT_VOL_EXECUTABLE", executable)
     get_settings.cache_clear()
     argv = runner.build_argv(Path("/e/x.raw"), ToolRequest("windows.info.Info"), tmp_path)
-    assert argv[0] == "/opt/vol/bin/vol"
+    assert argv[0] == executable
 
 
-def test_python_script_runs_via_interpreter() -> None:
+def test_python_script_runs_via_interpreter(tmp_path: Path) -> None:
     import sys
 
-    from app.tools.volatility.runner import vol_command
-
+    script = str(tmp_path / "fake_vol.PY")
     assert vol_command("vol") == ["vol"]
-    assert vol_command("C:/tools/fake_vol.PY") == [sys.executable, "C:/tools/fake_vol.PY"]
+    assert vol_command(script) == [sys.executable, script]
 
 
 def test_build_argv_validates(runner: VolatilityRunner, settings: Settings, tmp_path: Path) -> None:

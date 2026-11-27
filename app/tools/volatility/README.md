@@ -30,9 +30,11 @@ The scaffold provides the **mechanism** for running volatility3 safely. The **fo
 
 ## What you need to fill in
 
-- **Plugin catalog** - `plugins.py`. Currently only two EXAMPLE entries
-  (`windows.info.Info`, `windows.pslist.PsList --pid`). Use the full plugin name from `vol -h`
-  (vol does substring matching and errors on ambiguity). Instructions are in the module docstring.
+- **Plugin catalog** - `plugins.py` includes Windows system details, process lists and trees,
+  process scans, command lines, DLLs, handles, possible code injection (Malfind), network
+  endpoints, services, and file objects.
+  CmdLine, DllList, Handles, and Malfind accept a list of PIDs. These entries are available for
+  on-demand runs. Use the full plugin name from `vol -h` when extending the catalog.
 - **Presets** - `PluginSpec.presets`: `(label, args)` one-click queries.
 - **Auto-enumeration set** - `PluginSpec.auto_enumerate=True` on the plugins to queue for each
   new evidence item.
