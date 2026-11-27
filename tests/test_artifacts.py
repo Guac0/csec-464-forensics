@@ -23,6 +23,7 @@ from app.services import runs as runs_service
 from app.tools import executor, hooks
 from app.tools.base import ToolRequest
 from app.tools.hooks import HookContext, HookSpec
+from tests.conftest import symlinks_supported
 
 FAKE_VOL = Path(__file__).parent / "fixtures" / "fake_vol.py"
 PSLIST = "windows.pslist.PsList"
@@ -94,6 +95,8 @@ def test_guess_file_type(tmp_path: Path, content: bytes, expected: str) -> None:
 
 
 def test_dir_size_ignores_symlinks(tmp_path: Path) -> None:
+    if not symlinks_supported(tmp_path):
+        pytest.skip("creating symlinks needs admin rights or Developer Mode on Windows")
     (tmp_path / "a").write_bytes(b"x" * 10)
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b").write_bytes(b"x" * 5)

@@ -469,9 +469,10 @@ def clear_badge_cache() -> None:
 def run_volatility_test(settings: Settings | None = None) -> Check:
     """Run ``vol -h``: checks volatility3 starts and that every catalog plugin exists in it."""
     from app.tools import registry
+    from app.tools.volatility.runner import vol_command
 
     settings = settings or get_settings()
-    argv = [settings.vol_executable, "-h"]
+    argv = [*vol_command(settings.vol_executable), "-h"]
     details = [("Command", " ".join(argv))]
     started = time.monotonic()
     try:

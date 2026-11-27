@@ -50,6 +50,28 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return h.hexdigest()
 
 
+IS_WINDOWS = os.name == "nt"
+
+
+def _kill_tree_windows(proc: subprocess.Popen[bytes]) -> None:
+    """Windows has no process groups/signals: kill the process and all its descendants with
+    taskkill /T (must run while the parent is still alive, or its children are not found)."""
+    try:
+        subprocess.run(  # noqa: S603 - fixed argv
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],  # noqa: S607 - system tool
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        proc.kill()  # in case taskkill was unavailable
+    except OSError:
+        pass
+
+
 def _signal_group(proc: subprocess.Popen[bytes], sig: int) -> None:
     """Send ``sig`` to the process group of ``proc``; fall back to the process itself."""
     killpg = getattr(os, "killpg", None)
@@ -71,7 +93,15 @@ def _signal_group(proc: subprocess.Popen[bytes], sig: int) -> None:
 
 
 def _stop(proc: subprocess.Popen[bytes], grace: float) -> None:
-    """SIGTERM the process group, then SIGKILL it if still alive after ``grace`` seconds."""
+    """SIGTERM the process group, then SIGKILL it if still alive after ``grace`` seconds.
+    On Windows the whole process tree is killed at once (there is no graceful signal)."""
+    if IS_WINDOWS:
+        _kill_tree_windows(proc)
+        try:
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:  # pragma: no cover - pathological
+            pass
+        return
     _signal_group(proc, signal.SIGTERM)
     try:
         proc.wait(timeout=grace)

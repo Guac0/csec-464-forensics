@@ -14,6 +14,21 @@ from app.config import Settings, get_settings
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def symlinks_supported(tmp_path: Path) -> bool:
+    """Creating symlinks on Windows needs admin rights or Developer Mode; tests that need them
+    skip (or drop the symlink part) when they are not available."""
+    target, link = tmp_path / ".symlink-probe-target", tmp_path / ".symlink-probe"
+    target.write_text("x")
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        return False
+    finally:
+        target.unlink(missing_ok=True)
+    link.unlink()
+    return True
+
+
 @pytest.fixture
 def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settings]:
     """Settings pointing at temp dirs. evidence_dir contains one small fake image."""

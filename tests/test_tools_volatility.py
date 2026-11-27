@@ -180,6 +180,15 @@ def test_build_argv_uses_vol_executable(
     assert argv[0] == "/opt/vol/bin/vol"
 
 
+def test_python_script_runs_via_interpreter() -> None:
+    import sys
+
+    from app.tools.volatility.runner import vol_command
+
+    assert vol_command("vol") == ["vol"]
+    assert vol_command("C:/tools/fake_vol.PY") == [sys.executable, "C:/tools/fake_vol.PY"]
+
+
 def test_build_argv_validates(runner: VolatilityRunner, settings: Settings, tmp_path: Path) -> None:
     with pytest.raises(ArgValidationError):
         runner.build_argv(Path("/e/x.raw"), req({"plugin-dirs": "evil"}), tmp_path)

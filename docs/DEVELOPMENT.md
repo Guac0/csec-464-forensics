@@ -112,6 +112,21 @@ diff in your PR. Any evidence-sourced text must go through `esc()`, `code()` or 
 an undeclared file-writing option, a broken preset). At runtime such entries are skipped and
 shown on the System page instead of stopping the app.
 
+## Developing on Windows
+
+The test suite runs natively on Windows (the app itself is meant to run in Docker). Things that
+differ:
+
+- `FT_VOL_EXECUTABLE` pointing at a `.py` script is run with the current Python
+  (`app/tools/volatility/runner.py: vol_command`), because Windows cannot execute scripts
+  directly. That is how tests use `tests/fixtures/fake_vol.py` on every OS.
+- Stopping a run kills the whole process tree with `taskkill /T /F` (no process groups or
+  signals on Windows, so no graceful stop).
+- Tests that create symlinks skip that part unless symlinks are allowed (admin rights or
+  Developer Mode).
+- Finding an orphaned `vol` after a crash uses `/proc`, so it only happens on Linux.
+- Never use `os.kill(pid, 0)` to check a process on Windows: it terminates it.
+
 ## Disk guards in tests
 
 `tests/conftest.py` sets `FT_MIN_FREE_DISK_BYTES=0` and `FT_HARD_MIN_FREE_DISK_BYTES=0` so the

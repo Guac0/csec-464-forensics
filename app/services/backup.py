@@ -33,6 +33,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 import zipfile
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
@@ -164,26 +165,52 @@ def _resolve(path_or_name: str | Path) -> Path:
     return get_backup(str(path_or_name)).path
 
 
-@contextlib.contextmanager
-def _file_lock(path: Path, *, blocking: bool) -> Iterator[bool]:
-    """Exclusive advisory lock on ``path`` (POSIX). Yields False if it is held elsewhere; yields
-    True where locking is unsupported (Windows without Docker)."""
+def _try_lock(f: Any) -> bool:
+    """Non-blocking exclusive lock on an open file (fcntl on POSIX, msvcrt on Windows)."""
     try:
         import fcntl
-    except ImportError:  # pragma: no cover - Windows
-        yield True
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as f:
+    except ImportError:  # Windows
+        import msvcrt
+
+        f.seek(0)
         try:
-            fcntl.flock(f, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-        except BlockingIOError:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
+def _unlock(f: Any) -> None:
+    try:
+        import fcntl
+    except ImportError:  # Windows
+        import msvcrt
+
+        f.seek(0)
+        with contextlib.suppress(OSError):
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    fcntl.flock(f, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def _file_lock(path: Path) -> Iterator[bool]:
+    """Exclusive advisory lock on ``path`` without waiting. Yields False if it is held by
+    another process (or another open handle in this process)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+") as f:
+        if not _try_lock(f):
             yield False
             return
         try:
             yield True
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            _unlock(f)
 
 
 # The running app holds this lock (see app.main) so restore can refuse while it runs.
@@ -194,16 +221,10 @@ def hold_app_lock(settings: Settings | None = None) -> bool:
     """Called at app startup: take the data folder's app lock for the app's lifetime. Returns
     False (and logs) if another process holds it, e.g. a second app on the same data."""
     global _app_lock_file
-    try:
-        import fcntl
-    except ImportError:  # pragma: no cover - Windows
-        return True
     path = (settings or get_settings()).data_dir / APP_LOCK
     path.parent.mkdir(parents=True, exist_ok=True)
-    f = path.open("a")
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    f = path.open("a+")
+    if not _try_lock(f):
         f.close()
         logger.warning("another process is using %s (second app instance or a restore?)", path)
         return False
@@ -214,6 +235,7 @@ def hold_app_lock(settings: Settings | None = None) -> bool:
 def release_app_lock() -> None:
     global _app_lock_file
     if _app_lock_file is not None:
+        _unlock(_app_lock_file)
         _app_lock_file.close()
         _app_lock_file = None
 
@@ -315,7 +337,7 @@ def create_backup(trigger: str = "manual", settings: Settings | None = None) -> 
     if not _create_lock.acquire(blocking=False):
         raise BackupError("a backup is already being made")
     try:
-        with _file_lock(folder / ".backup.lock", blocking=False) as locked:
+        with _file_lock(folder / ".backup.lock") as locked:
             if not locked:
                 raise BackupError("a backup is already being made (another process)")
             needed = estimate_size(settings)
@@ -345,7 +367,7 @@ def _create(trigger: str, settings: Settings, folder: Path) -> BackupInfo:
     while any(folder.glob(f"forensics-backup-{_stamp(created)}-*.zip")):
         created += timedelta(seconds=1)  # names have 1 s resolution: never overwrite one
     name = f"forensics-backup-{_stamp(created)}-{trigger}.zip"
-    with tempfile.TemporaryDirectory(dir=folder, prefix=".tmp-") as tmp:
+    with tempfile.TemporaryDirectory(dir=folder, prefix=".tmp-", ignore_cleanup_errors=True) as tmp:
         tmpdir = Path(tmp)
         snap = tmpdir / DB_NAME
         try:
@@ -470,7 +492,7 @@ def verify_backup(path_or_name: str | Path) -> VerifyReport:
     except (OSError, zipfile.BadZipFile) as exc:
         report.problems.append(f"not a readable ZIP: {exc}")
         return report
-    with zf, tempfile.TemporaryDirectory() as tmp:
+    with zf, tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         try:
             manifest = json.loads(zf.read(MANIFEST))
         except (KeyError, ValueError) as exc:
@@ -533,10 +555,26 @@ def verify_backup(path_or_name: str | Path) -> VerifyReport:
 # --------------------------------------------------------------------------------- restore
 
 
+def _move(src: Path, dst: Path, attempts: int = 5) -> None:
+    """os.replace with a few retries: on Windows, antivirus or the search indexer can hold a
+    just-closed file open for a moment."""
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise BackupError(
+                    f"cannot move {src.name}: it is open in another program (is the app or "
+                    "another tool still using the database?)"
+                ) from None
+            time.sleep(0.2 * (attempt + 1))
+
+
 def app_is_running(settings: Settings | None = None) -> bool:
-    """True if a process holds the data folder's app lock (POSIX only)."""
+    """True if a process holds the data folder's app lock."""
     path = (settings or get_settings()).data_dir / APP_LOCK
-    with _file_lock(path, blocking=False) as free:
+    with _file_lock(path) as free:
         return not free
 
 
@@ -558,9 +596,12 @@ def restore_backup(path_or_name: str | Path, settings: Settings | None = None) -
 
     data = settings.data_dir
     data.mkdir(parents=True, exist_ok=True)
-    with _file_lock(data / APP_LOCK, blocking=False) as locked:
+    with _file_lock(data / APP_LOCK) as locked:
         if not locked:
             raise BackupError("the app started while restoring; stop it and try again")
+        # Close this process's own database connections first: Windows cannot move or
+        # replace a file that is still open (and SQLite keeps pooled connections open).
+        db.dispose_engine()
         aside: Path | None = None
         current = [p for p in data.glob(f"{DB_NAME}*") if p.is_file()]
         raw_now = [
@@ -573,11 +614,11 @@ def restore_backup(path_or_name: str | Path, settings: Settings | None = None) -
             aside = data / f"pre-restore-{_stamp(_now())}"
             aside.mkdir()
             for p in current:
-                os.replace(p, aside / p.name)
+                _move(p, aside / p.name)
             for f in raw_now:
                 target = aside / f.relative_to(data)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(f, target)
+                _move(f, target)
 
         restored = 0
         with zipfile.ZipFile(path) as zf:

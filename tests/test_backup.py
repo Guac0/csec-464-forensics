@@ -219,3 +219,21 @@ def test_cli(session: Session, settings: Settings, capsys: pytest.CaptureFixture
     session.close()
     assert cli(["restore", name, "--yes"]) == 0
     assert "restored" in capsys.readouterr().out
+
+
+def test_dispose_engine_closes_replaced_engines(settings: Settings) -> None:
+    """Restore on Windows needs every connection to the DB closed, including ones from an
+    engine that was replaced (e.g. the backup CLI re-initialising the engine)."""
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session as OrmSession
+
+    old = db.init_engine()
+    s = OrmSession(bind=old)
+    s.execute(text("SELECT 1"))
+    new = db.init_engine()  # e.g. `python -m app.backup create` in the same process
+    with new.connect():
+        pass
+    s.close()  # returns its connection to the OLD engine's pool
+    assert old.pool.checkedin() == 1 and new.pool.checkedin() == 1
+    db.dispose_engine()
+    assert old.pool.checkedin() == 0 and new.pool.checkedin() == 0

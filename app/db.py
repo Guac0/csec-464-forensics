@@ -1,6 +1,7 @@
 """Database engine/session setup (SQLite on the /data volume)."""
 
 import logging
+import weakref
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,6 +20,9 @@ class Base(DeclarativeBase):
 
 
 _engine: Engine | None = None
+# Every engine this process created. Replacing the engine (init_engine again, e.g. the backup
+# CLI or tests) leaves sessions that still use the old one; dispose_engine closes those too.
+_all_engines: "weakref.WeakSet[Engine]" = weakref.WeakSet()
 SessionLocal = sessionmaker(autoflush=False, expire_on_commit=False)
 
 
@@ -33,6 +37,7 @@ def init_engine(url: str | None = None) -> Engine:
         url,
         connect_args={"check_same_thread": False, "timeout": 30},
     )
+    _all_engines.add(_engine)
 
     @event.listens_for(_engine, "connect")
     def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
@@ -46,6 +51,15 @@ def init_engine(url: str | None = None) -> Engine:
 
     SessionLocal.configure(bind=_engine)
     return _engine
+
+
+def dispose_engine() -> None:
+    """Close every idle pooled connection of every engine this process created (e.g. before
+    moving the database file on Windows, which cannot move open files). Engines reconnect on
+    next use. Connections still checked out by an open session are not closed: close sessions
+    first."""
+    for engine in list(_all_engines):
+        engine.dispose()
 
 
 def get_engine() -> Engine:

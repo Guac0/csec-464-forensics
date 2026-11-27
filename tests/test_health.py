@@ -69,11 +69,11 @@ def test_settings_summary_hides_secrets(settings: Settings) -> None:
 
 
 def _fake_vol(tmp_path: Path, plugins: str, code: int = 0) -> Path:
-    script = tmp_path / "vol"
+    """A fake `vol` as a Python script (run via the current interpreter on every OS)."""
+    script = tmp_path / "vol.py"
     script.write_text(
-        f"#!/bin/sh\necho 'Volatility 3 Framework 9.9.9'\necho '{plugins}'\nexit {code}\n"
+        f"import sys\nprint('Volatility 3 Framework 9.9.9')\nprint({plugins!r})\nsys.exit({code})\n"
     )
-    script.chmod(0o755)
     return script
 
 
