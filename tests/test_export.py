@@ -333,3 +333,26 @@ def test_scope_lookup_error(session: Session) -> None:
         export.get_scope(session, 12345)
     assert isinstance(export.get_scope(session, None).evidence, list)
     _ = Evidence  # model import used for typing in fixtures
+
+
+def test_citations_summary_support_states() -> None:
+    _citations_summary = export._citations_summary  # noqa: SLF001
+    assert _citations_summary([]) == "0"
+    ok = {"key": "R1:1", "valid": True, "support": "supported"}
+    assert _citations_summary([ok]) == "1"
+    out = _citations_summary(
+        [
+            ok,
+            {"key": "R1:2", "valid": False, "support": "not_found"},
+            {
+                "key": "R1:3",
+                "valid": True,
+                "support": "unsupported",
+                "unsupported_values": ["PID/port 9"],
+            },
+            {"key": "R1:4", "valid": True},  # stored before support checking existed
+        ]
+    )
+    assert out.startswith("4 (1 invalid: R1:2; 1 cited row(s) don't support the stated values: ")
+    assert "R1:3" in out and "PID/port 9" in out
+    assert "value support not checked (older answer)" in out

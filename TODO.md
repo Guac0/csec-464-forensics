@@ -65,8 +65,10 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] **Evaluation cases** — replace the two `evals/cases/*_example.yaml` (synthetic fixture) with
       cases built from real captured output, then save a baseline per model you use.
 - [ ] **AI context** — `app/ai/context.py`: choose which rows of each plugin are worth sending.
-- [ ] **Citation checking** — `app/ai/citations.py`: verify that cited row values actually
-      support the claim (currently only checks the row exists).
+- [ ] **Citation checking** — `app/ai/citations.py` now checks that typed values (IPs, paths,
+      file names, hex, labelled PIDs/ports, quoted text) next to a citation appear in the cited
+      row(s). Review it against real output: tune what is extracted and the volatility path
+      forms it treats as equal; meaning-level checks (is the claim *true*?) are still manual.
 - [ ] **Dependencies** — decide whether to depend on `volatility3[full]` (some Windows plugins need
       its extra libraries); this changes `pyproject.toml`.
 - [ ] **README** — fill in the stubbed **Features** section.
@@ -114,6 +116,6 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] Integrity: a full re-hash before each run is off by default (`FT_VERIFY_ON_RUN`); the
       default pre-run check is size + modification time only. Decide per deployment.
 - [ ] The UI doesn't refresh automatically after hashing finishes (reload the page).
-- [ ] Failed AI requests show the error text twice in the AI panel.
+- [x] Failed AI requests show the error text twice in the AI panel.
 - [ ] The gitleaks pre-commit hook only protects local commits; in CI it checks nothing.
 - [ ] Linux/macOS memory images (custom symbol tables) are out of scope for the PoC.

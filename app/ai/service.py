@@ -159,6 +159,9 @@ def _run_pipeline(
             "error": reply.error,
             "citations": len(reply.citations or []),
             "invalid_citations": sum(1 for c in reply.citations or [] if not c.get("valid")),
+            "unsupported_citations": sum(
+                1 for c in reply.citations or [] if c.get("support") == "unsupported"
+            ),
             "suggestions": len(reply.suggestions or []),
             "usage": reply.usage,
             "content_sha256": hashlib.sha256(reply.content.encode("utf-8")).hexdigest(),

@@ -227,6 +227,12 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/ai/context.py`: `build_context(session, evidence_id, run_ids=None, row_refs=None) -> tuple[str, dict]`
 - `app/ai/prompts.py`: system prompt templates — **TODO(forensics)** refine
 - `app/ai/citations.py`: `extract_citations(text) -> list[str]`, `validate_citations(session, text) -> list[dict]`
+  - Each citation dict (stored in `AIMessage.citations`): `key`, `run_id`, `row_idx`, `url`,
+    `valid` (row exists), `support` (`supported` | `unsupported` | `unchecked` | `not_found`),
+    `checked` and `unsupported_values` (typed values from the same sentence, see
+    `extract_values`). Answers stored before this field have no `support`:
+    `citation_status(c)` returns `not_checked` for them. Audit `ai.*.response` details include
+    `unsupported_citations`; evals metric `citation_support`.
 - `app/ai/suggestions.py`: `parse_suggestions(text) -> list[dict]`, `validate_suggestions(list) -> list[dict]`
 - `app/ai/service.py`: `ask(session, evidence_id, question, run_ids=None, row_refs=None) -> AIMessage`,
   `summarize_run(session, run_id) -> AIMessage`

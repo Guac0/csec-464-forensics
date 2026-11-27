@@ -34,13 +34,15 @@ Deterministic checks (always), per attempt:
 |---|---|
 | `pass` | every check below passed |
 | `citation_validity` | cited row keys that exist / all citations (invented rows = 0) |
+| `citation_support` | checked citations whose row(s) contain the values stated in the same sentence (PIDs, names, paths, IPs, ...) / checked citations |
 | `expected_row_recall` | expected rows cited / expected rows |
 | `cited_sentence_ratio` | sentences carrying a citation / sentences (rough: claims should be cited) |
 | `mention_recall` | required terms present / required terms |
 | `suggestion_validity` | suggested queries that pass the plugin allowlist / suggestions |
 | `latency_s`, `total_tokens` | cost |
 
-Checks that fail a case: an invented citation, an expected row not cited, too few citations, a
+Checks that fail a case: an invented citation, a cited row that doesn't contain a value stated
+next to it (see `app/ai/citations.py`), an expected row not cited, too few citations, a
 required term missing, a forbidden term present, no valid suggestion of an expected plugin, any
 invalid suggestion.
 
