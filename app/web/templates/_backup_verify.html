@@ -1,0 +1,3 @@
+<span class="badge health-{{ 'ok' if report.ok else 'fail' }}">{{ "verified" if report.ok else "FAILED" }}</span>
+<span class="small-text muted">{{ report.files }} files, {{ report.audit_events }} audit events</span>
+{% for p in report.problems %}<div class="small-text error-text">{{ p }}</div>{% endfor %}

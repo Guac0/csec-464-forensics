@@ -120,8 +120,28 @@
     </section>
 
     <section class="panel">
-      <h2>Runs</h2>
+      <div class="panel-head">
+        <h2>Runs</h2>
+        {% if cleanup and cleanup.count %}
+        <button type="button" class="small secondary" onclick="document.getElementById('cleanup-dialog').showModal()"
+                title="Delete the data of failed, interrupted and cancelled runs">Clean up… ({{ cleanup.count }}, {{ cleanup.bytes | humansize }})</button>
+        {% endif %}
+      </div>
       {% include "_runs.html" %}
+      {% if cleanup and cleanup.count %}
+      <dialog id="cleanup-dialog" class="export-dialog">
+        <form method="post" action="/ui/evidence/{{ ev.id }}/cleanup">
+          <h3>Clean up {{ cleanup.count }} run{{ "s" if cleanup.count != 1 }}?</h3>
+          <p>Deletes the rows, raw output and dumped files ({{ cleanup.bytes | humansize }}) of every {{ cleanup.statuses | join(", ") }} run of this evidence. Each run keeps a tombstone with its hashes and audit history; succeeded runs are not touched.</p>
+          <label for="cleanup-reason">Reason (recorded in the audit log for each run)</label>
+          <textarea id="cleanup-reason" name="reason" rows="2" required placeholder="e.g. freeing space; failed attempts"></textarea>
+          <div class="dialog-buttons">
+            <button type="submit" class="danger">Delete permanently</button>
+            <button type="button" class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+      {% endif %}
     </section>
   </div>
 

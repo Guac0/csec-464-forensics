@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     data_dir: Path = Path("/data")
     # Writable volatility3 symbol cache.
     symbols_dir: Path = Path("/symbols")
+    # Backups (app/services/backup.py). Keep this on a different volume from data_dir.
+    backup_dir: Path = Path("/backups")
+    # Automatic backup when the newest backup is older than this many hours (0 = off).
+    backup_interval_hours: int = 24
+    # Number of automatic backups kept (manual and command-line backups are never pruned).
+    backup_keep: int = 7
 
     # Max concurrent tool runs (volatility is memory hungry).
     max_concurrent_runs: int = 1
@@ -38,6 +44,10 @@ class Settings(BaseSettings):
     max_data_bytes: int = 0
     # A running run is stopped if free space drops below this (protects the SQLite database).
     hard_min_free_disk_bytes: int = 1024**3
+    # Stall watchdog: an active run with no sign of progress for this many seconds (tool
+    # heartbeat, row ingest, next hook) is marked interrupted / its hooks failed, and its worker
+    # slot is freed. 0 = off. A slow but alive `vol` process is FT_RUN_TIMEOUT_SECONDS' job.
+    run_stall_seconds: int = 600
     # Executable used to invoke volatility3.
     vol_executable: str = "vol"
     # Pass --offline to volatility3 (no symbol downloads; pre-fill the symbols volume first).

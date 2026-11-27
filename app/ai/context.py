@@ -196,7 +196,7 @@ def build_context(
 
     stmt = select(Run).where(Run.evidence_id == evidence_id)
     if run_ids is None:
-        stmt = stmt.where(Run.status == RunStatus.SUCCEEDED)
+        stmt = stmt.where(Run.status == RunStatus.SUCCEEDED, Run.deleted_at.is_(None))
     else:
         stmt = stmt.where(Run.id.in_(run_ids))
     runs = session.execute(stmt.order_by(Run.id)).scalars().all()

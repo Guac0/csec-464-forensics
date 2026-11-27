@@ -208,6 +208,8 @@ def test_pid_recorded_while_running_and_cleared_after(
 
     monkeypatch.setattr(worker_mod, "execute", fake_execute)
     run = runs_service.create_run(session, evidence.id, ToolRequest("windows.info.Info"))
+    run.status = RunStatus.RUNNING  # as if claimed by the worker
+    session.commit()
     Worker()._process(session, run.id, threading.Event())
     session.expire_all()
     assert seen == [4242, ["vol", "x"]]

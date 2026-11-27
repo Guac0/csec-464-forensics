@@ -166,6 +166,7 @@ def enqueue_auto(session: Session, evidence_id: int, tool: str = "volatility3") 
                 Run.tool == tool,
                 Run.plugin == spec.name,
                 Run.status.in_(_AUTO_SKIP_STATUSES),
+                Run.deleted_at.is_(None),
             )
         )
         if any((r.args or {}) == normalized for r in existing):

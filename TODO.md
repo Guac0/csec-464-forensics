@@ -81,18 +81,22 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] Large results: decide whether to enable `FT_SEARCH_INDEX` after measuring real runs on the
       team's machines (`python -m scripts.bench_rows --rows 1000000`); existing runs can be
       indexed later with `POST /api/runs/{id}/search-index`.
-- [ ] Dumped files are never deleted. There is now an optional total cap (`FT_MAX_DATA_BYTES`)
-      and free-space checks, but nothing cleans up old runs.
+- [ ] Run deletion is manual (single or bulk clean-up); there is no automatic retention.
+      Deleting a whole evidence item is not supported yet.
+- [ ] Backups exclude dumped files by design, and live on the same machine (separate Docker
+      volume, usually the same disk). Copying them off-machine is manual
+      (`docker compose cp app:/backups ...`).
 - [ ] Set real `timeout_seconds` per catalog plugin once the catalog is final (filescan/dumpfiles
       on big images may need more than the 1 h default).
 - [ ] Orphaned `vol` processes are only found after a crash on Linux (uses /proc); in Docker a
       container restart ends them anyway.
-- [ ] A worker thread that hangs without crashing is not detected (heartbeats are recorded but
-      nothing acts on a stale one).
-- [ ] Decide which plugins may write files (`--dump` etc.); only the EXAMPLE pslist entry does.
-- [ ] The audit chain head lives in the same DB file; someone with write access to the file
-      could rebuild the whole chain. Optionally anchor the head hash elsewhere (exports now print
-      it; copying it to a separate file/system is still open).
+- [ ] A stalled run's Python thread cannot be killed: the watchdog frees its slot, but if the
+      thread is stuck holding SQLite's write lock the whole app waits until it lets go.
+- [ ] Decide (forensics team) which plugins may write files; they must be declared with
+      `writes_files=True`. Only the EXAMPLE pslist `--dump` is.
+- [ ] Audit anchors (`audit-anchors.jsonl`) live in the backup folder; someone with write access
+      to both volumes could still rewrite both. Copy backups/anchors off-machine for stronger
+      guarantees.
 
 - [ ] Case export: the report has no row data inline (it is in the ZIP's CSVs), skips page/API
       request events, note edit history and full AI prompts. Revisit if reviewers need them.

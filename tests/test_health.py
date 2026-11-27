@@ -28,8 +28,11 @@ def _by_key(checks: list[health.Check]) -> dict[str, health.Check]:
 def test_quick_checks_on_a_fresh_install(session: Session, settings: Settings) -> None:
     checks = _by_key(health.quick_checks(session))
     assert set(checks) == {
-        "disk", "folders", "symbols", "worker", "database", "audit", "hooks", "ai_config"
+        "disk", "folders", "symbols", "worker", "database", "audit", "hooks", "ai_config",
+        "catalog", "backups",
     }  # fmt: skip
+    assert checks["catalog"].status == "ok"
+    assert checks["backups"].status == "warn" and "No backup yet" in checks["backups"].summary
     assert checks["disk"].status == "ok"
     assert checks["folders"].status == "ok"
     assert checks["database"].status == "ok" and "up to date" in checks["database"].summary

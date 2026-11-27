@@ -20,6 +20,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
     evidence = tmp_path / "evidence"
     data = tmp_path / "data"
     symbols = tmp_path / "symbols"
+    monkeypatch.setenv("FT_BACKUP_DIR", str(tmp_path / "backups"))
     for d in (evidence, data, symbols):
         d.mkdir()
     (evidence / "sample.raw").write_bytes(b"\x00" * 4096)

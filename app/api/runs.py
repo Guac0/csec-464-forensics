@@ -59,6 +59,8 @@ class RunOut(BaseModel):
     parent_run_id: int | None
     triggered_by_hook: str | None
     rerun_of_id: int | None = None
+    deleted_at: datetime | None = None
+    delete_reason: str | None = None
     chain_depth: int
 
 
@@ -187,6 +189,36 @@ def rerun(run_id: int, session: SessionDep) -> Run:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
+class DeleteIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/{run_id}/delete-preview")
+def delete_preview(run_id: int, session: SessionDep) -> dict[str, Any]:
+    """What deleting this run would remove (rows, bytes, dumped files) and what cites it."""
+    from dataclasses import asdict
+
+    from app.services import run_deletion
+
+    _get_or_404(session, run_id)
+    return asdict(run_deletion.preview(session, run_id))
+
+
+@router.post("/{run_id}/delete", response_model=RunOut)
+def delete_run(run_id: int, body: DeleteIn, session: SessionDep) -> Run:
+    """Delete the run's rows, raw output and dumped files, keeping a tombstone record (with its
+    hashes) and the audit history. Not possible while queued or running."""
+    from app.services import run_deletion
+
+    run = _get_or_404(session, run_id)
+    try:
+        run_deletion.delete_run(session, run_id, body.reason)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    session.refresh(run)
+    return run
+
+
 @router.post("/{run_id}/hooks/rerun", response_model=RunOut)
 def rerun_hooks(run_id: int, session: SessionDep) -> Run:
     """Run the post-run hooks again (e.g. after changing hook code) without re-running the tool.
@@ -221,6 +253,8 @@ def export_run(
 def export_response(session: Session, run: Run, params: Any, fmt: str) -> Response:
     view = results.RowView.from_params(params)
     base = f"run-{run.id}-{run.plugin.rsplit('.', 1)[-1].lower()}"
+    if run.deleted_at is not None:
+        raise HTTPException(status.HTTP_410_GONE, f"run {run.id} was deleted: {run.delete_reason}")
     if fmt == "raw":
         path = (get_settings().data_dir / run.stdout_path) if run.stdout_path else None
         if path is None or not path.is_file():

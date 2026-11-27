@@ -182,3 +182,5 @@ table.kv { border-collapse: collapse; margin: .3rem 0 .3rem 1rem; }
 table.kv th { text-align: left; font-weight: 500; padding: .1rem 1rem .1rem 0; color: #475467; vertical-align: top; }
 table.kv td { padding: .1rem 0; word-break: break-all; }
 #test-volatility, #test-ai { margin-bottom: .8rem; }
+.badge.status-deleted { background: #e4e7ec; color: #475467; text-decoration: line-through; }
+a.cite-deleted { text-decoration: line-through; color: #667085; }

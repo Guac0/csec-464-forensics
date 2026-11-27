@@ -2,7 +2,8 @@
 #
 # Forensics Tool - single-user PoC image.
 # Runs the FastAPI app and the volatility3 CLI (`vol`) as a non-root user.
-# Evidence is mounted read-only at /evidence; state lives in /data and /symbols.
+# Evidence is mounted read-only at /evidence; state lives in /data and /symbols, backups in
+# /backups (keep it a separate volume from /data).
 
 ARG PYTHON_IMAGE=python:3.12-slim-trixie
 FROM ${PYTHON_IMAGE}
@@ -24,7 +25,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_ROOT_USER_ACTION=ignore \
     FT_EVIDENCE_DIR=/evidence \
     FT_DATA_DIR=/data \
-    FT_SYMBOLS_DIR=/symbols
+    FT_SYMBOLS_DIR=/symbols \
+    FT_BACKUP_DIR=/backups
 
 WORKDIR /app
 
@@ -58,13 +60,13 @@ ENV XDG_CACHE_HOME=/symbols/cache
 RUN vol -h > /dev/null \
     && groupadd --gid "${APP_GID}" app \
     && useradd --uid "${APP_UID}" --gid app --create-home --shell /usr/sbin/nologin app \
-    && mkdir -p /data /symbols/cache /evidence \
-    && chown -R app:app /data /symbols \
+    && mkdir -p /data /symbols/cache /evidence /backups \
+    && chown -R app:app /data /symbols /backups \
     && chmod 0755 /evidence
 
 USER app
 
-VOLUME ["/data", "/symbols"]
+VOLUME ["/data", "/symbols", "/backups"]
 EXPOSE 8000
 
 # No curl in the slim image; use the stdlib. Proxies are bypassed on purpose.

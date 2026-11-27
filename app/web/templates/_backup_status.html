@@ -1,0 +1,7 @@
+<div id="backup-status"{% if state.running %} hx-get="/ui/system/backup-status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if state.busy %}<p class="flash warn small-text">A backup is already being made.</p>{% endif %}
+  {% if state.running %}<p class="small-text"><span class="spinner">Making a backup…</span> (the app keeps working meanwhile)</p>
+  {% elif state.error %}<p class="flash error small-text">Backup failed: {{ state.error }}</p>
+  {% elif state.result %}<p class="flash small-text">Created <span class="mono">{{ state.result }}</span>. <a href="/system#backups">Reload</a> to see it in the list.</p>
+  {% endif %}
+</div>

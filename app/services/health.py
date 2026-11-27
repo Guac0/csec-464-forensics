@@ -14,7 +14,9 @@ import subprocess
 import tempfile
 import threading
 import time
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -280,6 +282,97 @@ def check_hooks(settings: Settings) -> Check:
     return Check("hooks", "Post-run hooks", "ok", f"{len(registered)} hook(s) registered.", details)
 
 
+def check_backups(session: Session, settings: Settings) -> Check:
+    from app.models import AuditEvent
+    from app.services import backup
+
+    folder = settings.backup_dir
+    details = [
+        ("Folder (FT_BACKUP_DIR)", str(folder)),
+        (
+            "Automatic (FT_BACKUP_INTERVAL_HOURS / FT_BACKUP_KEEP)",
+            f"every {settings.backup_interval_hours} h, keep {settings.backup_keep}"
+            if settings.backup_interval_hours
+            else "off",
+        ),
+    ]
+    with suppress(OSError):
+        folder.mkdir(parents=True, exist_ok=True)
+    if not folder.is_dir() or _writable(folder) is not None:
+        return Check(
+            "backups",
+            "Backups",
+            "fail",
+            f"backup folder {folder} is missing or not writable.",
+            details,
+        )
+    backups = backup.list_backups(settings)
+    if backups:
+        details.append(("Latest", f"{backups[0].name} ({fmt_bytes(backups[0].size_bytes)})"))
+        details.append(("Backups kept", str(len(backups))))
+    with suppress(OSError):
+        if os.stat(folder).st_dev == os.stat(settings.data_dir).st_dev:
+            details.append(
+                ("Same disk as data", "yes — copy backups off this machine for real safety")
+            )
+    scheduler = backup.get_scheduler()
+    if scheduler.last_error:
+        details.append(("Last automatic backup error", scheduler.last_error))
+
+    # Anchor: the audit head recorded (outside the DB) by the last backup must still be in the
+    # live chain with the same hash; otherwise the chain was rebuilt or the DB replaced.
+    anchor = backup.last_anchor(settings)
+    if anchor and anchor.get("head_seq"):
+        live = session.scalar(select(AuditEvent.hash).where(AuditEvent.seq == anchor["head_seq"]))
+        if live != anchor.get("head_hash"):
+            return Check(
+                "backups",
+                "Backups",
+                "fail",
+                f"The audit log no longer contains the event anchored by backup "
+                f"{anchor.get('backup')} (seq {anchor['head_seq']}): the log was rebuilt, or this "
+                "database is not the one that was backed up (e.g. after a restore of an older "
+                "backup).",
+                details,
+            )
+        details.append(("Audit anchor", f"seq {anchor['head_seq']} matches"))
+
+    if scheduler.last_error:
+        return Check("backups", "Backups", "warn", "The last automatic backup failed.", details)
+    if not backups:
+        status: Status = "warn" if settings.backup_interval_hours else "info"
+        return Check("backups", "Backups", status, "No backup yet.", details)
+    age = datetime.now(UTC) - backups[0].created_at
+    hours = age.total_seconds() / 3600
+    if settings.backup_interval_hours and hours > 2 * settings.backup_interval_hours:
+        return Check("backups", "Backups", "warn", f"Latest backup is {hours:.0f} h old.", details)
+    return Check("backups", "Backups", "ok", f"Latest backup {hours:.1f} h ago.", details)
+
+
+def check_catalog() -> Check:
+    from app.tools import registry
+
+    runner = registry.get_runner("volatility3")
+    problems = runner.catalog_problems()
+    valid = runner.plugins()
+    writing = [p.name for p in valid if p.may_write_files]
+    details = [
+        ("Usable plugins", str(len(valid))),
+        ("May write files", ", ".join(writing) or "none"),
+    ]
+    details += [(f"Skipped: {name}", "; ".join(errs)) for name, errs in sorted(problems.items())]
+    if problems:
+        return Check(
+            "catalog",
+            "Plugin catalog",
+            "fail",
+            f"{len(problems)} catalog entr{'y' if len(problems) == 1 else 'ies'} skipped as "
+            "invalid (see details; fix app/tools/volatility/plugins.py).",
+            details,
+        )
+    return Check("catalog", "Plugin catalog", "ok", f"{len(valid)} plugin(s), all valid.", details)
+
+
 def check_ai_config(settings: Settings) -> Check:
     details = [
         ("Base URL (FT_AI_BASE_URL)", settings.ai_base_url),
@@ -314,6 +407,8 @@ def quick_checks(session: Session, settings: Settings | None = None) -> list[Che
         lambda: check_database(session, settings),
         lambda: check_audit(session, settings),
         lambda: check_hooks(settings),
+        check_catalog,
+        lambda: check_backups(session, settings),
         lambda: check_ai_config(settings),
     ):
         try:

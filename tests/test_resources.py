@@ -144,6 +144,8 @@ def test_worker_fails_run_stopped_for_disk_space(
 
     monkeypatch.setattr(worker_mod, "execute", fake_execute)
     run = runs_service.create_run(session, evidence.id, ToolRequest("windows.info.Info"))
+    run.status = RunStatus.RUNNING  # as if claimed by the worker
+    session.commit()
     Worker()._process(session, run.id, threading.Event())
     session.expire_all()
     run = session.get(Run, run.id)

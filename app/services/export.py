@@ -347,7 +347,7 @@ def _runs_section(session: Session, ev: Evidence) -> list[str]:
                 code(r.plugin),
                 code(json.dumps(r.args or {}, sort_keys=True)),
                 esc(r.origin.value),
-                esc(r.status.value),
+                esc(r.status.value) + (" (deleted)" if r.deleted_at else ""),
                 str(r.row_count),
                 _ts(r.finished_at),
             ]
@@ -370,6 +370,17 @@ def _run_detail(session: Session, r: Run) -> list[str]:
         ["Started / finished (UTC)", f"{_ts(r.started_at)} / {_ts(r.finished_at)}"],
         ["Rows", str(r.row_count)],
     ]
+    if r.deleted_at is not None:
+        rows.insert(
+            1,
+            [
+                "Deleted",
+                f"{_ts(r.deleted_at)} — {esc(r.delete_reason)} (rows, raw output and dumped "
+                "files removed; hashes above are what they were)",
+            ],
+        )
+    if r.rerun_of_id:
+        rows.append(["Re-run of", f"run {r.rerun_of_id}"])
     if r.parent_run_id:
         rows.append(["Queued by", f"hook {code(r.triggered_by_hook)} after run {r.parent_run_id}"])
     if r.integrity_warning:
@@ -563,6 +574,9 @@ def build_bundle(
     for ev in scope.evidence:
         for r in _runs(session, ev.id):
             base = f"evidence-{ev.id}/run-{r.id}-{r.plugin.rsplit('.', 1)[-1].lower()}"
+            if r.deleted_at is not None:
+                notes.append(f"{base}: run data was deleted ({r.delete_reason})")
+                continue
             if session.scalar(select(ResultRow.id).where(ResultRow.run_id == r.id).limit(1)):
                 csv_text = "".join(
                     results.export_rows(session, r, results.RowView(), "csv")
