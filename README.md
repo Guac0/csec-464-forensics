@@ -80,28 +80,6 @@ FT_EVIDENCE_DIR=./evidence FT_DATA_DIR=./data FT_SYMBOLS_DIR=./symbols FT_BACKUP
   uvicorn app.main:create_app --factory --reload
 ```
 
-On Windows, run these commands in PowerShell from the repository root. If you already have
-a `.venv` with the project dependencies installed, start at the environment variables.
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev,volatility]"
-
-$env:FT_EVIDENCE_DIR = "$PWD\evidence"
-$env:FT_DATA_DIR = "$PWD\data"
-$env:FT_SYMBOLS_DIR = "$PWD\symbols"
-$env:FT_BACKUP_DIR = "$PWD\backups"
-$env:FT_VOL_EXECUTABLE = "$PWD\.venv\Scripts\vol.exe"
-
-New-Item -ItemType Directory -Force data,symbols,backups | Out-Null
-.\.venv\Scripts\python.exe -m uvicorn app.main:create_app --factory
-```
-
-Copy a Windows RAM image into `evidence/`, open [the local app](http://127.0.0.1:8000), and click
-**Scan evidence folder**. Open the image and run `windows.pstree.PsTree` to see the process tree.
-Use a PID from the tree with `windows.cmdline.CmdLine` to inspect that process's command line.
-The first run may need internet access to fetch matching Windows symbols.
-
 Team workflow, branch rules and guidance for AI coding assistants:
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Outstanding setup and hand-off work: [TODO.md](TODO.md).
 
@@ -142,13 +120,12 @@ separated by spaces or commas.
 | `windows.filescan.FileScan` | File objects and their paths | — | — |
 
 ### Preset queries
-
-The **PID 4 (System)** preset in PsList filters the active process list to the Windows System process.
+- **Status:** TODO
+- _TODO: describe the hardcoded suggested queries and when to use them._
 
 ### Auto-enumeration
-
-**Auto-enumerate** queues Windows Info and PsList to identify the OS and establish an active
-process list. All catalog plugins are available for on-demand runs.
+- **Status:** infrastructure done, plugin set TODO
+- _TODO: list what runs when "Auto-enumerate" is clicked and why._
 
 ### Results browsing
 - **Status:** infrastructure done
@@ -163,7 +140,7 @@ process list. All catalog plugins are available for on-demand runs.
 - _TODO: describe any per-plugin views or highlighting._
 
 ### Dumped files
-- PsList exposes `--dump` to extract process executables. Combine it with a PID filter to limit output.
+- **Status:** infrastructure done; which plugins may dump is TODO (example: pslist `--dump`)
 - Files a plugin writes (e.g. dumped processes) are hashed (SHA-256, MD5, SHA-1), typed, linked
   to the result row that names them, and listed on the run page. Downloads are an encrypted zip
   (password `infected`) by default, or the raw file after a warning; every download re-checks
