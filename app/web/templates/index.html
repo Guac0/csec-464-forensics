@@ -4,11 +4,15 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Evidence</h2>
-    <form method="post" action="/ui/scan" hx-post="/ui/scan" hx-target="#evidence-list" hx-swap="outerHTML">
-      <button type="submit">Scan evidence folder</button>
-    </form>
+    <div class="filter">
+      <form method="post" action="/ui/scan" hx-post="/ui/scan" hx-target="#evidence-list" hx-swap="outerHTML">
+        <button type="submit">Scan evidence folder</button>
+      </form>
+      <button type="button" class="secondary" onclick="document.getElementById('case-export-dialog').showModal()">Export investigation…</button>
+    </div>
   </div>
   {% include "_evidence_list.html" %}
+  {% include "_case_export_dialog.html" %}
 </section>
 <section class="panel" id="notes-section">
   <h2>Investigation notes</h2>

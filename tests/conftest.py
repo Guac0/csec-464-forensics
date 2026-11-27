@@ -14,12 +14,28 @@ from app.config import Settings, get_settings
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def symlinks_supported(tmp_path: Path) -> bool:
+    """Creating symlinks on Windows needs admin rights or Developer Mode; tests that need them
+    skip (or drop the symlink part) when they are not available."""
+    target, link = tmp_path / ".symlink-probe-target", tmp_path / ".symlink-probe"
+    target.write_text("x")
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        return False
+    finally:
+        target.unlink(missing_ok=True)
+    link.unlink()
+    return True
+
+
 @pytest.fixture
 def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settings]:
     """Settings pointing at temp dirs. evidence_dir contains one small fake image."""
     evidence = tmp_path / "evidence"
     data = tmp_path / "data"
     symbols = tmp_path / "symbols"
+    monkeypatch.setenv("FT_BACKUP_DIR", str(tmp_path / "backups"))
     for d in (evidence, data, symbols):
         d.mkdir()
     (evidence / "sample.raw").write_bytes(b"\x00" * 4096)
@@ -29,6 +45,10 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
     monkeypatch.setenv("FT_AI_BASE_URL", "http://ai.test/v1")
     monkeypatch.setenv("FT_AI_API_KEY", "test-key")
     monkeypatch.setenv("FT_AI_MODEL", "test-model")
+    # Disk-space guards off by default so tests don't depend on the machine's free space
+    # (tests/test_resources.py turns them on).
+    monkeypatch.setenv("FT_MIN_FREE_DISK_BYTES", "0")
+    monkeypatch.setenv("FT_HARD_MIN_FREE_DISK_BYTES", "0")
     get_settings.cache_clear()
     yield get_settings()
     get_settings.cache_clear()
@@ -38,7 +58,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
 def session(settings: Settings) -> Iterator[Session]:
     """A session on a fresh SQLite DB in settings.data_dir with all tables created."""
     db.init_engine()
-    db.create_all()
+    db.migrate()
     with db.SessionLocal() as s:
         yield s
 

@@ -15,8 +15,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.db import SessionLocal, create_all, init_engine
-from app.jobs.worker import get_worker, recover_stale_runs
+from app.config import get_settings
+from app.db import SessionLocal, init_engine, migrate
+from app.jobs.worker import get_worker, recover_interrupted_runs
+from app.services import audit, backup
+from app.tools import hooks, registry
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,11 @@ ROUTER_MODULES = (
     "app.api.evidence",
     "app.api.runs",
     "app.api.notes",
+    "app.api.hooks",
+    "app.api.audit",
+    "app.api.artifacts",
+    "app.api.export",
+    "app.api.system",
     "app.api.ai",
     "app.web.pages",
 )
@@ -73,22 +81,46 @@ def create_app(start_worker: bool = True) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         init_engine()
-        create_all()
+        migrate()
+        hook_errors = hooks.load_hooks()  # import hook modules now so errors show in the log
+        catalog_problems = registry.get_runner("volatility3").catalog_problems()  # logs them
+        settings = get_settings()
+        audit.record_now(
+            "app.start",
+            summary="Application started",
+            details={
+                "version": _app.version,
+                "audit_level": settings.audit_level,
+                "hooks": [h.name for h in hooks.registered_hooks()],
+                "hook_load_errors": hook_errors,
+                "catalog_problems": catalog_problems,
+            },
+        )
         with SessionLocal() as session:
-            recover_stale_runs(session)
+            recover_interrupted_runs(session)
         worker = get_worker() if start_worker else None
+        scheduler = backup.get_scheduler() if start_worker else None
         if worker is not None:
+            backup.hold_app_lock()  # lets `python -m app.backup restore` refuse while we run
             worker.start()
+        if scheduler is not None:
+            scheduler.start()
         try:
             yield
         finally:
+            if scheduler is not None:
+                scheduler.stop()
             if worker is not None:
                 worker.stop()
+                backup.release_app_lock()
 
     app = FastAPI(title="Forensics Tool", version="0.1.0", lifespan=lifespan)
+    # Sets the audit context (origin/request id) and logs requests at FT_AUDIT_LEVEL=all.
+    app.middleware("http")(audit.audit_requests_middleware)
 
     @app.get("/health")
     def health() -> dict[str, str]:
+        """Liveness probe (Docker). Detailed checks: /api/system/health and the System page."""
         return {"status": "ok"}
 
     for module_name in ROUTER_MODULES:

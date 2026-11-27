@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.ai import service
 from app.ai.client import AIClient
 from app.ai.context import NotFoundError
+from app.ai.prompts import PROMPT_VERSION
 from app.config import Settings
 from app.models import AIMessage
 from tests.test_ai_helpers import PSLIST, install_fake_runner, mock_transport, respond_with, seed
@@ -44,7 +45,12 @@ def test_ask_persists_full_provenance(session: Session, settings: Settings) -> N
     assert msg.model_requested == "test-model"
     assert msg.model_returned == "test-model-2025"
     assert msg.provider_base_url == "http://ai.test/v1"
-    assert msg.params == {"model": "test-model", "temperature": 0.2, "max_tokens": 2000}
+    assert msg.params == {
+        "model": "test-model",
+        "temperature": 0.2,
+        "max_tokens": 2000,
+        "prompt_version": PROMPT_VERSION,
+    }
     assert msg.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
     # exact messages sent are recorded
     assert msg.request_messages == sent[0]["json"]["messages"]

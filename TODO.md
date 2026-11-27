@@ -57,9 +57,13 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
       `tests/fixtures/` and replace the synthetic `sample_pstree.jsonl`.
 - [ ] **Output parsing** — check `VolatilityRunner.parse_output` (`app/tools/volatility/runner.py`)
       against those fixtures; add per-plugin post-processing where needed.
-- [ ] **OS detection** — fill `Evidence.os_info` from `windows.info` output (needs a small
-      post-success hook in `app/jobs/worker.py` that calls your code).
+- [ ] **Post-run hooks** — `app/tools/volatility/hooks/` (guide: `hooks/README.md`). Review the
+      EXAMPLE `windows_info.py` OS-detection hook against real output, and add hooks that flag
+      suspicious rows, summarise runs as findings, and queue sensible follow-up plugins.
 - [ ] **AI prompts** — `app/ai/prompts.py`: the analysis system prompt and the run-summary question.
+      Bump `PROMPT_VERSION` with each change and compare with `python -m evals.run`.
+- [ ] **Evaluation cases** — replace the two `evals/cases/*_example.yaml` (synthetic fixture) with
+      cases built from real captured output, then save a baseline per model you use.
 - [ ] **AI context** — `app/ai/context.py`: choose which rows of each plugin are worth sending.
 - [ ] **Citation checking** — `app/ai/citations.py`: verify that cited row values actually
       support the claim (currently only checks the row exists).
@@ -69,11 +73,38 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 
 ## 3. Known infrastructure follow-ups
 
-- [ ] Markdown export of notes, runs, hashes and AI outputs is not implemented yet.
-- [ ] Runs don't re-verify the image hash before executing; a run records the evidence SHA-256 only
-      if the image was hashed first.
+- [ ] **Audit level:** `FT_AUDIT_LEVEL` defaults to `all` (every page/API request) for the PoC.
+      Switch the default in `app/config.py` to `key_reads` when evaluation is over.
+- [ ] Audit log has no retention/archiving; at level `all` it grows with every request.
+- [ ] Add `.github/workflows/evals.yml` (provided separately) and the repo secrets
+      `FT_AI_BASE_URL`, `FT_AI_API_KEY` + variable `FT_AI_MODEL` for manual evaluation runs.
+- [ ] Large results: decide whether to enable `FT_SEARCH_INDEX` after measuring real runs on the
+      team's machines (`python -m scripts.bench_rows --rows 1000000`); existing runs can be
+      indexed later with `POST /api/runs/{id}/search-index`.
+- [ ] Run deletion is manual (single or bulk clean-up); there is no automatic retention.
+      Deleting a whole evidence item is not supported yet.
+- [ ] Backups exclude dumped files by design, and live on the same machine (separate Docker
+      volume, usually the same disk). Copying them off-machine is manual
+      (`docker compose cp app:/backups ...`).
+- [ ] Set real `timeout_seconds` per catalog plugin once the catalog is final (filescan/dumpfiles
+      on big images may need more than the 1 h default).
+- [ ] Orphaned `vol` processes are only found after a crash on Linux (uses /proc); in Docker a
+      container restart ends them anyway.
+- [ ] A stalled run's Python thread cannot be killed: the watchdog frees its slot, but if the
+      thread is stuck holding SQLite's write lock the whole app waits until it lets go.
+- [ ] Decide (forensics team) which plugins may write files; they must be declared with
+      `writes_files=True`. Only the EXAMPLE pslist `--dump` is.
+- [ ] Audit anchors (`audit-anchors.jsonl`) live in the backup folder; someone with write access
+      to both volumes could still rewrite both. Copy backups/anchors off-machine for stronger
+      guarantees.
+
+- [ ] Case export: the report has no row data inline (it is in the ZIP's CSVs), skips page/API
+      request events, note edit history and full AI prompts. Revisit if reviewers need them.
+- [ ] Case export ZIPs are built in a temp file; very large runs or dumped files make big
+      downloads. No size limit or progress indicator yet.
+- [ ] Integrity: a full re-hash before each run is off by default (`FT_VERIFY_ON_RUN`); the
+      default pre-run check is size + modification time only. Decide per deployment.
 - [ ] The UI doesn't refresh automatically after hashing finishes (reload the page).
 - [ ] Failed AI requests show the error text twice in the AI panel.
 - [ ] The gitleaks pre-commit hook only protects local commits; in CI it checks nothing.
-- [ ] Move from `create_all()` to Alembic migrations once the schema settles.
 - [ ] Linux/macOS memory images (custom symbol tables) are out of scope for the PoC.

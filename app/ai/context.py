@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.citations import parse_key
 from app.models import Evidence, Note, ResultRow, Run, RunStatus
+from app.services import integrity
 
 TRUNCATED_MARKER = "[truncated]"
 
@@ -29,7 +30,45 @@ def _json(value: Any) -> str:
 
 def format_row(row: ResultRow) -> str:
     indent = "  " * max(row.depth, 0)
-    return f"{indent}[{row.citation}] {_json(row.data)}"
+    text = f"{indent}[{row.citation}] {_json(row.data)}"
+    if row.annotations:
+        flags = "; ".join(
+            f"{a.get('tag')} ({a.get('severity')})" + (f": {a['note']}" if a.get("note") else "")
+            for a in row.annotations
+        )
+        text += f"  <- automated flags: {flags}"
+    return text
+
+
+def _artifacts_line(run: Run, limit: int = 10) -> str:
+    """Files the run wrote (e.g. --dump), with hashes, for the model to reference."""
+    parts = []
+    for a in run.artifacts[:limit]:
+        where = f", row R{run.id}:{a.source_row_idx}" if a.source_row_idx is not None else ""
+        parts.append(
+            f"{a.filename} ({a.file_type}, {a.size_bytes} bytes, sha256 {a.sha256}{where})"
+        )
+    more = f"; ... ({len(run.artifacts)} total)" if len(run.artifacts) > limit else ""
+    return "dumped files: " + "; ".join(parts) + more
+
+
+def _findings_block(run: Run, max_rows: int = 10) -> list[str]:
+    """Hook findings for a run, labelled as automated heuristics with their supporting rows."""
+    if not run.findings:
+        return []
+    lines = ["automated findings (post-run hooks; heuristics to verify, not conclusions):"]
+    for f in run.findings:
+        rows = f.get("rows") or []
+        cites = ", ".join(f"R{run.id}:{i}" for i in rows[:max_rows])
+        if len(rows) > max_rows:
+            cites += f", ... ({len(rows)} rows)"
+        line = f"- [{f.get('severity')}] {f.get('title')}"
+        if f.get("detail"):
+            line += f" - {f['detail']}"
+        if cites:
+            line += f" (rows: {cites})"
+        lines.append(line)
+    return lines
 
 
 class _Builder:
@@ -73,6 +112,7 @@ def _evidence_block(ev: Evidence) -> str:
         f"file: {ev.rel_path}",
         f"size_bytes: {ev.size_bytes}",
         f"sha256: {ev.sha256 or '(not yet hashed)'}",
+        f"integrity: {integrity.status(ev)}",
         f"os_info: {_json(ev.os_info) if ev.os_info else '(unknown)'}",
     ]
     if ev.description:
@@ -156,7 +196,7 @@ def build_context(
 
     stmt = select(Run).where(Run.evidence_id == evidence_id)
     if run_ids is None:
-        stmt = stmt.where(Run.status == RunStatus.SUCCEEDED)
+        stmt = stmt.where(Run.status == RunStatus.SUCCEEDED, Run.deleted_at.is_(None))
     else:
         stmt = stmt.where(Run.id.in_(run_ids))
     runs = session.execute(stmt.order_by(Run.id)).scalars().all()
@@ -172,7 +212,10 @@ def build_context(
         ]
         if run.error:
             header.append(f"error: {run.error}")
-        rows = (
+        header.extend(_findings_block(run))
+        if run.artifacts:
+            header.append(_artifacts_line(run))
+        rows = list(
             session.execute(
                 select(ResultRow)
                 .where(ResultRow.run_id == run.id)
@@ -182,8 +225,28 @@ def build_context(
             .scalars()
             .all()
         )
+        shown_first = len(rows)
+        # Rows flagged by hooks beyond the first N are included too, so flags are never hidden
+        # just because the row appears late in the output.
+        flagged = (
+            session.execute(
+                select(ResultRow)
+                .where(
+                    ResultRow.run_id == run.id,
+                    ResultRow.row_idx >= shown_first,
+                    ResultRow.annotations.is_not(None),
+                )
+                .order_by(ResultRow.row_idx)
+                .limit(max_rows_per_run)
+            )
+            .scalars()
+            .all()
+        )
+        rows.extend(flagged)
         if rows and run.row_count > len(rows):
-            header.append(f"(showing first {len(rows)} of {run.row_count} rows)")
+            note = f"(showing first {shown_first} of {run.row_count} rows"
+            note += f" plus {len(flagged)} later flagged rows)" if flagged else ")"
+            header.append(note)
         # TODO(forensics): per-plugin summarization / row selection (e.g. only suspicious
         # malfind hits, collapsed pstree branches) instead of the first N rows.
         if not b.add("\n".join(header)):

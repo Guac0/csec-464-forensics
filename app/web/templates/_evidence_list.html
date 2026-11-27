@@ -3,12 +3,13 @@
   {% if message %}<p class="flash">{{ message }}</p>{% endif %}
   {% if evidence %}
   <table class="data">
-    <thead><tr><th>Image</th><th>Size</th><th>SHA-256</th><th>OS info</th><th>Runs</th></tr></thead>
+    <thead><tr><th>Image</th><th>Size</th><th>Integrity</th><th>SHA-256</th><th>OS info</th><th>Runs</th></tr></thead>
     <tbody>
     {% for ev in evidence %}
       <tr>
         <td><a href="/evidence/{{ ev.id }}">{{ ev.rel_path }}</a></td>
         <td class="num">{{ ev.size_bytes | humansize }}</td>
+        <td>{% include "_integrity_badge.html" %}</td>
         <td class="mono">
           {% if ev.sha256 %}<span class="hash" title="hashed {{ ev.hashed_at | dt }}">{{ ev.sha256 }}</span>
           {% else %}

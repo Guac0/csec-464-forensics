@@ -3,14 +3,92 @@
 {% block crumbs %}<a href="/">Evidence</a> / <span class="mono">{{ ev.rel_path }}</span>{% endblock %}
 {% block content %}
 <section class="panel">
-  <h2 class="mono">{{ ev.rel_path }}</h2>
+  <div class="panel-head">
+    <h2 class="mono">{{ ev.rel_path }}</h2>
+    <button type="button" class="small secondary" onclick="document.getElementById('case-export-dialog').showModal()">Export…</button>
+  </div>
+  {% set export_evidence = ev %}{% include "_case_export_dialog.html" %}
   <dl class="meta">
     <dt>Size</dt><dd>{{ ev.size_bytes | humansize }} ({{ ev.size_bytes }} bytes)</dd>
-    <dt>SHA-256</dt><dd class="mono">{{ ev.sha256 or "not hashed" }}{% if ev.hashed_at %} <span class="muted">({{ ev.hashed_at | dt }})</span>{% endif %}</dd>
+    <dt>Integrity</dt><dd>{% include "_integrity_badge.html" %} <a class="small-text" href="#integrity">details</a></dd>
     <dt>OS info</dt><dd>{{ ev.os_info | os_info }}</dd>
     <dt>Registered</dt><dd>{{ ev.created_at | dt }}</dd>
+    <dt>Activity</dt><dd><a href="/activity?evidence_id={{ ev.id }}">Audit log for this evidence</a></dd>
     {% if ev.description %}<dt>Description</dt><dd class="prewrap">{{ ev.description }}</dd>{% endif %}
   </dl>
+</section>
+
+<section class="panel" id="integrity">
+  <div class="panel-head">
+    <h2>Integrity</h2>
+    <form method="post" action="/ui/evidence/{{ ev.id }}/hash">
+      <button type="submit" class="small" {% if hashing %}disabled{% endif %}
+              title="Hash the whole image now (SHA-256, MD5, SHA-1); its current content becomes the baseline">
+        {% if hashing %}Hashing…{% elif ev.sha256 %}Verify now{% else %}Hash now{% endif %}</button>
+    </form>
+  </div>
+  {% if integrity_problem %}<p class="flash {{ 'error' if integrity_mode == 'strict' else 'warn' }}">{{ integrity_problem }}{% if integrity_mode == "strict" %} New runs are blocked.{% else %} Runs are allowed (warn mode) and will be flagged.{% endif %}</p>{% endif %}
+  {% if integrity_error %}<p class="flash error">{{ integrity_error }}</p>{% endif %}
+  {% if hashing %}<p class="flash">Hashing in progress; refresh to see the result.</p>{% endif %}
+  <table class="data hashes">
+    <thead><tr><th>Algorithm</th><th>Computed</th><th>Expected (from acquisition)</th></tr></thead>
+    <tbody>
+    {% for algo, label in [("sha256", "SHA-256"), ("md5", "MD5"), ("sha1", "SHA-1")] %}
+      {% set computed = ev[algo] %}{% set expected = ev["expected_" ~ algo] %}
+      <tr{% if computed and expected and computed != expected %} class="annotated sev-high"{% endif %}>
+        <td>{{ label }}</td>
+        <td class="mono small-text">{{ computed or "—" }}</td>
+        <td class="mono small-text">{{ expected or "—" }}{% if computed and expected %} {{ "✓" if computed == expected else "✗ mismatch" }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted small-text">
+    {% if ev.hashed_at %}Last hashed {{ ev.hashed_at | dt }} ({{ ev.size_bytes }} bytes).{% else %}Not hashed yet: it will be hashed automatically before the first run.{% endif %}
+    Before every run the size and modification time are checked{% if verify_on_run %} and the whole image is re-hashed{% endif %}. Mode: <span class="mono">{{ integrity_mode }}</span>.
+  </p>
+  {% if ev.mismatch_ack_at %}<p class="flash warn">Mismatch acknowledged {{ ev.mismatch_ack_at | dt }}: {{ ev.mismatch_ack_reason }}</p>{% endif %}
+  <details{% if integrity_error %} open{% endif %}>
+    <summary>Set expected hashes</summary>
+    <form method="post" action="/ui/evidence/{{ ev.id }}/expected-hashes" class="stack">
+      {% set vals = expected_values or {} %}
+      <label>SHA-256 <input name="expected_sha256" class="mono" value="{{ vals.get('expected_sha256', ev.expected_sha256 or '') }}" placeholder="64 hex characters"></label>
+      <label>MD5 <input name="expected_md5" class="mono" value="{{ vals.get('expected_md5', ev.expected_md5 or '') }}" placeholder="32 hex characters"></label>
+      <label>SHA-1 <input name="expected_sha1" class="mono" value="{{ vals.get('expected_sha1', ev.expected_sha1 or '') }}" placeholder="40 hex characters"></label>
+      <button type="submit" class="small">Save expected hashes</button>
+    </form>
+  </details>
+  {% if integrity_status == "mismatch" %}
+  <details open>
+    <summary>Acknowledge mismatch</summary>
+    <form method="post" action="/ui/evidence/{{ ev.id }}/acknowledge" class="stack">
+      <label>Reason (recorded in the audit log)
+        <textarea name="reason" rows="2" required placeholder="e.g. acquisition report lists the compressed file's hash"></textarea></label>
+      <button type="submit" class="small danger">Acknowledge and allow runs</button>
+    </form>
+  </details>
+  {% endif %}
+  {% if integrity_checks %}
+  <details>
+    <summary>Hash history ({{ integrity_checks | length }})</summary>
+    <table class="data">
+      <thead><tr><th>When (UTC)</th><th>Kind</th><th>Result</th><th>SHA-256</th><th>Time</th><th>Run</th><th>Detail</th></tr></thead>
+      <tbody>
+      {% for c in integrity_checks %}
+        <tr>
+          <td class="mono small-text">{{ c.created_at | dt }}</td>
+          <td>{{ c.kind }}</td>
+          <td><span class="badge {{ 'status-succeeded' if c.result == 'ok' else 'status-failed' }}">{{ c.result }}</span></td>
+          <td class="mono small-text">{{ c.sha256 or "—" }}</td>
+          <td class="mono small-text">{{ "%.1f s" | format(c.seconds) if c.seconds is not none else "" }}</td>
+          <td>{% if c.run_id %}<a href="/runs/{{ c.run_id }}">{{ c.run_id }}</a>{% endif %}</td>
+          <td class="small-text">{{ c.detail }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
 </section>
 
 <div class="columns">
@@ -42,8 +120,28 @@
     </section>
 
     <section class="panel">
-      <h2>Runs</h2>
+      <div class="panel-head">
+        <h2>Runs</h2>
+        {% if cleanup and cleanup.count %}
+        <button type="button" class="small secondary" onclick="document.getElementById('cleanup-dialog').showModal()"
+                title="Delete the data of failed, interrupted and cancelled runs">Clean up… ({{ cleanup.count }}, {{ cleanup.bytes | humansize }})</button>
+        {% endif %}
+      </div>
       {% include "_runs.html" %}
+      {% if cleanup and cleanup.count %}
+      <dialog id="cleanup-dialog" class="export-dialog">
+        <form method="post" action="/ui/evidence/{{ ev.id }}/cleanup">
+          <h3>Clean up {{ cleanup.count }} run{{ "s" if cleanup.count != 1 }}?</h3>
+          <p>Deletes the rows, raw output and dumped files ({{ cleanup.bytes | humansize }}) of every {{ cleanup.statuses | join(", ") }} run of this evidence. Each run keeps a tombstone with its hashes and audit history; succeeded runs are not touched.</p>
+          <label for="cleanup-reason">Reason (recorded in the audit log for each run)</label>
+          <textarea id="cleanup-reason" name="reason" rows="2" required placeholder="e.g. freeing space; failed attempts"></textarea>
+          <div class="dialog-buttons">
+            <button type="submit" class="danger">Delete permanently</button>
+            <button type="button" class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+      {% endif %}
     </section>
   </div>
 

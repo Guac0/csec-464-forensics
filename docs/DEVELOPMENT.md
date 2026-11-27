@@ -85,6 +85,122 @@ AI coding assistants are allowed and encouraged, with these rules:
    the PR which parts were AI-generated.
 5. Don't paste real case data, API keys or `.env` content into an assistant.
 
+## Changing the AI prompts or context
+
+Measure, don't guess: run `python -m evals.run` before and after the change (see
+[evals/README.md](../evals/README.md)), bump `PROMPT_VERSION` in `app/ai/prompts.py`, and if the
+change is an improvement, commit a new baseline (`--save-baseline`) in the same PR.
+
+## Performance check for big runs
+
+`python -m scripts.bench_rows --rows 200000` (add `--search-index` to compare) builds a throwaway
+database with a synthetic filescan-sized run through the real parser and ingest code, and times
+paging, search, filters, sorting and CSV export. Run it before and after changes to row storage
+or querying.
+
+## Case export report format
+
+`tests/fixtures/export_golden.md` pins the exact Markdown of a case report. If you change the
+report on purpose, regenerate it with `UPDATE_GOLDEN=1 pytest tests/test_export.py` and review the
+diff in your PR. Any evidence-sourced text must go through `esc()`, `code()` or `fenced()` in
+`app/services/export.py`; `test_export.py` renders the report to check nothing gets through.
+
+## Plugin catalog
+
+`tests/test_catalog.py::test_shipped_catalog_is_valid` fails if an entry in
+`app/tools/volatility/plugins.py` is invalid (wrong plugin name, clashing or duplicate flags,
+an undeclared file-writing option, a broken preset). At runtime such entries are skipped and
+shown on the System page instead of stopping the app.
+
+## Developing on Windows
+
+The test suite runs natively on Windows (the app itself is meant to run in Docker). Things that
+differ:
+
+- `FT_VOL_EXECUTABLE` pointing at a `.py` script is run with the current Python
+  (`app/tools/volatility/runner.py: vol_command`), because Windows cannot execute scripts
+  directly. That is how tests use `tests/fixtures/fake_vol.py` on every OS.
+- Stopping a run kills the whole process tree with `taskkill /T /F` (no process groups or
+  signals on Windows, so no graceful stop).
+- Tests that create symlinks skip that part unless symlinks are allowed (admin rights or
+  Developer Mode).
+- Finding an orphaned `vol` after a crash uses `/proc`, so it only happens on Linux.
+- Never use `os.kill(pid, 0)` to check a process on Windows: it terminates it.
+
+## Disk guards in tests
+
+`tests/conftest.py` sets `FT_MIN_FREE_DISK_BYTES=0` and `FT_HARD_MIN_FREE_DISK_BYTES=0` so the
+suite does not depend on the machine's free space; `tests/test_resources.py` turns them on. If
+you add a new way to start a run, call `resources.check_can_start_run()` before queueing it.
+
+## Audit log
+
+Everything that changes data must be recorded in the audit log, in the **same transaction** as
+the change (so both are saved or neither is):
+
+```python
+from app.services import audit
+
+note.body = new_body
+audit.record(
+    session,
+    "note.edit",  # <object>.<verb>
+    object_type="note",
+    object_id=note.id,
+    evidence_id=note.evidence_id,
+    summary=f"Edited note {note.id}",  # human readable, shown in the Activity page
+    details={"version": 3},  # JSON; anything useful to reconstruct what happened
+)
+session.commit()
+```
+
+- Who/where (`actor`, `origin`, `request_id`) is filled in automatically from the request or
+  worker context.
+- Use `category=audit.KEY_READ` for sensitive reads (exports, downloads). Ordinary reads need
+  nothing: at `FT_AUDIT_LEVEL=all` the middleware logs every request.
+- The log can't be edited or deleted (DB triggers) and is hash-chained; "Verify integrity" on
+  the Activity page (or `GET /api/audit/verify`) recomputes the chain.
+- `FT_AUDIT_LEVEL=all` is a temporary PoC default (very verbose). The intended setting is
+  `key_reads`; switching is a one-line change of the default in `app/config.py`.
+- New actions should get a line in `tests/test_audit.py::test_every_state_change_is_audited`.
+
+## Database migrations
+
+The schema is managed with [Alembic](https://alembic.sqlalchemy.org/). The app runs
+`app.db.migrate()` at startup, which upgrades the database to the latest migration, so users
+never lose their data when they pull a new version. (Databases created before Alembic was added
+are detected and adopted automatically.)
+
+**Any change to `app/models.py` must ship with a migration in the same PR:**
+
+```bash
+pip install -e ".[dev]"
+mkdir -p data
+FT_DATA_DIR=./data alembic upgrade head                        # bring your dev DB up to date
+FT_DATA_DIR=./data alembic revision --autogenerate -m "add run hook results"
+```
+
+Then **review the generated file** in `app/migrations/versions/` (autogenerate is a draft, not
+the truth):
+
+- New columns on existing tables should be nullable or have a `server_default`, or existing rows
+  will break the migration.
+- SQLite can't alter columns in place; the generated `batch_alter_table` blocks rebuild the table
+  for you. Keep them.
+- Renames are detected as drop + add (data loss). Edit them into `alter_column(new_column_name=...)`.
+- Fill in `downgrade()` and check it works: `alembic downgrade -1 && alembic upgrade head`.
+- Data migrations (backfilling values) go in the same file using `op.execute(...)`.
+
+Rules:
+
+- **Never edit a migration that has been merged to `main`**; add a new one instead.
+- **One head only.** If two PRs both add a migration on the same parent, CI fails
+  (`tests/test_migrations.py::test_single_head`). Whoever merges second rebases and changes their
+  migration's `down_revision` to the other migration's revision id.
+- CI also fails if the models and the migrations disagree (`test_migrations_match_models`),
+  i.e. someone changed `app/models.py` without generating a migration.
+- Resetting a local DB is still fine for experiments: `docker compose down -v`.
+
 ## Fixtures: adding real volatility3 output
 
 Unit tests never run real volatility: they use `tests/fixtures/fake_vol.py` and recorded
@@ -118,5 +234,6 @@ docker compose up --build             # run the app at http://127.0.0.1:8000
 docker compose run --rm app vol -h    # run vol inside the image
 docker compose exec app sh            # shell in the running container
 docker compose down -v                # wipe DB, run outputs and symbol cache
+FT_DATA_DIR=./data alembic current    # which migration a local dev DB is at
 pre-commit autoupdate                 # bump hook versions (separate PR)
 ```

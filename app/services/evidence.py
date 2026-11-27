@@ -5,7 +5,7 @@ Evidence files live in the read-only ``settings.evidence_dir`` mount; we only ev
 
 from __future__ import annotations
 
-import hashlib
+import contextvars
 import logging
 import os
 import threading
@@ -16,11 +16,10 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Evidence, utcnow
+from app.models import Evidence
+from app.services import audit, integrity
 
 logger = logging.getLogger(__name__)
-
-HASH_CHUNK_SIZE = 1024 * 1024  # 1 MiB
 
 # Evidence ids currently being hashed by a background thread (avoid duplicate work).
 _hashing: set[int] = set()
@@ -71,6 +70,8 @@ def scan_evidence(session: Session) -> list[Evidence]:
 
     existing = {e.rel_path: e for e in session.scalars(select(Evidence))}
     result: list[Evidence] = []
+    added: list[str] = []
+    changed: list[str] = []
     for path in _iter_evidence_files(root):
         rel_path = path.relative_to(root).as_posix()
         try:
@@ -82,13 +83,36 @@ def scan_evidence(session: Session) -> list[Evidence]:
         if ev is None:
             ev = Evidence(rel_path=rel_path, size_bytes=st.st_size, mtime=st.st_mtime)
             session.add(ev)
+            session.flush()  # assign ev.id for the audit event
+            audit.record(
+                session,
+                "evidence.register",
+                object_type="evidence",
+                object_id=ev.id,
+                evidence_id=ev.id,
+                summary=f"Registered evidence {rel_path}",
+                details={"rel_path": rel_path, "size_bytes": st.st_size, "mtime": st.st_mtime},
+            )
+            added.append(rel_path)
         elif ev.size_bytes != st.st_size or ev.mtime != st.st_mtime:
-            # File changed on disk: the old hash no longer describes it.
-            ev.size_bytes = st.st_size
-            ev.mtime = st.st_mtime
-            ev.sha256 = None
-            ev.hashed_at = None
+            if ev.sha256 is None:
+                # Not hashed yet: nothing to protect, just track the current file.
+                ev.size_bytes, ev.mtime = st.st_size, st.st_mtime
+            elif integrity.mark_changed(
+                session,
+                ev,
+                f"scan: size {ev.size_bytes} -> {st.st_size}, mtime {ev.mtime} -> {st.st_mtime}",
+            ):
+                # The hashed size/mtime are kept as the baseline; the analyst must re-verify.
+                changed.append(rel_path)
         result.append(ev)
+    audit.record(
+        session,
+        "evidence.scan",
+        summary=f"Scanned evidence folder: {len(result)} file(s), {len(added)} new, "
+        f"{len(changed)} changed",
+        details={"files": len(result), "added": added, "changed": changed},
+    )
     session.commit()
     return result
 
@@ -107,6 +131,15 @@ def list_evidence(session: Session) -> list[Evidence]:
 
 def update_description(session: Session, evidence_id: int, description: str) -> Evidence:
     ev = get_evidence(session, evidence_id)
+    audit.record(
+        session,
+        "evidence.describe",
+        object_type="evidence",
+        object_id=ev.id,
+        evidence_id=ev.id,
+        summary=f"Changed description of {ev.rel_path}",
+        details={"before": ev.description, "after": description},
+    )
     ev.description = description
     session.commit()
     return ev
@@ -124,38 +157,24 @@ def resolve_evidence_path(evidence: Evidence) -> Path:
     return path
 
 
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        while chunk := f.read(HASH_CHUNK_SIZE):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def hash_evidence(session: Session, evidence_id: int) -> Evidence:
-    """Compute the SHA-256 of an evidence file. Skipped if already hashed at the same size+mtime."""
+    """Hash (or re-verify) an image now: SHA-256 + MD5 + SHA-1, recorded as an integrity check.
+
+    This is the analyst's "Verify": the current content becomes the image's baseline (a change
+    since the last hash is recorded as result "changed"). See app/services/integrity.py.
+    """
     ev = get_evidence(session, evidence_id)
-    path = resolve_evidence_path(ev)
-    st = path.stat()
-    if ev.sha256 and ev.size_bytes == st.st_size and ev.mtime == st.st_mtime:
-        return ev
-    logger.info("hashing evidence %s (%s, %d bytes)", ev.id, ev.rel_path, st.st_size)
-    digest = _sha256_file(path)
-    # Re-stat: if the file changed while hashing, the digest is not trustworthy.
-    st_after = path.stat()
-    if (st_after.st_size, st_after.st_mtime) != (st.st_size, st.st_mtime):
-        raise RuntimeError(f"evidence {ev.rel_path!r} changed while hashing")
-    ev.size_bytes = st.st_size
-    ev.mtime = st.st_mtime
-    ev.sha256 = digest
-    ev.hashed_at = utcnow()
-    session.commit()
+    integrity.hash_evidence(
+        session, evidence_id, kind="initial" if ev.sha256 is None else "verify", accept=True
+    )
+    session.refresh(ev)
     return ev
 
 
 def is_hashing(evidence_id: int) -> bool:
+    """True while a background verify or the worker is hashing this image."""
     with _hashing_lock:
-        return evidence_id in _hashing
+        return evidence_id in _hashing or integrity.is_hashing(evidence_id)
 
 
 def start_hash_in_background(evidence_id: int) -> None:
@@ -170,9 +189,14 @@ def start_hash_in_background(evidence_id: int) -> None:
             with SessionLocal() as s:
                 hash_evidence(s, evidence_id)
         except Exception:
+            # integrity.hash_evidence already recorded the failure (check + audit event).
             logger.exception("background hash of evidence %s failed", evidence_id)
         finally:
             with _hashing_lock:
                 _hashing.discard(evidence_id)
 
-    threading.Thread(target=_target, name=f"hash-evidence-{evidence_id}", daemon=True).start()
+    # Run in a copy of the caller's context so audit events keep the request's origin/id.
+    ctx = contextvars.copy_context()
+    threading.Thread(
+        target=ctx.run, args=(_target,), name=f"hash-evidence-{evidence_id}", daemon=True
+    ).start()

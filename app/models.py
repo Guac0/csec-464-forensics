@@ -6,7 +6,17 @@ import enum
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -26,8 +36,22 @@ class Evidence(Base):
     rel_path: Mapped[str] = mapped_column(String, unique=True)
     size_bytes: Mapped[int] = mapped_column(Integer)
     mtime: Mapped[float] = mapped_column()
-    sha256: Mapped[str | None] = mapped_column(String(64), default=None)  # None until hashed
+    # Computed hashes (one pass over the file); None until hashed. See app/services/integrity.py.
+    sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    md5: Mapped[str | None] = mapped_column(String(32), default=None)
+    sha1: Mapped[str | None] = mapped_column(String(40), default=None)
     hashed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # Hashes the analyst expects (e.g. from the acquisition report). A difference = mismatch.
+    expected_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    expected_md5: Mapped[str | None] = mapped_column(String(32), default=None)
+    expected_sha1: Mapped[str | None] = mapped_column(String(40), default=None)
+    # Analyst's explicit decision to run despite a mismatch (cleared when hashes change).
+    mismatch_ack_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    mismatch_ack_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    # Set when the file's size/mtime no longer match what was hashed; cleared by re-hashing.
+    changed_detected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
     # Filled by humans' windows.info handling (e.g. {"os": "windows", "build": "19041"}).
     os_info: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -42,6 +66,8 @@ class RunStatus(enum.StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # The app stopped (crash, restart, shutdown) while the run was in progress.
+    INTERRUPTED = "interrupted"
 
 
 class RunOrigin(enum.StrEnum):
@@ -49,6 +75,7 @@ class RunOrigin(enum.StrEnum):
     PRESET = "preset"  # user clicked a hardcoded suggested query
     AUTO = "auto"  # queued by auto-enumeration
     AI_SUGGESTED = "ai"  # user clicked a validated AI suggestion
+    HOOK = "hook"  # queued by a post-run hook as a follow-up (see app/tools/hooks.py)
 
 
 class Run(Base):
@@ -65,7 +92,21 @@ class Run(Base):
     origin: Mapped[RunOrigin] = mapped_column(Enum(RunOrigin), default=RunOrigin.MANUAL)
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.QUEUED)
     tool_version: Mapped[str | None] = mapped_column(String, default=None)
+    # Snapshot of the evidence the tool actually ran against (checked just before execution).
     evidence_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    evidence_size_bytes: Mapped[int | None] = mapped_column(Integer, default=None)
+    evidence_mtime: Mapped[float | None] = mapped_column(default=None)
+    # Set when FT_INTEGRITY_MODE=warn let the run go ahead despite an integrity problem.
+    integrity_warning: Mapped[str | None] = mapped_column(Text, default=None)
+    # What a RUNNING run is doing: "hashing" | "verifying" | "running" | "post-processing".
+    phase: Mapped[str | None] = mapped_column(String, default=None)
+    # Output columns in first-seen order with an inferred type, computed at ingest:
+    # [{"name": "PID", "type": "int"}, ...]; type is int|float|bool|str|json|null|mixed.
+    columns: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
+    # True when this run's rows are in the full-text search index (FT_SEARCH_INDEX).
+    search_indexed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -77,11 +118,46 @@ class Run(Base):
     stdout_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
     row_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # Post-run hooks (app/tools/hooks.py). One entry per hook executed on the last hook pass:
+    # {"hook", "version", "status": "ok"|"error", "duration_ms", "error", "at", ...counts}.
+    hook_results: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
+    # Run-level findings from hooks: {"hook", "title", "detail", "severity", "rows": [row_idx]}.
+    findings: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
+    # Follow-up provenance: set when a hook queued this run.
+    parent_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL", name="fk_runs_parent_run_id"),
+        default=None,
+        index=True,
+    )
+    triggered_by_hook: Mapped[str | None] = mapped_column(String, default=None)
+    # 0 for user/auto runs; parent's depth + 1 for hook follow-ups (loop guard).
+    chain_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Set when the run was created with "Re-run" from another run.
+    rerun_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL", name="fk_runs_rerun_of_id"), default=None
+    )
+    # OS process id of the tool while it runs (used to stop an orphaned process after a crash).
+    pid: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Tombstone: set when the run's rows, raw output and dumped files were deleted (the record,
+    # its hashes and its audit history stay). Status keeps the value it had before deletion.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    delete_reason: Mapped[str | None] = mapped_column(Text, default=None)
 
     evidence: Mapped[Evidence] = relationship(back_populates="runs")
+    artifacts: Mapped[list[DerivedArtifact]] = relationship(
+        viewonly=True, order_by="DerivedArtifact.filename"
+    )
     rows: Mapped[list[ResultRow]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="ResultRow.row_idx"
     )
+
+    @property
+    def artifact_count(self) -> int:
+        return len(self.artifacts)
 
 
 class ResultRow(Base):
@@ -97,6 +173,10 @@ class ResultRow(Base):
     depth: Mapped[int] = mapped_column(Integer, default=0)
     parent_idx: Mapped[int | None] = mapped_column(Integer, default=None)
     data: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # Hook annotations: [{"hook", "tag", "severity", "note"}]; None when not annotated.
+    annotations: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON(none_as_null=True), default=None
+    )
 
     run: Mapped[Run] = relationship(back_populates="rows")
 
@@ -137,4 +217,108 @@ class AIMessage(Base):
     suggestions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
     usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class NoteVersion(Base):
+    """Append-only history of a note: one row per create/edit/delete (DB triggers block changes).
+
+    ``note_id`` is deliberately not a foreign key, so history survives the note being deleted.
+    """
+
+    __tablename__ = "note_versions"
+    __table_args__ = (UniqueConstraint("note_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    note_id: Mapped[int] = mapped_column(Integer, index=True)
+    version: Mapped[int] = mapped_column(Integer)  # 1, 2, 3... per note
+    action: Mapped[str] = mapped_column(String)  # "create" | "edit" | "delete"
+    body: Mapped[str] = mapped_column(Text)  # text after the action (last text for "delete")
+    evidence_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    actor: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuditEvent(Base):
+    """One audit log entry. Append-only (DB triggers) and hash-chained (see app/services/audit.py).
+
+    ``ts`` is stored as an ISO-8601 UTC string (not DateTime) so the value that was hashed is
+    byte-for-byte the value read back during verification.
+    """
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, unique=True)  # 1, 2, 3... gaps = deleted rows
+    ts: Mapped[str] = mapped_column(String, index=True)
+    actor: Mapped[str] = mapped_column(String)  # "local" until there is login
+    origin: Mapped[str] = mapped_column(String)  # ui | api | worker | system
+    category: Mapped[str] = mapped_column(String, index=True)  # change | key_read | request
+    action: Mapped[str] = mapped_column(String, index=True)  # e.g. "note.edit", "run.create"
+    object_type: Mapped[str | None] = mapped_column(String, default=None)
+    object_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    evidence_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), default=None)
+    request_id: Mapped[str | None] = mapped_column(String, default=None)
+    prev_hash: Mapped[str] = mapped_column(String(64))
+    hash: Mapped[str] = mapped_column(String(64))
+
+
+class AuditHead(Base):
+    """Single row (id=1) holding the latest chain hash and sequence number. Updating it first in
+    every audit write takes SQLite's write lock, so chain appends are serialised."""
+
+    __tablename__ = "audit_head"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+    last_hash: Mapped[str] = mapped_column(String(64))
+
+
+class IntegrityCheck(Base):
+    """Append-only record of every hash computation / verification of an evidence file."""
+
+    __tablename__ = "integrity_checks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    evidence_id: Mapped[int] = mapped_column(Integer, index=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, default=None)  # set for pre-run checks
+    # "initial" (first hash) | "verify" (manual) | "pre_run" (FT_VERIFY_ON_RUN) | "rehash"
+    kind: Mapped[str] = mapped_column(String)
+    # "ok" | "changed" (content differs from the last hash) | "mismatch" (differs from the
+    # expected hashes) | "error"
+    result: Mapped[str] = mapped_column(String)
+    sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    md5: Mapped[str | None] = mapped_column(String(32), default=None)
+    sha1: Mapped[str | None] = mapped_column(String(40), default=None)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, default=None)
+    mtime: Mapped[float | None] = mapped_column(default=None)
+    seconds: Mapped[float | None] = mapped_column(default=None)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DerivedArtifact(Base):
+    """A file a tool wrote during a run (e.g. a process dumped with --dump).
+
+    Stored under ``<data_dir>/runs/<run_id>/output/``. Hashed when registered; downloads re-check
+    the SHA-256. Treat the content as potentially malicious.
+    """
+
+    __tablename__ = "derived_artifacts"
+    __table_args__ = (UniqueConstraint("run_id", "rel_path"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), index=True)
+    evidence_id: Mapped[int] = mapped_column(Integer, index=True)
+    rel_path: Mapped[str] = mapped_column(String)  # relative to settings.data_dir
+    filename: Mapped[str] = mapped_column(String)  # path relative to the run's output dir
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    md5: Mapped[str] = mapped_column(String(32))
+    sha1: Mapped[str] = mapped_column(String(40))
+    file_type: Mapped[str] = mapped_column(String, default="data")  # guessed from magic bytes
+    # Result row that names this file (e.g. pslist's "File output" column), if any.
+    source_row_idx: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

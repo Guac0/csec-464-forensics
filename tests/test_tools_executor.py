@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -49,6 +50,19 @@ def run(
 
 
 def _pid_alive(pid: int) -> bool:
+    if os.name == "nt":  # os.kill(pid, 0) would TERMINATE the process on Windows
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        try:
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        finally:
+            kernel32.CloseHandle(handle)
+        return code.value == 259  # STILL_ACTIVE
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -70,7 +84,7 @@ def test_success(fake_vol: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert (tmp_path / "run" / "output").is_dir()
     assert res.stdout_sha256 == hashlib.sha256(res.stdout_path.read_bytes()).hexdigest()
     assert "Volatility 3 Framework" in res.stderr_path.read_text()
-    assert res.argv[0] == str(FAKE_VOL)
+    assert res.argv[:2] == [sys.executable, str(FAKE_VOL)]  # .py scripts run via Python
     rows = list(VolatilityRunner().parse_output(res.stdout_path))
     assert [(r.data["PID"], r.depth, r.parent_idx) for r in rows] == [
         (4, 0, None),
@@ -86,7 +100,7 @@ def test_argv_reaches_process(
     monkeypatch.setenv("FAKE_VOL_MODE", "argv")
     res = run(fake_vol, tmp_path)
     line = [ln for ln in res.stdout_path.read_text().splitlines() if ln.strip()][0]
-    assert json.loads(line)["argv"] == res.argv[1:]
+    assert json.loads(line)["argv"] == res.argv[2:]  # after [python, fake_vol.py]
     assert res.argv[-3:] == ["windows.pslist.PsList", "--pid", "4"]
 
 

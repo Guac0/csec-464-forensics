@@ -1,0 +1,15 @@
+<div class="health-check" id="check-{{ check.key }}">
+  <div class="health-head">
+    <span class="badge health-{{ check.status }}">{{ {"ok": "OK", "warn": "warning", "fail": "problem", "info": "info"}[check.status] }}</span>
+    <strong>{{ check.name }}</strong>
+    <span>{{ check.summary }}</span>
+  </div>
+  {% if check.details %}
+  <details{% if check.status in ("warn", "fail") %} open{% endif %}>
+    <summary class="small-text muted">Details</summary>
+    <table class="kv small-text">
+      {% for label, value in check.details %}<tr><th>{{ label }}</th><td class="mono">{{ value }}</td></tr>{% endfor %}
+    </table>
+  </details>
+  {% endif %}
+</div>

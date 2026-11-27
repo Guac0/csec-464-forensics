@@ -32,6 +32,7 @@ htmlcov/
 # --- Local runtime data (dev runs outside Docker) ---
 data/
 symbols/
+backups/
 *.db
 *.sqlite
 *.sqlite3
@@ -71,3 +72,6 @@ vol-output/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# AI evaluation reports (baselines in evals/baselines/ ARE committed)
+evals/reports/

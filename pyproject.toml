@@ -11,6 +11,8 @@ dependencies = [
     "python-multipart>=0.0.9",
     "httpx>=0.27",
     "pydantic-settings>=2.3",
+    "alembic>=1.13",
+    "pyzipper>=0.3.6",  # AES-encrypted zips for downloading dumped (possibly malicious) files
 ]
 
 [project.optional-dependencies]
@@ -20,6 +22,8 @@ dev = [
     "pytest>=8",
     "ruff>=0.6",
     "pre-commit>=3.7",
+    "pyyaml>=6",  # evaluation case files (evals/)
+    "markdown-it-py>=3",  # tests render case-export Markdown to check escaping
 ]
 
 [build-system]
@@ -30,7 +34,12 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["web/templates/*.html", "web/templates/**/*.html", "web/static/*"]
+app = [
+    "web/templates/*.html",
+    "web/templates/**/*.html",
+    "web/static/*",
+    "migrations/script.py.mako",
+]
 
 [tool.ruff]
 line-length = 100

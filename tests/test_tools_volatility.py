@@ -19,7 +19,7 @@ TEST_PLUGIN = PluginSpec(
     args=(
         ArgSpec(name="pid", flag="--pid", type="int_list"),
         ArgSpec(name="offset", flag="--offset", type="int"),
-        ArgSpec(name="dump", flag="--dump", type="bool"),
+        ArgSpec(name="dump", flag="--dump", type="bool", writes_files=True),
         ArgSpec(name="name", flag="--name", type="str"),
     ),
 )
@@ -178,6 +178,15 @@ def test_build_argv_uses_vol_executable(
     get_settings.cache_clear()
     argv = runner.build_argv(Path("/e/x.raw"), ToolRequest("windows.info.Info"), tmp_path)
     assert argv[0] == "/opt/vol/bin/vol"
+
+
+def test_python_script_runs_via_interpreter() -> None:
+    import sys
+
+    from app.tools.volatility.runner import vol_command
+
+    assert vol_command("vol") == ["vol"]
+    assert vol_command("C:/tools/fake_vol.PY") == [sys.executable, "C:/tools/fake_vol.PY"]
 
 
 def test_build_argv_validates(runner: VolatilityRunner, settings: Settings, tmp_path: Path) -> None:

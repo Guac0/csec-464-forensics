@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import logging
 import re
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -39,6 +41,8 @@ from app.tools.base import (
     ToolRunner,
 )
 from app.tools.volatility import plugins as plugin_catalog
+
+logger = logging.getLogger(__name__)
 
 MAX_STR_LEN = 1024
 CHILDREN_KEY = "__children"
@@ -119,6 +123,68 @@ _COERCERS = {
 }
 
 
+# volatility3 options / plugins known to write files into the output dir. A guard against
+# undeclared file output, not a complete list: declare writes_files=True on anything that writes.
+KNOWN_FILE_WRITING_FLAGS = frozenset({"--dump", "--dump-dir", "--dump-all"})
+KNOWN_FILE_WRITING_PLUGINS = frozenset(
+    {
+        "windows.dumpfiles.DumpFiles",
+        "windows.registry.hivelist.HiveList",  # with --dump
+        "windows.memmap.Memmap",  # with --dump
+        "linux.pagecache.InodePages",
+    }
+)
+_PLUGIN_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.[A-Z][A-Za-z0-9_]*$")
+_ARG_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def catalog_problems(plugins: list[PluginSpec]) -> dict[str, list[str]]:
+    """Check catalog entries. Returns {plugin name: [problems]} for invalid ones (empty if all are
+    fine). Checked: full dotted plugin name, duplicates, arg names/flags (format, duplicates,
+    global vol flags), arg types, file-writing options declared, timeout, and presets."""
+    problems: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for spec in plugins:
+        errs: list[str] = []
+        if not _PLUGIN_NAME_RE.match(spec.name):
+            errs.append("name must be the full volatility3 plugin name, e.g. windows.pslist.PsList")
+        if spec.name in seen:
+            errs.append("listed more than once")
+        seen.add(spec.name)
+        arg_names: set[str] = set()
+        flags: set[str] = set()
+        for arg in spec.args:
+            try:
+                check_argspec(arg)
+            except ArgValidationError as exc:
+                errs.append(f"argument {arg.name!r}: {exc}")
+            if not _ARG_NAME_RE.match(arg.name):
+                errs.append(f"argument name {arg.name!r} must be snake_case")
+            if arg.name in arg_names or arg.flag in flags:
+                errs.append(f"argument {arg.name!r} / {arg.flag} declared twice")
+            arg_names.add(arg.name)
+            flags.add(arg.flag)
+            if arg.flag in KNOWN_FILE_WRITING_FLAGS and not arg.writes_files:
+                errs.append(f"{arg.flag} writes files: mark it writes_files=True")
+        if spec.name in KNOWN_FILE_WRITING_PLUGINS and not spec.may_write_files:
+            errs.append("this plugin writes files: mark it (or its dump option) writes_files=True")
+        if spec.timeout_seconds is not None and spec.timeout_seconds <= 0:
+            errs.append("timeout_seconds must be positive")
+        if not errs:
+            checker = _CatalogRunner([spec])
+            for label, args in spec.presets:
+                try:
+                    checker.validate(ToolRequest(plugin=spec.name, args=args))
+                except ArgValidationError as exc:
+                    errs.append(f"preset {label!r}: {exc}")
+        if errs:
+            problems.setdefault(spec.name, []).extend(errs)
+    return problems
+
+
+_logged_problems: dict[str, list[str]] = {}
+
+
 def check_argspec(spec: ArgSpec) -> None:
     """Sanity-check a catalog ArgSpec (catches catalog mistakes, not user input)."""
     if not _FLAG_RE.match(spec.flag):
@@ -129,6 +195,15 @@ def check_argspec(spec: ArgSpec) -> None:
         raise ArgValidationError(f"unknown arg type in plugin catalog: {spec.type!r}")
 
 
+def vol_command(executable: str) -> list[str]:
+    """The command that starts volatility: ``FT_VOL_EXECUTABLE``, except that a ``.py`` script
+    is run with the current Python interpreter. (Windows cannot execute scripts directly; this
+    is how tests run tests/fixtures/fake_vol.py, and works the same on Linux/macOS.)"""
+    if executable.lower().endswith(".py"):
+        return [sys.executable, executable]
+    return [executable]
+
+
 class VolatilityRunner(ToolRunner):
     name = "volatility3"
 
@@ -136,8 +211,22 @@ class VolatilityRunner(ToolRunner):
         # TODO: expose as a Settings field (e.g. FT_VOL_OFFLINE) once config.py is unfrozen.
         self.offline = offline
 
-    def plugins(self) -> list[PluginSpec]:
+    def _catalog(self) -> list[PluginSpec]:
         return plugin_catalog.PLUGINS
+
+    def catalog_problems(self) -> dict[str, list[str]]:
+        problems = catalog_problems(self._catalog())
+        global _logged_problems
+        if problems != _logged_problems:  # log each new set of problems once
+            _logged_problems = problems
+            for name, errs in problems.items():
+                logger.error("plugin catalog entry %s skipped: %s", name, "; ".join(errs))
+        return problems
+
+    def plugins(self) -> list[PluginSpec]:
+        """Valid catalog entries only: invalid ones are skipped (see catalog_problems())."""
+        bad = self.catalog_problems()
+        return [p for p in self._catalog() if p.name not in bad]
 
     def validate(self, request: ToolRequest) -> dict[str, Any]:
         spec = self.get_plugin(request.plugin)
@@ -169,7 +258,7 @@ class VolatilityRunner(ToolRunner):
         cache_dir.mkdir(parents=True, exist_ok=True)  # vol requires it to exist
 
         argv = [
-            settings.vol_executable,
+            *vol_command(settings.vol_executable),
             "-q",
             "-r", "jsonl",
             "-s", str(settings.symbols_dir),
@@ -249,3 +338,14 @@ class VolatilityRunner(ToolRunner):
                                 f"{stdout_path}: line {lineno}: child is not an object"
                             )
                         stack.append((child, depth + 1, my_idx))
+
+
+class _CatalogRunner(VolatilityRunner):
+    """Runner over a fixed plugin list, used to validate presets without recursion."""
+
+    def __init__(self, plugins: list[PluginSpec]) -> None:
+        super().__init__()
+        self._plugins = plugins
+
+    def plugins(self) -> list[PluginSpec]:
+        return self._plugins

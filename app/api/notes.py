@@ -79,3 +79,25 @@ def delete_note(note_id: int, session: SessionDep) -> Response:
     except LookupError as exc:
         raise _http_error(exc) from exc
     return Response(status_code=204)
+
+
+class NoteVersionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    note_id: int
+    version: int
+    action: str
+    body: str
+    evidence_id: int | None
+    actor: str
+    created_at: datetime
+
+
+@router.get("/{note_id}/versions", response_model=list[NoteVersionOut])
+def note_versions(note_id: int, session: SessionDep) -> list:
+    """Full edit history of a note (still available after the note is deleted)."""
+    versions = notes_service.list_versions(session, note_id)
+    if not versions:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no history for note {note_id}")
+    return versions

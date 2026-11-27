@@ -25,6 +25,21 @@ OUTPUT_DIR_NAME = "output"
 HEARTBEAT_INTERVAL = 5.0  # seconds between on_heartbeat calls
 POLL_INTERVAL = 0.2  # seconds between checks of process/cancel/timeout
 KILL_GRACE = 5.0  # seconds between SIGTERM and SIGKILL
+OUTPUT_CHECK_INTERVAL = 2.0  # seconds between output-dir size checks
+
+
+def dir_size(path: Path) -> int:
+    """Total size of regular files under ``path`` (symlinks not followed)."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                st = os.lstat(os.path.join(root, name))
+            except OSError:
+                continue
+            if not os.path.islink(os.path.join(root, name)):
+                total += st.st_size
+    return total
 
 
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -33,6 +48,28 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
         while chunk := f.read(chunk_size):
             h.update(chunk)
     return h.hexdigest()
+
+
+IS_WINDOWS = os.name == "nt"
+
+
+def _kill_tree_windows(proc: subprocess.Popen[bytes]) -> None:
+    """Windows has no process groups/signals: kill the process and all its descendants with
+    taskkill /T (must run while the parent is still alive, or its children are not found)."""
+    try:
+        subprocess.run(  # noqa: S603 - fixed argv
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],  # noqa: S607 - system tool
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        proc.kill()  # in case taskkill was unavailable
+    except OSError:
+        pass
 
 
 def _signal_group(proc: subprocess.Popen[bytes], sig: int) -> None:
@@ -56,7 +93,15 @@ def _signal_group(proc: subprocess.Popen[bytes], sig: int) -> None:
 
 
 def _stop(proc: subprocess.Popen[bytes], grace: float) -> None:
-    """SIGTERM the process group, then SIGKILL it if still alive after ``grace`` seconds."""
+    """SIGTERM the process group, then SIGKILL it if still alive after ``grace`` seconds.
+    On Windows the whole process tree is killed at once (there is no graceful signal)."""
+    if IS_WINDOWS:
+        _kill_tree_windows(proc)
+        try:
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:  # pragma: no cover - pathological
+            pass
+        return
     _signal_group(proc, signal.SIGTERM)
     try:
         proc.wait(timeout=grace)
@@ -82,6 +127,10 @@ def execute(
     *,
     heartbeat_interval: float = HEARTBEAT_INTERVAL,
     kill_grace: float = KILL_GRACE,
+    max_output_bytes: int | None = None,
+    output_check_interval: float | None = None,
+    on_start: Callable[[int, list[str]], None] | None = None,
+    should_stop: Callable[[], str | None] | None = None,
 ) -> ExecutionResult:
     """Run one tool invocation and return its ExecutionResult.
 
@@ -101,6 +150,14 @@ def execute(
       message written to the stderr file, so the worker's usual "record stderr tail" failure path
       applies. Callers should treat ``returncode is None`` (and not cancelled/timed out) as failure.
     - ``stdout_sha256`` is the SHA-256 of the stdout file after exit.
+    - ``max_output_bytes``: if the files the tool writes into ``run_dir/output`` grow past this,
+      the process group is stopped and ``output_limit_exceeded`` is set (checked every
+      ``output_check_interval`` seconds and once more after exit).
+    - ``on_start(pid, argv)`` is called once the process is launched (the worker records both,
+      so an interrupted run keeps its exact command and an orphaned process can be found after a
+      crash). Its exceptions are swallowed.
+    - ``should_stop()`` is called every ``output_check_interval`` seconds; if it returns a
+      reason, the process group is stopped and ``stop_reason`` is set (e.g. disk nearly full).
     """
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -138,8 +195,17 @@ def execute(
                 tool_version=tool_version,
             )
 
+        if on_start is not None:
+            try:
+                on_start(proc.pid, list(argv))
+            except Exception:  # noqa: S110 - bookkeeping must not orphan the child process
+                pass
+
+        output_check_interval = output_check_interval or OUTPUT_CHECK_INTERVAL
         start = time.monotonic()
-        last_heartbeat = start
+        last_heartbeat = last_output_check = start
+        output_limit_exceeded = False
+        stop_reason: str | None = None
         while True:
             try:
                 proc.wait(timeout=POLL_INTERVAL)
@@ -155,6 +221,20 @@ def execute(
                 timed_out = True
                 _stop(proc, kill_grace)
                 break
+            if now - last_output_check >= output_check_interval:
+                last_output_check = now
+                if max_output_bytes is not None and dir_size(output_dir) > max_output_bytes:
+                    output_limit_exceeded = True
+                    _stop(proc, kill_grace)
+                    break
+                if should_stop is not None:
+                    try:
+                        stop_reason = should_stop()
+                    except Exception:
+                        stop_reason = None
+                    if stop_reason:
+                        _stop(proc, kill_grace)
+                        break
             if on_heartbeat is not None and now - last_heartbeat >= heartbeat_interval:
                 last_heartbeat = now
                 try:
@@ -171,4 +251,7 @@ def execute(
         tool_version=tool_version,
         timed_out=timed_out,
         cancelled=cancelled,
+        output_limit_exceeded=output_limit_exceeded
+        or (max_output_bytes is not None and dir_size(output_dir) > max_output_bytes),
+        stop_reason=stop_reason,
     )

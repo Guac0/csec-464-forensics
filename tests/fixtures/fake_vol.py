@@ -9,6 +9,9 @@ Behaviour is chosen by the FAKE_VOL_MODE env var (default "ok"):
   spawn   - start a sleeping grandchild, print {"child_pid": N} to stdout, then sleep (used to
             check that the whole process group is killed)
   argv    - print the received argv (excluding argv[0]) as one JSON line and exit 0
+  dump    - like vol's --dump: write a fake PE file per process into the -o directory, name it
+            in a "File output" column, and exit 0
+  flood   - keep writing 64 KiB chunks into the -o directory until killed (size-limit tests)
 Output is SYNTHETIC test data, not real volatility output.
 """
 
@@ -35,6 +38,23 @@ def main() -> int:
         sys.stdout.write(json.dumps({"child_pid": child.pid}) + "\n")
         sys.stdout.flush()
         time.sleep(120)
+        return 0
+    if mode in ("dump", "flood"):
+        out_dir = sys.argv[sys.argv.index("-o") + 1]
+        if mode == "flood":
+            with open(os.path.join(out_dir, "flood.bin"), "wb") as f:
+                while True:
+                    f.write(b"\0" * 65536)
+                    f.flush()
+                    time.sleep(0.01)
+        sys.stdout.write("\n")
+        for pid in (4, 101):
+            name = f"pid.{pid}.0x1000.dmp"
+            with open(os.path.join(out_dir, name), "wb") as f:
+                f.write(b"MZ" + bytes(62) + b"fake process " + str(pid).encode())
+            row = {"PID": pid, "File output": name, "__children": []}
+            sys.stdout.write(json.dumps(row, sort_keys=True) + "\n")
+        sys.stdout.write(json.dumps({"PID": 7, "File output": "Disabled", "__children": []}) + "\n")
         return 0
     if mode == "argv":
         sys.stdout.write("\n" + json.dumps({"argv": sys.argv[1:], "__children": []}) + "\n")

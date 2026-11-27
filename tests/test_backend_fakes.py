@@ -87,6 +87,7 @@ def make_fake_execute(
         timeout: float,
         cancel_event: threading.Event,
         on_heartbeat: Callable[[], None] | None = None,
+        **_kwargs: Any,
     ) -> ExecutionResult:
         stdout = run_dir / "stdout.jsonl"
         stderr_path = run_dir / "stderr.txt"

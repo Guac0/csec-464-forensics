@@ -1,0 +1,82 @@
+# Manual AI evaluation run (see evals/README.md). Never runs on pull requests: it calls the AI
+# provider (cost, rate limits) and model output varies between runs.
+#
+# Setup (repo Settings > Secrets and variables > Actions):
+#   secrets   FT_AI_BASE_URL, FT_AI_API_KEY   (an OpenAI-compatible endpoint reachable from
+#             GitHub-hosted runners; a model on your laptop is not)
+#   variable  FT_AI_MODEL                     (default model; can be overridden per run)
+name: AI evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model (empty = repository variable FT_AI_MODEL)"
+        required: false
+        default: ""
+      cases:
+        description: "Case ids or tags, space separated (empty = all)"
+        required: false
+        default: ""
+      repeat:
+        description: "Attempts per case"
+        required: false
+        default: "3"
+      judge:
+        description: "Also grade answers with an AI judge"
+        type: boolean
+        default: false
+      fail_on_regression:
+        description: "Fail the run if a metric dropped vs the committed baseline"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-evaluation
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Run evaluation
+        env:
+          FT_AI_BASE_URL: ${{ secrets.FT_AI_BASE_URL }}
+          FT_AI_API_KEY: ${{ secrets.FT_AI_API_KEY }}
+          FT_AI_MODEL: ${{ inputs.model || vars.FT_AI_MODEL }}
+          # Inputs are passed through the environment, never interpolated into the script.
+          EVAL_CASES: ${{ inputs.cases }}
+          EVAL_REPEAT: ${{ inputs.repeat }}
+          EVAL_JUDGE: ${{ inputs.judge }}
+          EVAL_FAIL_ON_REGRESSION: ${{ inputs.fail_on_regression }}
+        run: |
+          args=(--repeat "$EVAL_REPEAT")
+          if [ -n "$EVAL_CASES" ]; then
+            read -r -a case_list <<< "$EVAL_CASES"
+            args+=(--cases "${case_list[@]}")
+          fi
+          if [ "$EVAL_JUDGE" = "true" ]; then args+=(--judge); fi
+          if [ "$EVAL_FAIL_ON_REGRESSION" = "true" ]; then args+=(--fail-on-regression); fi
+          python -m evals.run "${args[@]}"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-evaluation-report
+          path: evals/reports/
+          if-no-files-found: ignore

@@ -26,6 +26,10 @@ class ArgSpec:
     type: ArgType
     help: str = ""
     required: bool = False
+    # True if using this option makes the tool write files (e.g. --dump). Such options must be
+    # declared: the catalog check refuses known file-writing flags that are not marked, and the
+    # run form warns before using one.
+    writes_files: bool = False
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,14 @@ class PluginSpec:
     auto_enumerate: bool = False  # include in the "auto-enumerate" batch
     # Hardcoded suggested queries shown in the UI: (label, args) pairs.
     presets: tuple[tuple[str, dict[str, Any]], ...] = ()
+    # Timeout for this plugin in seconds; None = FT_RUN_TIMEOUT_SECONDS.
+    timeout_seconds: int | None = None
+    # True if the plugin always writes files (e.g. windows.dumpfiles.DumpFiles), whatever args.
+    writes_files: bool = False
+
+    @property
+    def may_write_files(self) -> bool:
+        return self.writes_files or any(a.writes_files for a in self.args)
 
 
 @dataclass(frozen=True)
@@ -61,6 +73,10 @@ class ExecutionResult:
     tool_version: str | None
     timed_out: bool = False
     cancelled: bool = False
+    # True if the files the tool wrote to output_dir exceeded max_output_bytes and it was stopped.
+    output_limit_exceeded: bool = False
+    # Set if should_stop() asked the executor to stop early (e.g. the disk is nearly full).
+    stop_reason: str | None = None
 
 
 class ToolRunner(ABC):
@@ -69,6 +85,10 @@ class ToolRunner(ABC):
     @abstractmethod
     def plugins(self) -> list[PluginSpec]:
         """Allowlisted plugins, in display order."""
+
+    def catalog_problems(self) -> dict[str, list[str]]:
+        """{plugin name: [problem, ...]} for catalog entries that were skipped as invalid."""
+        return {}
 
     def get_plugin(self, name: str) -> PluginSpec:
         for p in self.plugins():

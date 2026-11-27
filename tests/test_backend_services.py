@@ -12,12 +12,13 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db import SessionLocal
 from app.jobs import worker as worker_mod
-from app.jobs.worker import Worker, recover_stale_runs
+from app.jobs.worker import Worker, recover_interrupted_runs
 from app.models import Evidence, ResultRow, Run, RunOrigin, RunStatus
 from app.services import evidence as evidence_service
 from app.services import notes as notes_service
 from app.services import runs as runs_service
 from app.tools.base import ArgValidationError, ToolRequest
+from tests.conftest import symlinks_supported
 from tests.test_backend_fakes import FakeRunner, install_fake_runner, make_fake_execute
 
 
@@ -38,13 +39,17 @@ def test_scan_finds_files_and_skips_hidden_and_escaping_links(
     (ev_dir / ".hidden").write_bytes(b"x")
     (ev_dir / ".dir").mkdir()
     (ev_dir / ".dir" / "c.raw").write_bytes(b"x")
-    outside = tmp_path / "outside.raw"
-    outside.write_bytes(b"secret")
-    os.symlink(outside, ev_dir / "escape.raw")
-    os.symlink(ev_dir / "sample.raw", ev_dir / "inside-link.raw")
+    expected = ["sample.raw", "sub/b.mem"]
+    # Symlinks need admin rights or Developer Mode on Windows: check them only where possible.
+    if symlinks_supported(tmp_path):
+        outside = tmp_path / "outside.raw"
+        outside.write_bytes(b"secret")
+        os.symlink(outside, ev_dir / "escape.raw")
+        os.symlink(ev_dir / "sample.raw", ev_dir / "inside-link.raw")
+        expected = ["inside-link.raw", *expected]
 
     found = evidence_service.scan_evidence(session)
-    assert sorted(e.rel_path for e in found) == ["inside-link.raw", "sample.raw", "sub/b.mem"]
+    assert sorted(e.rel_path for e in found) == expected
     sample = next(e for e in found if e.rel_path == "sample.raw")
     assert sample.size_bytes == 4096
 
@@ -53,17 +58,18 @@ def test_scan_finds_files_and_skips_hidden_and_escaping_links(
     assert {e.id for e in again} == {e.id for e in found}
 
 
-def test_scan_clears_hash_when_file_changes(settings: Settings, session: Session) -> None:
+def test_scan_flags_hashed_file_that_changed(settings: Settings, session: Session) -> None:
     (ev,) = evidence_service.scan_evidence(session)
     evidence_service.hash_evidence(session, ev.id)
-    assert ev.sha256
+    baseline = ev.sha256
     path = settings.evidence_dir / "sample.raw"
     path.write_bytes(b"\x01" * 10)
     os.utime(path, (1_000_000, 1_000_000))
     (ev2,) = evidence_service.scan_evidence(session)
     assert ev2.id == ev.id
-    assert ev2.size_bytes == 10
-    assert ev2.sha256 is None
+    # The hashed baseline is kept; the image is flagged until the analyst re-verifies it.
+    assert ev2.size_bytes == 4096 and ev2.sha256 == baseline
+    assert ev2.changed_detected_at is not None
 
 
 @pytest.mark.parametrize("bad", ["../outside.raw", "/etc/passwd", "sub/../../x", ""])
@@ -79,19 +85,16 @@ def test_resolve_evidence_path_ok(settings: Settings) -> None:
     assert p == (settings.evidence_dir / "sample.raw").resolve()
 
 
-def test_hash_evidence_and_cache(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hash_evidence_computes_all_hashes(session: Session) -> None:
     import hashlib
 
     (ev,) = evidence_service.scan_evidence(session)
     evidence_service.hash_evidence(session, ev.id)
-    assert ev.sha256 == hashlib.sha256(b"\x00" * 4096).hexdigest()
+    data = b"\x00" * 4096
+    assert ev.sha256 == hashlib.sha256(data).hexdigest()
+    assert ev.md5 == hashlib.md5(data).hexdigest()  # noqa: S324
+    assert ev.sha1 == hashlib.sha1(data).hexdigest()  # noqa: S324
     assert ev.hashed_at is not None
-
-    def boom(_path: Path) -> str:
-        raise AssertionError("should be cached")
-
-    monkeypatch.setattr(evidence_service, "_sha256_file", boom)
-    assert evidence_service.hash_evidence(session, ev.id).sha256 == ev.sha256
 
 
 def test_hash_in_background(session: Session) -> None:
@@ -337,17 +340,18 @@ def test_cancel_running_without_worker_marks_cancelled(
     assert runs_service.cancel_run(session, run.id).status == RunStatus.CANCELLED
 
 
-def test_recover_stale_runs(session: Session, evidence: Evidence) -> None:
+def test_recover_interrupted_runs(session: Session, evidence: Evidence) -> None:
     for st in (RunStatus.RUNNING, RunStatus.RUNNING, RunStatus.QUEUED, RunStatus.SUCCEEDED):
         session.add(Run(evidence_id=evidence.id, plugin="windows.info.Info", status=st))
     session.commit()
-    assert recover_stale_runs(session) == 2
+    assert recover_interrupted_runs(session) == 2
     session.expire_all()
     with SessionLocal() as s:
-        failed = s.query(Run).filter(Run.status == RunStatus.FAILED).all()
-        assert len(failed) == 2
-        assert all(r.error == "interrupted by restart" for r in failed)
-    assert recover_stale_runs(session) == 0
+        stopped = s.query(Run).filter(Run.status == RunStatus.INTERRUPTED).all()
+        assert len(stopped) == 2
+        assert all(r.error.startswith("interrupted: the app stopped") for r in stopped)
+        assert s.query(Run).filter(Run.status == RunStatus.QUEUED).count() == 1
+    assert recover_interrupted_runs(session) == 0
 
 
 def test_scan_skips_docs_hashes_and_archives(settings, session):

@@ -26,9 +26,15 @@ from app.ai import service as ai_svc
 from app.config import get_settings
 from app.db import get_session
 from app.models import AIMessage, Evidence, Note, ResultRow, Run, RunOrigin, RunStatus
+from app.services import audit as audit_svc
 from app.services import evidence as evidence_svc
+from app.services import integrity as integrity_svc
 from app.services import notes as notes_svc
+from app.services import results as results_svc
 from app.services import runs as runs_svc
+from app.services.resources import DiskSpaceError
+from app.services.runs import RERUNNABLE_STATUSES
+from app.tools import hooks as hooks_mod
 from app.tools import registry
 from app.tools.base import ArgValidationError, PluginSpec, ToolRequest
 
@@ -41,6 +47,8 @@ PAGE_SIZE = 100
 MAX_PAGE_SIZE = 500
 STDERR_TAIL_BYTES = 4096
 ACTIVE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING)
+SEVERITIES = hooks_mod.SEVERITIES
+ANY_TAG = "*"  # tag filter value meaning "any annotated row"
 UI_ORIGINS = {"manual": RunOrigin.MANUAL, "preset": RunOrigin.PRESET, "ai": RunOrigin.AI_SUGGESTED}
 
 
@@ -94,6 +102,21 @@ _CITE_BRACKET_RE = re.compile(r"\[\s*(R\d+:\d+(?:\s*[,;]\s*R\d+:\d+)*)\s*\]")
 _CITE_KEY_RE = re.compile(r"R(\d+):(\d+)")
 
 
+def _deleted_run_ids(run_ids: set[int]) -> set[int]:
+    """Which of ``run_ids`` are deleted (tombstoned) runs."""
+    if not run_ids:
+        return set()
+    from app.db import SessionLocal
+
+    try:
+        with SessionLocal() as s:
+            return set(
+                s.scalars(select(Run.id).where(Run.id.in_(run_ids), Run.deleted_at.is_not(None)))
+            )
+    except Exception:
+        return set()
+
+
 def render_ai_content(content: str | None, citations: list[dict[str, Any]] | None = None) -> Markup:
     """Escape AI text completely, then turn citation tokens like [R12:34] into row links.
 
@@ -105,12 +128,18 @@ def render_ai_content(content: str | None, citations: list[dict[str, Any]] | Non
         if isinstance(c, dict) and c.get("valid") is False
     }
     escaped = str(escape(content or ""))
+    deleted = _deleted_run_ids({int(m.group(1)) for m in _CITE_KEY_RE.finditer(escaped)})
 
     def _key(m: re.Match[str]) -> str:
         run_id, row_idx = int(m.group(1)), int(m.group(2))
         key = f"R{run_id}:{row_idx}"
         if key in invalid:
             return f'<span class="cite-invalid" title="citation not found in database">{key}</span>'
+        if run_id in deleted:
+            return (
+                f'<a class="cite cite-deleted" href="/runs/{run_id}" '
+                f'title="run {run_id} was deleted; this row no longer exists">{key}</a>'
+            )
         href = f"/runs/{run_id}?row={row_idx}#row-{run_id}-{row_idx}"
         return f'<a class="cite" href="{href}">{key}</a>'
 
@@ -124,7 +153,19 @@ def render_ai_content(content: str | None, citations: list[dict[str, Any]] | Non
 def fmt_os_info(value: dict[str, Any] | None) -> str:
     if not value:
         return "—"
-    return ", ".join(f"{k}={v}" for k, v in value.items())
+    parts = []
+    for k, v in value.items():
+        if isinstance(v, dict | list):
+            parts.append(f"{k}=({len(v)} fields)")  # nested detail is shown on hover/API
+        else:
+            parts.append(f"{k}={v}")
+    return ", ".join(parts)
+
+
+def max_severity(annotations: list[dict[str, Any]] | None) -> str | None:
+    """Highest severity among a row's annotations (for row highlighting)."""
+    levels = [a.get("severity") for a in annotations or [] if a.get("severity") in SEVERITIES]
+    return max(levels, key=SEVERITIES.index) if levels else None
 
 
 templates.env.filters.update(
@@ -136,6 +177,9 @@ templates.env.filters.update(
     pretty=pretty_json,
     ai_content=render_ai_content,
     os_info=fmt_os_info,
+    max_severity=max_severity,
+    integrity_status=lambda ev: integrity_svc.status(ev),
+    integrity_problem=lambda ev: integrity_svc.describe_problem(ev),
 )
 
 
@@ -297,44 +341,105 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "messages": ai_history(session, ev.id),
         "runs_panel": True,
         "values": {},
+        "integrity_status": integrity_svc.status(ev),
+        "integrity_problem": integrity_svc.describe_problem(ev),
+        "integrity_checks": integrity_svc.list_checks(session, ev.id)[:20],
+        "integrity_mode": get_settings().integrity_mode,
+        "verify_on_run": get_settings().verify_on_run,
+        "hashing": evidence_svc.is_hashing(ev.id),
+        "cleanup": _cleanup_summary(session, ev.id),
+    }
+
+
+def _cleanup_summary(session: Session, evidence_id: int) -> dict[str, Any]:
+    """Failed / interrupted / cancelled runs that bulk clean-up would delete."""
+    from app.services import run_deletion
+
+    runs = run_deletion.cleanup_candidates(session, evidence_id)
+    return {
+        "count": len(runs),
+        "bytes": sum(run_deletion.dir_bytes(run_deletion.run_dir(r.id)) for r in runs),
+        "statuses": sorted({r.status.value for r in runs}),
     }
 
 
 def rows_context(
-    session: Session, run: Run, offset: int, limit: int, q: str | None, highlight: int | None
+    session: Session,
+    run: Run,
+    view: results_svc.RowView,
+    offset: int,
+    limit: int,
+    highlight: int | None = None,
 ) -> dict[str, Any]:
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     offset = max(0, offset)
-    q = (q or "").strip() or None
-    rows, total = runs_svc.get_rows(session, run.id, offset=offset, limit=limit, q=q)
-    columns: dict[str, None] = {}
-    for r in rows:
-        for k in r.data or {}:
-            columns.setdefault(k, None)
+    view_error = None
+    try:
+        rows, total = runs_svc.get_rows(
+            session,
+            run.id,
+            offset=offset,
+            limit=limit,
+            q=view.q or None,
+            annotated=view.annotated,
+            tag=view.tag or None,
+            filters=view.filters,
+            sort=view.sort or None,
+            desc=view.desc,
+        )
+    except ValueError as exc:  # e.g. an unsupported column name in a filter
+        rows, total, view_error = [], 0, str(exc)
+    # Stable columns recorded at ingest; fall back to this page's keys for older runs.
+    columns = [c["name"] for c in run.columns or []]
+    if not columns:
+        seen: dict[str, None] = {}
+        for r in rows:
+            for k in r.data or {}:
+                seen.setdefault(k, None)
+        columns = list(seen)
     return {
         "run": run,
         "rows": rows,
         "total": total,
         "offset": offset,
         "limit": limit,
-        "q": q or "",
-        "columns": list(columns),
+        "view": view,
+        "view_error": view_error,
+        "q": view.q,
+        "tag": "*" if view.annotated and not view.tag else view.tag,
+        "tags": runs_svc.annotation_tags(session, run.id),
+        "row_artifacts": _row_artifacts(run),
+        "has_annotations": any(r.annotations for r in rows) or view.annotated or bool(view.tag),
+        "columns": columns,
+        "column_types": {c["name"]: c["type"] for c in run.columns or []},
         "highlight": highlight,
         "prev_offset": max(0, offset - limit) if offset > 0 else None,
         "next_offset": offset + limit if offset + limit < total else None,
     }
 
 
-def page_url(run_id: int, offset: int, q: str, limit: int = PAGE_SIZE) -> str:
-    params: dict[str, Any] = {"offset": offset}
-    if q:
-        params["q"] = q
-    if limit != PAGE_SIZE:
-        params["limit"] = limit
-    return f"/runs/{run_id}?{urlencode(params)}"
+def _row_artifacts(run: Run) -> dict[int, list[Any]]:
+    """row_idx -> artifacts named by that row (for the results table's "File" column)."""
+    out: dict[int, list[Any]] = {}
+    for a in getattr(run, "artifacts", None) or []:
+        if a.source_row_idx is not None:
+            out.setdefault(a.source_row_idx, []).append(a)
+    return out
+
+
+def page_url(
+    run_id: int, view: results_svc.RowView, fragment: bool = False, **overrides: Any
+) -> str:
+    """URL of the run page (or the rows fragment) for a view, e.g. with another offset/sort."""
+    params = view.to_params(**overrides)
+    if params.get("limit") == PAGE_SIZE:
+        params.pop("limit")
+    base = f"/ui/runs/{run_id}/rows" if fragment else f"/runs/{run_id}"
+    return f"{base}?{urlencode(params)}" if params else base
 
 
 templates.env.globals.update(page_url=page_url)
+templates.env.globals.update(zip_password=lambda: get_settings().artifact_zip_password)
 
 
 # --------------------------------------------------------------------------- pages
@@ -374,11 +479,20 @@ def run_page(
     run_id: int,
     offset: int = 0,
     limit: int = PAGE_SIZE,
-    q: str | None = None,
     row: int | None = None,
 ) -> HTMLResponse:
+    """Query parameters: q, tag, sort, desc, f.<column> (see RowView), offset, limit, row."""
     run = get_run_or_404(session, run_id)
-    return _render_run_page(request, session, run, offset, limit, q, row)
+    view = results_svc.RowView.from_params(request.query_params)
+    return _render_run_page(request, session, run, offset, limit, row, view=view)
+
+
+def _delete_preview(session: Session, run: Run) -> Any:
+    from app.services import run_deletion
+
+    if run.deleted_at is not None or run.status in ACTIVE_STATUSES:
+        return None
+    return run_deletion.preview(session, run.id)
 
 
 def _render_run_page(
@@ -387,13 +501,15 @@ def _render_run_page(
     run: Run,
     offset: int = 0,
     limit: int = PAGE_SIZE,
-    q: str | None = None,
     row: int | None = None,
     summary: AIMessage | None = None,
+    message: str | None = None,
+    view: results_svc.RowView | None = None,
 ) -> HTMLResponse:
+    view = view or results_svc.RowView()
     if row is not None:
-        # Open the (unfiltered) page containing the requested row.
-        q = None
+        # Open the (unfiltered, unsorted) page containing the requested row.
+        view = results_svc.RowView()
         before = session.scalar(
             select(func.count(ResultRow.id)).where(
                 ResultRow.run_id == run.id, ResultRow.row_idx < row
@@ -401,13 +517,25 @@ def _render_run_page(
         )
         limit = max(1, min(limit, MAX_PAGE_SIZE))
         offset = ((before or 0) // limit) * limit
-    ctx = rows_context(session, run, offset, limit, q, row)
+    ctx = rows_context(session, run, view, offset, limit, row)
+    follow_ups = list(
+        session.scalars(select(Run).where(Run.parent_run_id == run.id).order_by(Run.id))
+    )
     return render(
         request,
         "run.html",
-        stderr_tail=stderr_tail(run) if run.status == RunStatus.FAILED else None,
+        stderr_tail=stderr_tail(run)
+        if run.status in (RunStatus.FAILED, RunStatus.INTERRUPTED)
+        else None,
+        can_rerun=run.status in RERUNNABLE_STATUSES,
+        delete_preview=_delete_preview(session, run),
         summary=summary,
         evidence_id=run.evidence_id,
+        hook_specs=hooks_mod.hooks_for(run.tool, run.plugin),
+        hook_errors=[h for h in run.hook_results or [] if h.get("status") != "ok"],
+        follow_ups=follow_ups,
+        message=message,
+        zip_password=get_settings().artifact_zip_password,
         **ctx,
     )
 
@@ -433,7 +561,7 @@ def ui_hash(request: Request, evidence_id: int, session: SessionDep) -> Response
     get_evidence_or_404(session, evidence_id)
     evidence_svc.start_hash_in_background(evidence_id)
     if not is_htmx(request):
-        return redirect("/")
+        return redirect(request.headers.get("referer") or "/")
     return evidence_list_response(
         request, session, message="Hashing started in the background; refresh to see the result."
     )
@@ -553,7 +681,11 @@ def ui_create_run(
         session.commit()
     except (ValueError, KeyError) as exc:  # ArgValidationError and JSON errors are ValueErrors
         session.rollback()
-        error = str(exc) if isinstance(exc, ArgValidationError) else f"invalid request: {exc}"
+        error = (
+            str(exc)
+            if isinstance(exc, ArgValidationError | integrity_svc.IntegrityError | DiskSpaceError)
+            else f"invalid request: {exc}"
+        )
 
     if is_htmx(request):
         if error:
@@ -573,7 +705,14 @@ def ui_create_run(
 @router.post("/ui/evidence/{evidence_id}/auto", dependencies=[Depends(same_origin_post)])
 def ui_auto(request: Request, evidence_id: int, session: SessionDep) -> Response:
     get_evidence_or_404(session, evidence_id)
-    runs = runs_svc.enqueue_auto(session, evidence_id)
+    try:
+        runs = runs_svc.enqueue_auto(session, evidence_id)
+    except (integrity_svc.IntegrityError, DiskSpaceError) as exc:
+        session.rollback()
+        if not is_htmx(request):
+            anchor = "integrity" if isinstance(exc, integrity_svc.IntegrityError) else "runs"
+            return redirect(f"/evidence/{evidence_id}#{anchor}")
+        return runs_response(request, session, evidence_id, error=str(exc))
     session.commit()
     if not is_htmx(request):
         return redirect(f"/evidence/{evidence_id}#runs")
@@ -597,6 +736,29 @@ def ui_cancel(request: Request, run_id: int, session: SessionDep) -> Response:
     return runs_response(request, session, run.evidence_id, error=error)
 
 
+@router.post("/ui/runs/{run_id}/rerun", dependencies=[Depends(same_origin_post)])
+def ui_rerun(request: Request, run_id: int, session: SessionDep) -> Response:
+    """Queue a copy of a finished run. From the runs table (HTMX) the table is refreshed; from
+    the run page the browser goes to the new run."""
+    run = get_run_or_404(session, run_id)
+    try:
+        new_run = runs_svc.rerun(session, run_id)
+    except (ValueError, LookupError) as exc:  # integrity, disk space, allowlist, still active
+        session.rollback()
+        error = f"Re-run failed: {exc}"
+        if is_htmx(request):
+            return runs_response(request, session, run.evidence_id, error=error)
+        return _render_run_page(request, session, run, message=error)
+    if is_htmx(request):
+        return runs_response(
+            request,
+            session,
+            run.evidence_id,
+            message=f"Queued run {new_run.id} (re-run of {run_id}).",
+        )
+    return redirect(f"/runs/{new_run.id}")
+
+
 @router.get("/ui/runs/{run_id}/rows", response_class=HTMLResponse)
 def ui_rows(
     request: Request,
@@ -604,12 +766,44 @@ def ui_rows(
     run_id: int,
     offset: int = 0,
     limit: int = PAGE_SIZE,
-    q: str | None = None,
 ) -> Response:
+    """Query parameters as for the run page (q, tag, sort, desc, f.<column>, offset, limit)."""
     run = get_run_or_404(session, run_id)
+    view = results_svc.RowView.from_params(request.query_params)
     if not is_htmx(request):
-        return redirect(page_url(run_id, offset, (q or "").strip(), limit))
-    return render(request, "_rows.html", **rows_context(session, run, offset, limit, q, None))
+        return redirect(page_url(run_id, view, offset=offset or None, limit=limit))
+    return render(request, "_rows.html", **rows_context(session, run, view, offset, limit))
+
+
+@router.get("/ui/runs/{run_id}/export")
+def ui_export(
+    request: Request, run_id: int, session: SessionDep, choice: str = "csv:view"
+) -> Response:
+    """Export dialog target: choice = "<csv|jsonl>:<view|all>" or "raw"."""
+    from app.api.runs import export_response
+
+    run = get_run_or_404(session, run_id)
+    fmt, _, scope = choice.partition(":")
+    if fmt not in ("csv", "jsonl", "raw"):
+        raise HTTPException(422, "unknown export format")
+    params = request.query_params if scope == "view" else {}
+    return export_response(session, run, params, fmt)
+
+
+@router.post("/ui/runs/{run_id}/hooks/rerun", dependencies=[Depends(same_origin_post)])
+def ui_rerun_hooks(request: Request, run_id: int, session: SessionDep) -> Response:
+    """Re-run post-processing hooks on a finished run (no re-run of the tool)."""
+    run = get_run_or_404(session, run_id)
+    try:
+        hooks_mod.load_hooks(force=True)  # pick up edited hook code without a restart
+        results = hooks_mod.run_hooks(session, run_id)
+    except ValueError as exc:
+        session.rollback()
+        return _render_run_page(request, session, run, message=str(exc))
+    session.refresh(run)
+    failed = sum(1 for r in results if r.get("status") != "ok")
+    message = f"Post-processing re-run: {len(results)} hook(s), {failed} failed."
+    return _render_run_page(request, session, run, message=message)
 
 
 @router.get("/ui/evidence/{evidence_id}/ai", response_class=HTMLResponse)
@@ -666,3 +860,294 @@ def ui_summarize(request: Request, run_id: int, session: SessionDep) -> Response
     if not is_htmx(request):
         return _render_run_page(request, session, run, summary=msg)
     return render(request, "_ai_message.html", msg=msg, evidence_id=run.evidence_id)
+
+
+# --------------------------------------------------------------------------- audit + note history
+
+AUDIT_PAGE_SIZE = 100
+
+
+@router.get("/activity", response_class=HTMLResponse)
+def activity_page(
+    request: Request,
+    session: SessionDep,
+    category: str | None = None,
+    action: str | None = None,
+    evidence_id: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    offset: int = 0,
+) -> HTMLResponse:
+    return _render_activity(
+        request, session, category, action, evidence_id, object_type, object_id, offset
+    )
+
+
+def _render_activity(
+    request: Request,
+    session: Session,
+    category: str | None = None,
+    action: str | None = None,
+    evidence_id: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    offset: int = 0,
+    report: audit_svc.ChainReport | None = None,
+) -> HTMLResponse:
+    filters = {
+        "category": (category or "").strip() or None,
+        "action": (action or "").strip() or None,
+        "evidence_id": _int_or_none(evidence_id),
+        "object_type": (object_type or "").strip() or None,
+        "object_id": _int_or_none(object_id),
+    }
+    offset = max(0, offset)
+    events, total = audit_svc.list_events(session, **filters, offset=offset, limit=AUDIT_PAGE_SIZE)
+    query = {k: v for k, v in filters.items() if v is not None}
+
+    def page_link(new_offset: int) -> str:
+        return "/activity?" + urlencode({**query, "offset": new_offset})
+
+    return render(
+        request,
+        "activity.html",
+        events=events,
+        total=total,
+        offset=offset,
+        limit=AUDIT_PAGE_SIZE,
+        filters=filters,
+        categories=audit_svc.CATEGORIES,
+        audit_level=get_settings().audit_level,
+        report=report,
+        prev_link=page_link(max(0, offset - AUDIT_PAGE_SIZE)) if offset > 0 else None,
+        next_link=page_link(offset + AUDIT_PAGE_SIZE) if offset + AUDIT_PAGE_SIZE < total else None,
+        evidence_id=filters["evidence_id"],
+    )
+
+
+def _int_or_none(value: str | None) -> int | None:
+    try:
+        return int(value) if value not in (None, "") else None
+    except ValueError:
+        return None
+
+
+@router.post("/ui/audit/verify", dependencies=[Depends(same_origin_post)])
+def ui_audit_verify(request: Request, session: SessionDep) -> Response:
+    report = audit_svc.verify_and_record(session)
+    return _render_activity(request, session, report=report)
+
+
+@router.get("/notes/{note_id}/history", response_class=HTMLResponse)
+def note_history(request: Request, note_id: int, session: SessionDep) -> HTMLResponse:
+    versions = notes_svc.list_versions(session, note_id)
+    if not versions:
+        raise HTTPException(404, f"no history for note {note_id}")
+    return render(
+        request,
+        "note_history.html",
+        note_id=note_id,
+        versions=versions,
+        evidence_id=versions[-1].evidence_id,
+    )
+
+
+# --------------------------------------------------------------------------- integrity
+
+
+@router.post("/ui/evidence/{evidence_id}/expected-hashes", dependencies=[Depends(same_origin_post)])
+def ui_expected_hashes(
+    request: Request, evidence_id: int, form: FormDep, session: SessionDep
+) -> Response:
+    ev = get_evidence_or_404(session, evidence_id)
+    try:
+        integrity_svc.set_expected_hashes(
+            session,
+            evidence_id,
+            sha256=form.get("expected_sha256"),
+            md5=form.get("expected_md5"),
+            sha1=form.get("expected_sha1"),
+        )
+    except ValueError as exc:
+        session.rollback()
+        ctx = evidence_context(session, ev)
+        ctx.update(integrity_error=str(exc), expected_values=form)
+        return render(request, "evidence.html", status_code=422, **ctx)
+    return redirect(f"/evidence/{evidence_id}#integrity")
+
+
+@router.post("/ui/evidence/{evidence_id}/acknowledge", dependencies=[Depends(same_origin_post)])
+def ui_acknowledge_mismatch(
+    request: Request, evidence_id: int, form: FormDep, session: SessionDep
+) -> Response:
+    ev = get_evidence_or_404(session, evidence_id)
+    try:
+        integrity_svc.acknowledge_mismatch(session, evidence_id, form.get("reason") or "")
+    except ValueError as exc:
+        session.rollback()
+        ctx = evidence_context(session, ev)
+        ctx.update(integrity_error=str(exc))
+        return render(request, "evidence.html", status_code=422, **ctx)
+    return redirect(f"/evidence/{evidence_id}#integrity")
+
+
+# --------------------------------------------------------------------------- artifacts
+
+
+@router.get("/ui/artifacts/{artifact_id}/download")
+def ui_artifact_download(
+    artifact_id: int,
+    session: SessionDep,
+    format: str = "zip",  # noqa: A002
+) -> Response:
+    from app.api.artifacts import file_download
+
+    if format not in ("zip", "raw"):
+        raise HTTPException(422, "format must be zip or raw")
+    return file_download(session, artifact_id, format)
+
+
+# --------------------------------------------------------------------------- case export
+
+
+@router.get("/ui/export")
+def ui_case_export(
+    session: SessionDep,
+    evidence_id: str | None = None,
+    format: str = "md",  # noqa: A002
+    include_dumped: bool = False,
+) -> Response:
+    """Target of the export dialogs on the home and evidence pages."""
+    from app.api.export import export_response
+
+    ev_id = _int_or_none(evidence_id)
+    if ev_id is not None:
+        get_evidence_or_404(session, ev_id)
+    return export_response(session, ev_id, format, include_dumped and format == "zip")
+
+
+# --------------------------------------------------------------------------- system / health
+
+
+def _health_badge() -> tuple[str, str] | None:
+    """(status, tooltip) for the top-bar System link; None if the checks cannot run."""
+    from app.db import SessionLocal
+    from app.services import health
+
+    try:
+        with SessionLocal() as s:
+            return health.badge(s)
+    except Exception:
+        return None
+
+
+templates.env.globals.update(health_badge=_health_badge)
+
+
+@router.get("/system", response_class=HTMLResponse)
+def system_page(request: Request, session: SessionDep) -> HTMLResponse:
+    from app.services import health
+
+    checks = health.quick_checks(session)
+    health.clear_badge_cache()
+    from app.services import backup, run_deletion
+
+    return render(
+        request,
+        "system.html",
+        checks=checks,
+        overall=health.overall(checks),
+        settings_rows=health.settings_summary(),
+        backups=backup.list_backups()[:15],
+        backup_state=backup.manual_state(),
+        biggest_runs=run_deletion.biggest_runs(session),
+    )
+
+
+@router.post("/ui/system/test/{kind}", dependencies=[Depends(same_origin_post)])
+def ui_system_test(request: Request, kind: str) -> Response:
+    from app.services import health
+
+    tests = {"volatility": health.run_volatility_test, "ai": health.run_ai_test}
+    if kind not in tests:
+        raise HTTPException(404, "unknown test")
+    check = tests[kind]()
+    if not is_htmx(request):
+        return redirect("/system")
+    return render(request, "_health_check.html", check=check)
+
+
+# --------------------------------------------------------------------------- run deletion
+
+
+@router.post("/ui/runs/{run_id}/delete", dependencies=[Depends(same_origin_post)])
+def ui_delete_run(request: Request, run_id: int, form: FormDep, session: SessionDep) -> Response:
+    from app.services import run_deletion
+
+    run = get_run_or_404(session, run_id)
+    try:
+        result = run_deletion.delete_run(session, run_id, form.get("reason") or "")
+    except ValueError as exc:
+        session.rollback()
+        return _render_run_page(request, session, run, message=f"Delete failed: {exc}")
+    if not result.files_removed:
+        session.refresh(run)
+        return _render_run_page(
+            request,
+            session,
+            run,
+            message="Deleted, but some files could not be removed; see the log.",
+        )
+    return redirect(f"/runs/{run_id}")
+
+
+@router.post("/ui/evidence/{evidence_id}/cleanup", dependencies=[Depends(same_origin_post)])
+def ui_cleanup(request: Request, evidence_id: int, form: FormDep, session: SessionDep) -> Response:
+    from app.services import run_deletion
+
+    get_evidence_or_404(session, evidence_id)
+    try:
+        results = run_deletion.delete_runs(session, evidence_id, form.get("reason") or "")
+    except ValueError as exc:
+        session.rollback()
+        return runs_response(request, session, evidence_id, error=f"Clean-up failed: {exc}")
+    freed = sum(r.bytes_freed for r in results)
+    message = f"Deleted the data of {len(results)} run(s), freeing {humansize(freed)}."
+    if not is_htmx(request):
+        return redirect(f"/evidence/{evidence_id}#runs")
+    return runs_response(request, session, evidence_id, message=message)
+
+
+@router.post("/ui/system/backup", dependencies=[Depends(same_origin_post)])
+def ui_backup_now(request: Request) -> Response:
+    from app.services import backup
+
+    started = backup.start_manual_backup()
+    if not is_htmx(request):
+        return redirect("/system#backups")
+    return render(
+        request,
+        "_backup_status.html",
+        state=backup.manual_state() | ({} if started else {"busy": True}),
+    )
+
+
+@router.get("/ui/system/backup-status", response_class=HTMLResponse)
+def ui_backup_status(request: Request) -> HTMLResponse:
+    from app.services import backup
+
+    return render(request, "_backup_status.html", state=backup.manual_state())
+
+
+@router.post("/ui/system/backups/{name}/verify", dependencies=[Depends(same_origin_post)])
+def ui_verify_backup(request: Request, name: str) -> Response:
+    from app.services import backup
+
+    try:
+        backup.get_backup(name)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    report = backup.verify_backup(name)
+    if not is_htmx(request):
+        return redirect("/system#backups")
+    return render(request, "_backup_verify.html", report=report)

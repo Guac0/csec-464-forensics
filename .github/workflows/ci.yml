@@ -37,7 +37,12 @@ jobs:
         run: pre-commit run --all-files --show-diff-on-failure --color=always
 
   test:
-    runs-on: ubuntu-latest
+    # Windows too: several developers run the tests natively on Windows.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest] #, windows-latest] # Takes too long to run on windows relative to the minimal extra value
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

@@ -1,27 +1,53 @@
 <div id="rows">
+  {# Sort state travels with the view form; column filters below are part of the same form. #}
+  <input type="hidden" name="sort" value="{{ view.sort }}">
+  <input type="hidden" name="desc" value="{{ 1 if view.desc else '' }}">
+  {% if view_error %}<p class="flash error">{{ view_error }}</p>{% endif %}
   <div class="pager">
-    {% if total %}Rows {{ offset + 1 }}–{{ [offset + limit, total] | min }} of {{ total }}{% else %}No rows{% endif %}{% if q %} matching “{{ q }}”{% endif %}
+    {% if total %}Rows {{ offset + 1 }}–{{ [offset + limit, total] | min }} of {{ total }}{% else %}No rows{% endif %}{% if q %} matching “{{ q }}”{% endif %}{% if tag == "*" %} with any annotation{% elif tag %} tagged “{{ tag }}”{% endif %}{% if view.filters %} · {{ view.filters | length }} column filter{{ "s" if view.filters | length != 1 }}{% endif %}{% if view.sort %} · sorted by {{ view.sort }} {{ "↓" if view.desc else "↑" }}{% endif %}
+    {% if view.active %}<a class="small-text" href="/runs/{{ run.id }}" hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML" hx-push-url="/runs/{{ run.id }}">Clear</a>{% endif %}
     {% if prev_offset is not none %}
-      <a href="{{ page_url(run.id, prev_offset, q, limit) }}"
-         hx-get="/ui/runs/{{ run.id }}/rows?offset={{ prev_offset }}&limit={{ limit }}&q={{ q | urlencode }}"
-         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, prev_offset, q, limit) }}">&larr; Prev</a>
+      <a href="{{ page_url(run.id, view, offset=prev_offset or None, limit=limit) }}"
+         hx-get="{{ page_url(run.id, view, fragment=True, offset=prev_offset or None, limit=limit) }}"
+         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, offset=prev_offset or None, limit=limit) }}">&larr; Prev</a>
     {% endif %}
     {% if next_offset is not none %}
-      <a href="{{ page_url(run.id, next_offset, q, limit) }}"
-         hx-get="/ui/runs/{{ run.id }}/rows?offset={{ next_offset }}&limit={{ limit }}&q={{ q | urlencode }}"
-         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, next_offset, q, limit) }}">Next &rarr;</a>
+      <a href="{{ page_url(run.id, view, offset=next_offset, limit=limit) }}"
+         hx-get="{{ page_url(run.id, view, fragment=True, offset=next_offset, limit=limit) }}"
+         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, offset=next_offset, limit=limit) }}">Next &rarr;</a>
     {% endif %}
+    {% if run.search_indexed %}<span class="muted small-text" title="search uses the full-text index (3+ characters)">indexed</span>{% endif %}
   </div>
-  {% if rows %}
+  {% if columns %}
   <div class="table-wrap">
   <table class="data results">
-    <thead><tr><th>Cite</th>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <thead>
+      <tr><th>Cite</th>{% if row_artifacts %}<th>File</th>{% endif %}{% if has_annotations %}<th>Flags</th>{% endif %}
+      {% for c in columns %}
+        {% set is_sorted = view.sort == c %}
+        {% set next_desc = 1 if is_sorted and not view.desc else None %}
+        <th title="{{ column_types.get(c, '') }}"><a class="sort" href="{{ page_url(run.id, view, sort=c, desc=next_desc) }}"
+               hx-get="{{ page_url(run.id, view, fragment=True, sort=c, desc=next_desc) }}"
+               hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, sort=c, desc=next_desc) }}">{{ c }}{% if is_sorted %} {{ "↓" if view.desc else "↑" }}{% endif %}</a></th>
+      {% endfor %}</tr>
+      <tr class="filter-row"><th></th>{% if row_artifacts %}<th></th>{% endif %}{% if has_annotations %}<th></th>{% endif %}
+      {% for c in columns %}
+        {% set ctype = column_types.get(c, "") %}
+        <th><input class="view-control col-filter" name="f.{{ c }}" value="{{ view.filters.get(c, '') }}"
+                   placeholder="{{ '>, <, =' if ctype in ('int', 'float') else 'contains' }}"
+                   title="Text = contains. Or start with =, !=, >, >=, <, <= (numbers compare as numbers). Press Enter or leave the box to apply."></th>
+      {% endfor %}</tr>
+    </thead>
     <tbody>
     {% for r in rows %}
-      <tr id="row-{{ run.id }}-{{ r.row_idx }}"{% if highlight is not none and r.row_idx == highlight %} class="highlight"{% endif %}>
+      {% set sev = r.annotations | max_severity %}
+      {% set cls = ["highlight" if highlight is not none and r.row_idx == highlight else "", ("annotated sev-" ~ sev) if sev else ""] | select | join(" ") %}
+      <tr id="row-{{ run.id }}-{{ r.row_idx }}"{% if cls %} class="{{ cls }}"{% endif %}>
         <td class="mono cite-key"><a href="/runs/{{ run.id }}?row={{ r.row_idx }}#row-{{ run.id }}-{{ r.row_idx }}">R{{ run.id }}:{{ r.row_idx }}</a></td>
+        {% if row_artifacts %}<td>{% for a in row_artifacts.get(r.row_idx, []) %}<a class="badge" href="#artifact-{{ a.id }}" title="{{ a.filename }} ({{ a.file_type }})">file</a> {% endfor %}</td>{% endif %}
+        {% if has_annotations %}<td class="flags">{% for a in r.annotations or [] %}<span class="badge sev-{{ a.severity }}" title="{{ a.note }} ({{ a.hook }})">{{ a.tag }}</span> {% endfor %}</td>{% endif %}
         {% for c in columns %}
-        {% if loop.first and r.depth %}
+        {% if loop.first and r.depth and not view.sort %}
         <td style="padding-left: {{ 0.5 + (r.depth | int) * 1.25 }}em"><span class="tree">└</span> {{ r.data.get(c) | cell }}</td>
         {% else %}
         <td>{{ r.data.get(c) | cell }}</td>

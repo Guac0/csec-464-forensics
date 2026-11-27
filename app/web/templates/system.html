@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}System{% endblock %}
+{% block crumbs %}System{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>System checks <span class="badge health-{{ overall }}">{{ {"ok": "all OK", "warn": "warnings", "fail": "problems"}[overall] }}</span></h2>
+    <a class="button" href="/system">Re-check</a>
+  </div>
+  <p class="muted small-text">Checked when this page loads. The JSON version is at <a href="/api/system/health">/api/system/health</a>.</p>
+  {% for check in checks %}{% include "_health_check.html" %}{% endfor %}
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>On-demand tests</h2></div>
+  <p class="muted small-text">These are slower or cost a little, so they only run when you click.</p>
+  <div id="test-volatility">
+    <form method="post" action="/ui/system/test/volatility" class="inline"
+          hx-post="/ui/system/test/volatility" hx-target="#test-volatility-result" hx-swap="innerHTML"
+          hx-indicator="#vol-spinner" hx-disabled-elt="find button">
+      <button type="submit">Test volatility</button>
+      <span class="small-text muted">Runs <span class="mono">vol -h</span> (a few seconds) and checks every catalog plugin exists.</span>
+      <span id="vol-spinner" class="htmx-indicator spinner">Running...</span>
+    </form>
+    <div id="test-volatility-result"></div>
+  </div>
+  <div id="test-ai">
+    <form method="post" action="/ui/system/test/ai" class="inline"
+          hx-post="/ui/system/test/ai" hx-target="#test-ai-result" hx-swap="innerHTML"
+          hx-indicator="#ai-spinner" hx-disabled-elt="find button">
+      <button type="submit">Test AI</button>
+      <span class="small-text muted">Sends one tiny request to the AI provider (uses a few tokens).</span>
+      <span id="ai-spinner" class="htmx-indicator spinner">Asking...</span>
+    </form>
+    <div id="test-ai-result"></div>
+  </div>
+</section>
+
+<section class="panel" id="backups">
+  <div class="panel-head">
+    <h2>Backups</h2>
+    <form method="post" action="/ui/system/backup" class="inline"
+          hx-post="/ui/system/backup" hx-target="#backup-status" hx-swap="outerHTML">
+      <button type="submit">Back up now</button>
+    </form>
+  </div>
+  <p class="muted small-text">Database snapshot + raw tool output (no dumped files), with a manifest of SHA-256 hashes. Safe while the app runs. Restore with <span class="mono">python -m app.backup restore &lt;name&gt;</span> while the app is stopped (see README).</p>
+  {% set state = backup_state %}{% include "_backup_status.html" %}
+  {% if backups %}
+  <table class="data small-text">
+    <thead><tr><th>Backup</th><th>Made</th><th>Size</th><th></th></tr></thead>
+    <tbody>
+    {% for b in backups %}
+      <tr>
+        <td class="mono">{{ b.name }}</td>
+        <td>{{ b.created_at | dt }} <span class="muted">({{ b.trigger }})</span></td>
+        <td class="num">{{ b.size_bytes | humansize }}</td>
+        <td id="verify-{{ loop.index }}">
+          <form method="post" action="/ui/system/backups/{{ b.name }}/verify" class="inline"
+                hx-post="/ui/system/backups/{{ b.name }}/verify" hx-target="#verify-{{ loop.index }}" hx-swap="innerHTML"
+                hx-indicator="#verify-spin-{{ loop.index }}" hx-disabled-elt="find button">
+            <button type="submit" class="small secondary">Verify</button>
+            <span id="verify-spin-{{ loop.index }}" class="htmx-indicator spinner">Checking…</span>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No backups yet.</p>
+  {% endif %}
+</section>
+
+<section class="panel" id="disk-use">
+  <div class="panel-head"><h2>Runs using the most disk</h2></div>
+  {% if biggest_runs %}
+  <table class="data small-text">
+    <thead><tr><th>Run</th><th>Plugin</th><th>Evidence</th><th>Status</th><th>On disk</th></tr></thead>
+    <tbody>
+    {% for run, size in biggest_runs %}
+      <tr>
+        <td><a href="/runs/{{ run.id }}">{{ run.id }}</a></td>
+        <td class="mono">{{ run.plugin }}</td>
+        <td class="mono"><a href="/evidence/{{ run.evidence_id }}">{{ run.evidence.rel_path }}</a></td>
+        <td><span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>{% if run.deleted_at %} <span class="badge status-deleted" title="files could not be removed">deleted</span>{% endif %}</td>
+        <td class="num">{{ size | humansize }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted small-text">Open a run to delete its data (rows, raw output, dumped files); evidence pages also offer "Clean up…" for failed, interrupted and cancelled runs.</p>
+  {% else %}
+  <p class="muted">No run output on disk yet.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <details>
+    <summary><strong>Active settings</strong> <span class="small-text muted">(secrets hidden)</span></summary>
+    <table class="kv small-text">
+      {% for name, value in settings_rows %}<tr><th class="mono">{{ name }}</th><td class="mono">{{ value }}</td></tr>{% endfor %}
+    </table>
+  </details>
+</section>
+{% endblock %}

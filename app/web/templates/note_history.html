@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Note {{ note_id }} history{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a>{% if evidence_id %} / <a href="/evidence/{{ evidence_id }}">evidence {{ evidence_id }}</a>{% endif %} / Note {{ note_id }} history{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Note {{ note_id }}: history</h2>
+    <a class="small-text" href="/activity?object_type=note&object_id={{ note_id }}">Audit events</a>
+  </div>
+  <p class="muted small-text">Every version is kept, including after deletion. Versions cannot be changed.</p>
+  {% for v in versions | reverse %}
+  <div class="note version-{{ v.action }}">
+    <div class="note-meta"><strong>Version {{ v.version }}</strong> · {{ v.action }} · {{ v.created_at | dt }} · {{ v.actor }}</div>
+    <div class="note-body">{{ v.body }}</div>
+  </div>
+  {% endfor %}
+</section>
+{% endblock %}

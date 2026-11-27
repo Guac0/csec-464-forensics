@@ -4,25 +4,40 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import Text, cast, func, select, update
+from sqlalchemy import func, literal_column, select, update
 from sqlalchemy.orm import Session
 
 from app.models import ResultRow, Run, RunOrigin, RunStatus, utcnow
+from app.services import audit, integrity, resources, results
 from app.services.evidence import get_evidence
+from app.services.integrity import IntegrityError
+from app.services.resources import DiskSpaceError
 from app.tools.base import ArgValidationError, ToolRequest, ToolRunner
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "ArgValidationError",
+    "DiskSpaceError",
+    "IntegrityError",
     "cancel_run",
     "create_run",
     "enqueue_auto",
     "get_rows",
     "get_run",
+    "annotation_tags",
     "get_runner",
     "list_runs",
+    "rerun",
 ]
+
+# Statuses a run can be re-run from (anything that is no longer queued or running).
+RERUNNABLE_STATUSES = (
+    RunStatus.SUCCEEDED,
+    RunStatus.FAILED,
+    RunStatus.CANCELLED,
+    RunStatus.INTERRUPTED,
+)
 
 # Statuses for which an auto-enumeration run is considered already done or in progress.
 _AUTO_SKIP_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.SUCCEEDED)
@@ -60,12 +75,21 @@ def create_run(
     request: ToolRequest,
     origin: RunOrigin = RunOrigin.MANUAL,
     tool: str = "volatility3",
+    *,
+    parent_run_id: int | None = None,
+    triggered_by_hook: str | None = None,
+    chain_depth: int = 0,
+    rerun_of_id: int | None = None,
 ) -> Run:
     """Validate the request against the tool's allowlist and queue a run.
 
-    Raises ArgValidationError for disallowed plugins/args and LookupError for unknown evidence.
+    The keyword-only arguments record follow-up provenance for runs queued by post-run hooks.
+    Raises ArgValidationError for disallowed plugins/args, LookupError for unknown evidence and
+    IntegrityError (strict mode) if the image changed or mismatches its expected hashes and
+    DiskSpaceError if the data volume is (nearly) full.
     """
-    get_evidence(session, evidence_id)
+    integrity.check_can_run(get_evidence(session, evidence_id))
+    resources.check_can_start_run()
     runner = get_runner(tool)
     args = runner.validate(request)
     run = Run(
@@ -75,16 +99,59 @@ def create_run(
         args=args,
         origin=origin,
         status=RunStatus.QUEUED,
+        parent_run_id=parent_run_id,
+        triggered_by_hook=triggered_by_hook,
+        chain_depth=chain_depth,
+        rerun_of_id=rerun_of_id,
     )
     session.add(run)
+    session.flush()  # assign run.id for the audit event
+    audit.record(
+        session,
+        "run.create",
+        object_type="run",
+        object_id=run.id,
+        evidence_id=evidence_id,
+        summary=f"Queued run {run.id}: {request.plugin} ({origin.value})",
+        details={
+            "tool": tool,
+            "plugin": request.plugin,
+            "args": args,
+            "origin": origin.value,
+            "parent_run_id": parent_run_id,
+            "triggered_by_hook": triggered_by_hook,
+            "chain_depth": chain_depth,
+            "rerun_of_id": rerun_of_id,
+        },
+    )
     session.commit()
     logger.info("queued run %s: %s %s (%s)", run.id, request.plugin, args, origin.value)
     return run
 
 
+def rerun(session: Session, run_id: int) -> Run:
+    """Queue a new run with the same tool, plugin and args as a finished run (e.g. one that was
+    interrupted or failed). The new run is a manual run that records ``rerun_of_id``; hook
+    follow-up provenance is not copied. Raises ValueError if the run is still active."""
+    original = get_run(session, run_id)
+    if original.status not in RERUNNABLE_STATUSES:
+        raise ValueError(
+            f"run {run_id} is {original.status.value}; only finished runs can be re-run"
+        )
+    return create_run(
+        session,
+        original.evidence_id,
+        ToolRequest(plugin=original.plugin, args=dict(original.args or {})),
+        RunOrigin.MANUAL,
+        original.tool,
+        rerun_of_id=original.id,
+    )
+
+
 def enqueue_auto(session: Session, evidence_id: int, tool: str = "volatility3") -> list[Run]:
     """Queue one run per auto_enumerate plugin, skipping ones already queued/running/succeeded."""
     get_evidence(session, evidence_id)
+    resources.check_can_start_run()  # all or nothing: don't queue half a batch
     runner = get_runner(tool)
     created: list[Run] = []
     for spec in runner.plugins():
@@ -99,11 +166,22 @@ def enqueue_auto(session: Session, evidence_id: int, tool: str = "volatility3") 
                 Run.tool == tool,
                 Run.plugin == spec.name,
                 Run.status.in_(_AUTO_SKIP_STATUSES),
+                Run.deleted_at.is_(None),
             )
         )
         if any((r.args or {}) == normalized for r in existing):
             continue
         created.append(create_run(session, evidence_id, request, RunOrigin.AUTO, tool))
+    audit.record(
+        session,
+        "evidence.auto_enumerate",
+        object_type="evidence",
+        object_id=evidence_id,
+        evidence_id=evidence_id,
+        summary=f"Auto-enumerate queued {len(created)} run(s)",
+        details={"run_ids": [r.id for r in created]},
+    )
+    session.commit()
     return created
 
 
@@ -114,6 +192,16 @@ def cancel_run(session: Session, run_id: int) -> Run:
     (a signalled RUNNING run becomes CANCELLED once the worker notices).
     """
     run = get_run(session, run_id)
+    previous_status = run.status.value
+    audit.record(
+        session,
+        "run.cancel",
+        object_type="run",
+        object_id=run.id,
+        evidence_id=run.evidence_id,
+        summary=f"Cancel requested for run {run.id} ({previous_status})",
+        details={"status_before": previous_status},
+    )
     # Atomic: only flip if the worker hasn't claimed it in the meantime.
     res = session.execute(
         update(Run)
@@ -152,25 +240,43 @@ def _escape_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def annotation_tags(session: Session, run_id: int) -> list[tuple[str, int]]:
+    """Distinct annotation tags on a run's rows with row counts, most common first."""
+    each = func.json_each(ResultRow.annotations).table_valued("value").alias("a")
+    tag = func.json_extract(each.c.value, "$.tag")
+    stmt = (
+        select(tag.label("tag"), func.count(func.distinct(ResultRow.id)).label("n"))
+        .select_from(ResultRow)
+        .join(each, literal_column("1") == literal_column("1"))
+        .where(ResultRow.run_id == run_id, ResultRow.annotations.is_not(None))
+        .group_by(tag)
+        .order_by(func.count(func.distinct(ResultRow.id)).desc(), tag)
+    )
+    return [(t, n) for t, n in session.execute(stmt) if t]
+
+
 def get_rows(
     session: Session,
     run_id: int,
     offset: int = 0,
     limit: int = 100,
     q: str | None = None,
+    annotated: bool = False,
+    tag: str | None = None,
+    filters: dict[str, str] | None = None,
+    sort: str | None = None,
+    desc: bool = False,
 ) -> tuple[list[ResultRow], int]:
-    """Page through a run's rows ordered by row_idx. ``q`` is a case-insensitive substring
-    match on the JSON-serialised row data. Returns (rows, total matching)."""
-    where = [ResultRow.run_id == run_id]
-    if q:
-        pattern = f"%{_escape_like(q)}%"
-        where.append(cast(ResultRow.data, Text).ilike(pattern, escape="\\"))
-    total = session.scalar(select(func.count()).select_from(ResultRow).where(*where)) or 0
-    rows = session.scalars(
-        select(ResultRow)
-        .where(*where)
-        .order_by(ResultRow.row_idx)
-        .offset(max(offset, 0))
-        .limit(max(limit, 0))
+    """Page through a run's rows. ``q``: substring search; ``annotated``/``tag``: hook
+    annotations; ``filters``: {column: expression} (see app/services/results.py); ``sort``: a
+    column name (row order by default). Returns (rows, total matching)."""
+    run = get_run(session, run_id)
+    view = results.RowView(
+        q=q or "",
+        annotated=annotated,
+        tag=tag or "",
+        filters=filters or {},
+        sort=sort or "",
+        desc=desc,
     )
-    return list(rows), total
+    return results.query_rows(session, run, view, offset=offset, limit=limit)
