@@ -1,0 +1,48 @@
+{% if not targets %}
+<p>This image is not in any case. Add it to a case to keep an indicator watchlist.</p>
+<div class="dialog-buttons"><button type="button" class="secondary" onclick="this.closest('dialog').close()">Close</button></div>
+{% elif not cells %}
+<p>This row has no values that can be used as an indicator.</p>
+<div class="dialog-buttons"><button type="button" class="secondary" onclick="this.closest('dialog').close()">Close</button></div>
+{% else %}
+<form method="post" action="/ui/indicators" class="stack" onsubmit="this.elements.next.value = location.pathname + location.search + location.hash">
+  <h3>Add an indicator from row R{{ run.id }}:{{ row_idx }}</h3>
+  <input type="hidden" name="next" value="">
+  <input type="hidden" name="source_key" value="R{{ run.id }}:{{ row_idx }}">
+  {% if targets | length == 1 %}
+  <input type="hidden" name="case_id" value="{{ targets[0][0].id }}">
+  <p class="small-text">Case watchlist: <strong>{{ targets[0][0].name }}</strong></p>
+  {% else %}
+  <label>Case watchlist
+    <select name="case_id" required>{% for c, label in targets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>
+  </label>
+  {% endif %}
+  <label>Value
+    <select name="value" id="ioc-value" required onchange="iocPick(this)">
+      {% for column, value, guess in cells %}<option value="{{ value }}" data-type="{{ guess }}" data-column="{{ column }}">{{ column }}: {{ value | truncate(80) }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Type
+    <select name="type" id="ioc-type">{% for t in types %}<option value="{{ t }}"{% if t == cells[0][2] %} selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+  </label>
+  <label>Match
+    <select name="match_mode"><option value="exact" selected>exact (whole value)</option><option value="contains">contains (anywhere in a value; more noise)</option></select>
+  </label>
+  <label class="inline-check"><input type="checkbox" name="only_column" value="1"> only in column <span class="mono" id="ioc-column-label">{{ cells[0][0] }}</span></label>
+  <input type="hidden" name="column" id="ioc-column" value="{{ cells[0][0] }}">
+  <label>Comment (optional) <textarea name="comment" rows="2"></textarea></label>
+  <p class="muted small-text">New runs of the case's images are checked automatically. Existing runs are checked when you press "Check all images" on the case page.</p>
+  <div class="dialog-buttons">
+    <button type="submit">Add indicator</button>
+    <button type="button" class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
+  </div>
+</form>
+<script>
+function iocPick(sel) {
+  const o = sel.options[sel.selectedIndex];
+  document.getElementById("ioc-type").value = o.dataset.type;
+  document.getElementById("ioc-column").value = o.dataset.column;
+  document.getElementById("ioc-column-label").textContent = o.dataset.column;
+}
+</script>
+{% endif %}

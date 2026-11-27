@@ -147,6 +147,11 @@ def add_evidence(session: Session, case_id: int, evidence_id: int, label: str = 
         raise ValueError(f"{ev.rel_path} is already in case {case.name!r}")
     member = CaseEvidence(case_id=case_id, evidence_id=evidence_id, label=_clean_label(label))
     session.add(member)
+    # The new image's existing runs have not been checked against the case's indicators yet.
+    from app.models import Indicator
+
+    for ind in session.scalars(select(Indicator).where(Indicator.case_id == case_id)):
+        ind.checked_at = None
     audit.record(
         session,
         "case.add_evidence",
@@ -194,6 +199,9 @@ def remove_evidence(session: Session, case_id: int, evidence_id: int) -> int:
     ).all()
     for item in items:
         sharing.unshare_in_tx(session, item, reason="image removed from the case")
+    from app.services import indicators
+
+    indicators.remove_hits_for_image(session, case_id, evidence_id)
     session.delete(member)
     audit.record(
         session,

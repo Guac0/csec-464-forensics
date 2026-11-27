@@ -194,6 +194,15 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `resolve(item) -> Resolved` (latest state: ok | changed | gone), `resolved_for_case`,
   `shared_keys`. Shared items are never part of AI context, hooks or another image's data.
 - API `/api/cases` (CRUD, `/{id}/evidence`, `/{id}/shared`); notes API takes `case_id`.
+- Indicators (migration `0010_indicators`): `Indicator` (case_id, type process|path|ip|domain|
+  hash|registry|text, value, normalized, match_mode exact|contains, column, comment, source_key,
+  checked_at) and `IndicatorHit` (indicator_id, run_id, evidence_id, row_idx, column, cell).
+  `app/services/indicators.py`: `normalize`, `validate`, `guess_type`, `Matcher` (add new match
+  modes/types here), `add_indicator`, `remove_indicator`, `match_run` (worker, after rows are
+  stored), `check_case` / `start_case_check` (on demand, background), `hits`, `hit_counts`,
+  `row_hits`. API `/api/cases/{id}/indicators` (GET/POST, DELETE `/{ind}`, POST `/check`,
+  GET `/hits`). Hits are removed with their run's data, indicator or case membership; they never
+  enter AI context or hooks.
 - UI: `/cases/{id}`; image and run pages take `?case=<id>` (active case; HTMX fragments read it
   from HX-Current-URL via `pages.request_case_id`); `/ui/share`, `/ui/shared/{id}/remove`.
 

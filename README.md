@@ -156,7 +156,7 @@ Team workflow, branch rules and guidance for AI coding assistants:
   [evals/README.md](evals/README.md).
 
 ### Cases (several images)
-- **Status:** cases and sharing done; indicator matching and comparison view next
+- **Status:** cases, sharing and indicators done; comparison view next
 - A **case** groups images investigated together, e.g. before/after snapshots of one machine,
   or several machines hit by the same actor. Create one on the home page and add images with an
   optional label ("before", "after", "laptop-2"). An image can be in several cases; cases are
@@ -171,6 +171,14 @@ Team workflow, branch rules and guidance for AI coding assistants:
   always naming the image they came from. AI answers are shared as labelled AI leads. Nothing
   shared is ever added to another image's runs, notes, hook input or AI context. Click
   "shared ✕" to un-share; removing an image from a case un-shares what it shared there.
+- **Indicators:** each case has a watchlist (process names, file paths, IPs, domains, hashes,
+  registry keys, other text). Add them on the case page or with **+IOC** on any result row (the
+  type is guessed). Every image's own rows are searched; a hit always points to a row of that
+  image, listed on the case page (hits per image), on the image page and as an **IOC** mark on
+  the row. Matching is **exact** by default (case-insensitive, `\` and `/` alike for paths,
+  canonical IPs; a process name also matches a path ending in it); **contains** and "only in
+  column X" are per-indicator options. New runs are checked automatically as they finish;
+  **Check all images** re-checks existing runs (on demand: it reads every row of every run).
 - Each case has its own **case notes** (they replace the old investigation-wide notes; existing
   ones were moved into a "General" case containing every image).
 - Exports: **Export case…** gives a case report (images and labels, case notes, everything

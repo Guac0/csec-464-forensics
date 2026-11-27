@@ -40,12 +40,17 @@
     </thead>
     <tbody>
     {% set sc = share_ctx(run.evidence_id, active_case_id) %}
+    {% set iocs = ioc_rows(sc.active[0] if sc.active else none, run.id) %}
     {% for r in rows %}
       {% set sev = r.annotations | max_severity %}
       {% set cls = ["highlight" if highlight is not none and r.row_idx == highlight else "", ("annotated sev-" ~ sev) if sev else ""] | select | join(" ") %}
       <tr id="row-{{ run.id }}-{{ r.row_idx }}"{% if cls %} class="{{ cls }}"{% endif %}>
         <td class="mono cite-key"><a href="/runs/{{ run.id }}?{{ case_amp }}row={{ r.row_idx }}#row-{{ run.id }}-{{ r.row_idx }}">R{{ run.id }}:{{ r.row_idx }}</a>
-          {% set share_key = "R" ~ run.id ~ ":" ~ r.row_idx %}{% set share_attrs = {"kind": "row", "run-id": run.id, "row-idx": r.row_idx, "what": "Row R" ~ run.id ~ ":" ~ r.row_idx ~ " of " ~ run.plugin} %}{% include "_share_button.html" %}</td>
+          {% set share_key = "R" ~ run.id ~ ":" ~ r.row_idx %}{% set share_attrs = {"kind": "row", "run-id": run.id, "row-idx": r.row_idx, "what": "Row R" ~ run.id ~ ":" ~ r.row_idx ~ " of " ~ run.plugin} %}{% include "_share_button.html" %}
+          {% if sc.cases %}<button type="button" class="small share-btn" title="Add a value of this row to a case's indicator watchlist"
+            hx-get="/ui/indicators/from-row?run_id={{ run.id }}&row_idx={{ r.row_idx }}" hx-target="#indicator-dialog-body"
+            hx-on::after-request="document.getElementById('indicator-dialog').showModal()">+IOC</button>{% endif %}
+          {% if r.row_idx in iocs %}<span class="badge sev-high" title="matches indicator(s): {{ iocs[r.row_idx] | join(', ') }}">IOC</span>{% endif %}</td>
         {% if row_artifacts %}<td>{% for a in row_artifacts.get(r.row_idx, []) %}<a class="badge" href="#artifact-{{ a.id }}" title="{{ a.filename }} ({{ a.file_type }})">file</a> {% endfor %}</td>{% endif %}
         {% if has_annotations %}<td class="flags">{% for a in r.annotations or [] %}<span class="badge sev-{{ a.severity }}" title="{{ a.note }} ({{ a.hook }})">{{ a.tag }}</span> {% endfor %}</td>{% endif %}
         {% for c in columns %}

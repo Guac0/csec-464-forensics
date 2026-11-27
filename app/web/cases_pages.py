@@ -53,12 +53,19 @@ def _case_page(
         for ev in session.scalars(select(Evidence).order_by(Evidence.rel_path))
         if ev.id not in member_ids
     ]
+    from app.services import indicators
+
     return render(
         request,
         "case.html",
         status_code=status,
         case=case,
         members=members,
+        indicators=indicators.list_indicators(session, case_id),
+        hit_counts=indicators.hit_counts(session, case_id),
+        unchecked=indicators.unchecked_count(session, case_id),
+        check_job=indicators.job_state(case_id),
+        indicator_types=[t.value for t in indicators.IndicatorType],
         other_evidence=others,
         shared=sharing.resolved_for_case(session, case_id),
         notes=list_scoped_notes(session, None, case_id),
@@ -186,3 +193,114 @@ def ui_unshare(item_id: int, form: FormDep, session: SessionDep) -> Response:
     case_id = item.case_id
     sharing.unshare(session, item_id, reason=(form.get("reason") or "").strip())
     return redirect(_safe_next(form.get("next"), f"/cases/{case_id}#shared"))
+
+
+# --------------------------------------------------------------------------------- indicators
+
+
+@router.post("/ui/indicators", dependencies=[Depends(same_origin_post)])
+def ui_indicator_add(request: Request, form: FormDep, session: SessionDep) -> Response:
+    """Add an indicator to a case (from the case page or the "indicator from row" dialog)."""
+    from app.services import indicators
+
+    case_id = _int(form.get("case_id"))
+    if case_id is None:
+        raise HTTPException(422, "choose a case")
+    back = _safe_next(form.get("next"), f"/cases/{case_id}#indicators")
+    column = (form.get("column") or "").strip() if form.get("only_column") else ""
+    try:
+        indicators.add_indicator(
+            session,
+            case_id,
+            form.get("type") or "",
+            form.get("value") or "",
+            mode=form.get("match_mode") or "exact",
+            column=column,
+            comment=form.get("comment") or "",
+            source_key=(form.get("source_key") or "").strip(),
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        session.rollback()
+        if back.startswith(f"/cases/{case_id}"):
+            return _case_page(
+                request, session, case_id, error=f"Indicator not added: {exc}", status=422
+            )
+        raise HTTPException(422, f"Indicator not added: {exc}") from exc
+    return redirect(back)
+
+
+@router.post("/ui/indicators/{indicator_id}/remove", dependencies=[Depends(same_origin_post)])
+def ui_indicator_remove(indicator_id: int, session: SessionDep) -> Response:
+    from app.services import indicators
+
+    try:
+        case_id = indicators.remove_indicator(session, indicator_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return redirect(f"/cases/{case_id}#indicators")
+
+
+@router.post("/ui/cases/{case_id}/indicators/check", dependencies=[Depends(same_origin_post)])
+def ui_indicator_check(request: Request, case_id: int, session: SessionDep) -> Response:
+    from app.services import indicators
+    from app.web.pages import is_htmx
+
+    _case_or_404(session, case_id)
+    started = indicators.start_case_check(case_id)
+    if not is_htmx(request):
+        return redirect(f"/cases/{case_id}#indicators")
+    return render(
+        request,
+        "_indicator_check.html",
+        case_id=case_id,
+        job=indicators.job_state(case_id) | ({} if started else {"busy": True}),
+    )
+
+
+@router.get("/ui/cases/{case_id}/indicators/check-status", response_class=HTMLResponse)
+def ui_indicator_check_status(request: Request, case_id: int) -> HTMLResponse:
+    from app.services import indicators
+
+    return render(
+        request, "_indicator_check.html", case_id=case_id, job=indicators.job_state(case_id)
+    )
+
+
+@router.get("/ui/indicators/from-row", response_class=HTMLResponse)
+def ui_indicator_from_row(
+    request: Request, session: SessionDep, run_id: int, row_idx: int
+) -> HTMLResponse:
+    """Body of the "make an indicator from this row" dialog: the row's values with a guessed
+    type each."""
+    from app.models import ResultRow, Run
+    from app.services import indicators
+    from app.web.pages import request_case_id
+
+    run = session.get(Run, run_id)
+    row = session.scalar(
+        select(ResultRow).where(ResultRow.run_id == run_id, ResultRow.row_idx == row_idx)
+    )
+    if run is None or row is None:
+        raise HTTPException(404, "row not found")
+    image_cases = cases_svc.cases_for_evidence(session, run.evidence_id)
+    active = request_case_id(request)
+    targets = [(c, label) for c, label in image_cases if c.id == active] or image_cases
+    cells = [
+        (column, str(value), indicators.guess_type(str(value)).value)
+        for column, value in (row.data or {}).items()
+        if column != "__children"
+        and value is not None
+        and not isinstance(value, (dict, list, bool))
+        and str(value).strip()
+    ]
+    return render(
+        request,
+        "_indicator_from_row.html",
+        run=run,
+        row_idx=row_idx,
+        cells=cells,
+        targets=targets,
+        types=[t.value for t in indicators.IndicatorType],
+    )
