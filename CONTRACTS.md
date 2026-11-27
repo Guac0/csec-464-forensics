@@ -61,6 +61,26 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/registry.py`: `get_runner(name: str = "volatility3") -> ToolRunner`, `available_tools() -> list[str]`
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
+- `app/tools/volatility/guide.py`: `BASELINE: list[Step]`, `NEXT: dict[plugin, list[Step]]` —
+  **TODO(forensics)**; EXAMPLE content. `Step` = `app.tools.base.GuideStep(plugin, reason,
+  args={}, when="succeeded"|"has_rows"|"has_flags"|"tag:<tag>", priority=0)`.
+
+### Investigation guide and recommendations
+- `ToolRunner.guide() -> InvestigationGuide(baseline, next)` (default empty).
+- `app/tools/guide.py`: `check_guide(runner) -> (valid guide with normalised args, [GuideProblem])`
+  (invalid steps skipped), `to_markdown(runner)`, `main()` (CLI `python -m
+  app.tools.volatility.guide`, exit 1 on problems), `describe_when`, `args_key`.
+- `app/services/recommendations.py`: `recommend(session, evidence_id) -> Recommendations`
+  (`items` best first, `dismissed`, `baseline_total/done`, `identified`, `guide_problems`;
+  `as_dict()`), `dismiss` / `restore` (table `dismissed_recommendations`, migration 0012),
+  `run_recommendation` (origin `RunOrigin.RECOMMENDED`), `run_baseline`, `step_key`.
+  A step is done while a queued/running/succeeded run has the same plugin + normalised args.
+- API `GET /api/evidence/{id}/recommendations`. UI: panel `#recommendations` on the image page
+  (`/ui/evidence/{id}/recommendations[?all=1]`, POST `.../run|baseline|dismiss|restore`), page
+  `/guide`. HTMX events: `runs-changed` (panel queued runs -> runs list reloads),
+  `recommendations-changed` (runs queued from the query form -> panel reloads).
+- Audit: `recommendation.dismiss|restore`, `evidence.run_baseline`, plus the usual `run.create`.
+- System page check `guide`.
 
 ### Run recovery, limits and health
 - `RunStatus.INTERRUPTED`: the app stopped during the run (startup recovery or graceful

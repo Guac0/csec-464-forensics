@@ -7,6 +7,7 @@ HTML fragment for HTMX requests (``HX-Request: true``) and a 303 redirect back o
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shlex
 from datetime import UTC, datetime
@@ -41,6 +42,8 @@ from app.tools.base import ArgValidationError, PluginSpec, ToolRequest
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(include_in_schema=False)
 
 PAGE_SIZE = 100
@@ -49,7 +52,15 @@ STDERR_TAIL_BYTES = 4096
 ACTIVE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING)
 SEVERITIES = hooks_mod.SEVERITIES
 ANY_TAG = "*"  # tag filter value meaning "any annotated row"
-UI_ORIGINS = {"manual": RunOrigin.MANUAL, "preset": RunOrigin.PRESET, "ai": RunOrigin.AI_SUGGESTED}
+UI_ORIGINS = {
+    "manual": RunOrigin.MANUAL,
+    "preset": RunOrigin.PRESET,
+    "ai": RunOrigin.AI_SUGGESTED,
+    "recommended": RunOrigin.RECOMMENDED,
+}
+# HTMX events: the runs list and the recommendations panel refresh each other.
+RUNS_CHANGED = "runs-changed"  # recommendations panel queued runs -> runs list reloads
+RECOMMENDATIONS_CHANGED = "recommendations-changed"  # runs queued elsewhere -> panel reloads
 
 
 # --------------------------------------------------------------------------- template helpers
@@ -281,6 +292,22 @@ def parse_plugin_args(spec: PluginSpec, form: dict[str, str]) -> dict[str, Any]:
     return args
 
 
+def form_values(spec: PluginSpec | None, args: dict[str, Any]) -> dict[str, Any]:
+    """Inverse of parse_plugin_args: typed args -> values for the run form (Edit before run)."""
+    values: dict[str, Any] = {}
+    for a in spec.args if spec else ():
+        if a.name not in args:
+            continue
+        value = args[a.name]
+        if a.type == "int_list" and isinstance(value, list):
+            values[a.name] = ", ".join(str(v) for v in value)
+        elif a.type == "bool":
+            values[a.name] = bool(value)
+        else:
+            values[a.name] = str(value)
+    return values
+
+
 def list_runs(session: Session, evidence_id: int) -> list[Run]:
     stmt = select(Run).where(Run.evidence_id == evidence_id).order_by(Run.id.desc())
     return list(session.scalars(stmt))
@@ -380,6 +407,27 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "verify_on_run": get_settings().verify_on_run,
         "hashing": evidence_svc.is_hashing(ev.id),
         "cleanup": _cleanup_summary(session, ev.id),
+        **recommendations_context(session, ev.id),
+    }
+
+
+def recommendations_context(
+    session: Session, evidence_id: int, show_all: bool = False
+) -> dict[str, Any]:
+    """The "Recommended next" panel (app/services/recommendations.py). Never breaks the page."""
+    from app.services import recommendations as recs_svc
+
+    try:
+        recs = recs_svc.recommend(session, evidence_id)
+    except Exception:  # a broken guide must not take the image page down
+        logger.exception("recommendations failed for evidence %s", evidence_id)
+        recs = None
+    runs = list_runs(session, evidence_id)
+    return {
+        "recs": recs,
+        "recs_all": show_all,
+        "recs_shown": recs_svc.DEFAULT_SHOWN,
+        "recs_polling": any(r.status in ACTIVE_STATUSES for r in runs),
     }
 
 
@@ -570,9 +618,17 @@ def evidence_page(
     evidence_id: int,
     plugin: str | None = None,
     case: int | None = None,
+    args: str | None = None,
 ) -> HTMLResponse:
     ev = get_evidence_or_404(session, evidence_id)
     ctx = {**evidence_context(session, ev, plugin), **case_context(session, ev, case)}
+    if args and ctx["selected_plugin"]:  # "Edit" on a recommendation: prefill the run form
+        try:
+            parsed = json.loads(args)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            ctx["values"] = form_values(ctx["selected_plugin"], parsed)
     return render(request, "evidence.html", **ctx)
 
 
@@ -862,7 +918,9 @@ def ui_create_run(
             resp.headers["HX-Retarget"] = "#run-form-errors"
             resp.headers["HX-Reswap"] = "innerHTML"
             return resp
-        return runs_response(request, session, evidence_id, clear_errors=True)
+        resp = runs_response(request, session, evidence_id, clear_errors=True)
+        resp.headers["HX-Trigger"] = RECOMMENDATIONS_CHANGED
+        return resp
     if error:
         ctx = evidence_context(session, ev, plugin_name)
         values = {k.removeprefix("arg_"): v for k, v in form.items() if k.startswith("arg_")}
@@ -885,9 +943,11 @@ def ui_auto(request: Request, evidence_id: int, session: SessionDep) -> Response
     session.commit()
     if not is_htmx(request):
         return redirect(f"/evidence/{evidence_id}#runs")
-    return runs_response(
+    resp = runs_response(
         request, session, evidence_id, message=f"Queued {len(runs)} auto-enumeration run(s)."
     )
+    resp.headers["HX-Trigger"] = RECOMMENDATIONS_CHANGED
+    return resp
 
 
 @router.post("/ui/runs/{run_id}/cancel", dependencies=[Depends(same_origin_post)])

@@ -52,6 +52,10 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] **Plugin catalog** — `app/tools/volatility/plugins.py`: replace the two EXAMPLE entries with
       the real allowlist of plugins and arguments.
 - [ ] **Preset queries** — add `presets` to each plugin.
+- [ ] **Investigation guide** — `app/tools/volatility/guide.py`: replace the EXAMPLE baseline and
+      "after X, suggest Y" steps with the team's workflow (how-to: README.md in that folder,
+      "Investigation guide"). Also review the EXAMPLE catalog entries added for it (pstree,
+      cmdline, netscan).
 - [ ] **Auto-enumerate set** — set `auto_enumerate=True` on the plugins that should run first.
 - [ ] **Real output fixtures** — capture `vol -r jsonl` output for every catalog plugin into
       `tests/fixtures/` and replace the synthetic `sample_pstree.jsonl`.

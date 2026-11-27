@@ -76,6 +76,7 @@ class RunOrigin(enum.StrEnum):
     AUTO = "auto"  # queued by auto-enumeration
     AI_SUGGESTED = "ai"  # user clicked a validated AI suggestion
     HOOK = "hook"  # queued by a post-run hook as a follow-up (see app/tools/hooks.py)
+    RECOMMENDED = "recommended"  # user clicked a recommendation from the investigation guide
 
 
 class Run(Base):
@@ -479,5 +480,27 @@ class SavedComparison(Base):
     # {"only_a": n, "only_b": n, "changed": n, "same": n} when saved.
     counts: Mapped[dict[str, int]] = mapped_column(JSON)
     comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DismissedRecommendation(Base):
+    """A guide recommendation the analyst hid for one image ("not relevant here").
+
+    ``key`` identifies the recommendation: tool, plugin and normalised args (see
+    app/services/recommendations.py ``step_key``).
+    """
+
+    __tablename__ = "dismissed_recommendations"
+    __table_args__ = (UniqueConstraint("evidence_id", "key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    evidence_id: Mapped[int] = mapped_column(
+        ForeignKey("evidence.id", ondelete="CASCADE"), index=True
+    )
+    key: Mapped[str] = mapped_column(String)
+    tool: Mapped[str] = mapped_column(String)
+    plugin: Mapped[str] = mapped_column(String)
+    args: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_by: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

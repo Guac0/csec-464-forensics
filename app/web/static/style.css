@@ -209,3 +209,10 @@ dialog.export-dialog label.inline-check input { width: auto; margin: 0; }
 dd.checks { display: flex; flex-wrap: wrap; gap: .2rem .8rem; }
 dd.checks label { font-size: 13px; }
 .compare-counts { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+
+/* Recommended next (investigation guide) */
+ul.recs { list-style: none; padding: 0; margin: .4rem 0; }
+li.rec { padding: .4rem 0; border-bottom: 1px solid #eaecf0; }
+li.rec:last-child { border-bottom: none; }
+.rec-actions { margin-top: .25rem; display: flex; gap: .4rem; align-items: center; }
+a.button.small { font-size: 12px; }

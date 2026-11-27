@@ -35,6 +35,7 @@ from app.config import get_settings
 from app.tools.base import (
     ArgSpec,
     ArgValidationError,
+    InvestigationGuide,
     ParsedRow,
     PluginSpec,
     ToolRequest,
@@ -213,6 +214,15 @@ class VolatilityRunner(ToolRunner):
 
     def _catalog(self) -> list[PluginSpec]:
         return plugin_catalog.PLUGINS
+
+    def guide(self) -> InvestigationGuide:
+        """The investigation guide in guide.py (read on each call, like the catalog)."""
+        from app.tools.volatility import guide as guide_module
+
+        return InvestigationGuide(
+            baseline=tuple(guide_module.BASELINE),
+            next={source: tuple(steps) for source, steps in guide_module.NEXT.items()},
+        )
 
     def catalog_problems(self) -> dict[str, list[str]]:
         problems = catalog_problems(self._catalog())

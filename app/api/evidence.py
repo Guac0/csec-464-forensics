@@ -193,3 +193,15 @@ def cleanup(evidence_id: int, body: CleanupIn, session: SessionDep) -> dict[str,
         "deleted_run_ids": [r.run_id for r in results],
         "bytes_freed": sum(r.bytes_freed for r in results),
     }
+
+
+@router.get("/{evidence_id}/recommendations")
+def get_recommendations(evidence_id: int, session: SessionDep) -> dict[str, Any]:
+    """Recommended next plugins from the investigation guide (app/tools/volatility/guide.py):
+    remaining baseline steps first, then follow-ups of succeeded runs. See CONTRACTS.md."""
+    from app.services import recommendations
+
+    try:
+        return recommendations.recommend(session, evidence_id).as_dict()
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc

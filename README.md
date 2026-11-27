@@ -111,6 +111,17 @@ Team workflow, branch rules and guidance for AI coding assistants:
 - **Status:** TODO
 - _TODO: describe the hardcoded suggested queries and when to use them._
 
+### Recommended next (investigation guide)
+- **Status:** infrastructure done, guide content EXAMPLE (forensics team)
+- The image page's "Recommended next" panel suggests what to run: first the remaining
+  **baseline** steps in order (the standard first pass: processes, network, ...), then
+  follow-ups of the image's succeeded runs ("pslist found processes -> run pstree"), some only
+  when a hook flagged rows. Each step has a reason; Run it, Edit its options first, Dismiss it
+  for this image, or "Run remaining baseline". No AI involved.
+- The guide is data in `app/tools/volatility/guide.py`; `/guide` shows it, and
+  `python -m app.tools.volatility.guide` prints it with any problems. How to extend it:
+  [app/tools/volatility/README.md](app/tools/volatility/README.md#investigation-guide).
+
 ### Auto-enumeration
 - **Status:** infrastructure done, plugin set TODO
 - _TODO: list what runs when "Auto-enumerate" is clicked and why._

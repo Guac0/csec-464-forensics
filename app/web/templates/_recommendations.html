@@ -1,0 +1,86 @@
+<section class="panel" id="recommendations"
+         hx-get="/ui/evidence/{{ evidence_id }}/recommendations{% if recs_all %}?all=1{% endif %}"
+         hx-trigger="recommendations-changed from:body{% if recs_polling %}, every 5s{% endif %}" hx-swap="outerHTML">
+  {% set baseline_left = recs.items | selectattr("baseline_pos") | list if recs else [] %}
+  <div class="panel-head">
+    <h2>Recommended next</h2>
+    <span>
+      <a class="small-text" href="/guide">How these are chosen</a>
+      {% if baseline_left %}
+      <form class="inline" method="post" action="/ui/evidence/{{ evidence_id }}/recommendations/baseline"
+            hx-post="/ui/evidence/{{ evidence_id }}/recommendations/baseline" hx-target="#recommendations" hx-swap="outerHTML">
+        <button type="submit" class="small" title="Queue every remaining baseline step, in order">Run remaining baseline ({{ baseline_left | length }})</button>
+      </form>
+      {% endif %}
+    </span>
+  </div>
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+  {% if message %}<p class="flash">{{ message }}</p>{% endif %}
+  {% if recs is none %}
+  <p class="flash warn small-text">Recommendations are unavailable right now (see the <a href="/system">System</a> page).</p>
+  {% else %}
+  {% if not recs.identified %}
+  <p class="small-text muted">Identify the image first: <b>Auto-enumerate</b> (under "Run a query") reads its OS and kernel details.</p>
+  {% endif %}
+  <p class="small-text muted">Baseline: {{ recs.baseline_done }} of {{ recs.baseline_total }} step(s) done or queued.{% if recs.guide_problems %} <a href="/guide">{{ recs.guide_problems }} invalid guide step(s) skipped.</a>{% endif %}</p>
+  {% if not recs.items %}
+  <p class="muted">Nothing to recommend right now. Run a query, or see the <a href="/guide">investigation guide</a>.</p>
+  {% endif %}
+  <ul class="recs">
+    {% for r in (recs.items if recs_all else recs.items[:recs_shown]) %}
+    {% set args_json = r.args | tojson %}
+    <li class="rec">
+      <div>
+        <span class="badge">{% if r.baseline_pos %}Baseline {{ r.baseline_pos }}/{{ recs.baseline_total }}{% else %}Next{% endif %}</span>
+        <span class="mono">{{ r.plugin }}</span>{% if r.args %} <span class="mono small-text">{{ r.args | args }}</span>{% endif %}
+        {% if r.writes_files %}<span class="badge sev-medium" title="Writes files extracted from the image (possible malware).">writes files</span>{% endif %}
+      </div>
+      <div class="small-text">{{ r.reasons | join(" · ") }}</div>
+      {% if r.sources %}<div class="small-text muted">Suggested after {% for s in r.sources %}<a href="/runs/{{ s.run_id }}">run {{ s.run_id }}</a> ({{ s.plugin.rsplit(".", 1)[-1] }}){% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+      {% if r.last_failed_run_id %}<div class="small-text error-text">Last attempt did not finish: <a href="/runs/{{ r.last_failed_run_id }}">run {{ r.last_failed_run_id }}</a></div>{% endif %}
+      <div class="rec-actions">
+        <form class="inline" method="post" action="/ui/evidence/{{ evidence_id }}/recommendations/run"
+              hx-post="/ui/evidence/{{ evidence_id }}/recommendations/run" hx-target="#recommendations" hx-swap="outerHTML">
+          <input type="hidden" name="plugin" value="{{ r.plugin }}">
+          <input type="hidden" name="tool" value="{{ r.tool }}">
+          <input type="hidden" name="args_json" value='{{ args_json }}'>
+          <button type="submit" class="small">Run</button>
+        </form>
+        <a class="button small" href="/evidence/{{ evidence_id }}?{{ case_amp }}plugin={{ r.plugin }}&amp;args={{ args_json | urlencode }}#query" title="Open in the query form to change options first">Edit</a>
+        <form class="inline" method="post" action="/ui/evidence/{{ evidence_id }}/recommendations/dismiss"
+              hx-post="/ui/evidence/{{ evidence_id }}/recommendations/dismiss" hx-target="#recommendations" hx-swap="outerHTML">
+          <input type="hidden" name="plugin" value="{{ r.plugin }}">
+          <input type="hidden" name="tool" value="{{ r.tool }}">
+          <input type="hidden" name="args_json" value='{{ args_json }}'>
+          <button type="submit" class="small secondary" title="Hide for this image">Dismiss</button>
+        </form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if recs.items | length > recs_shown %}
+  <a class="small-text" href="/evidence/{{ evidence_id }}?{{ case_amp }}#recommendations"
+     hx-get="/ui/evidence/{{ evidence_id }}/recommendations{% if not recs_all %}?all=1{% endif %}" hx-target="#recommendations" hx-swap="outerHTML">
+    {% if recs_all %}Show top {{ recs_shown }}{% else %}Show all ({{ recs.items | length }}){% endif %}</a>
+  {% endif %}
+  {% if recs.dismissed %}
+  <details class="small-text">
+    <summary>Dismissed ({{ recs.dismissed | length }})</summary>
+    <ul class="recs">
+      {% for r in recs.dismissed %}
+      <li class="rec muted">
+        <span class="mono">{{ r.plugin }}</span>{% if r.args %} <span class="mono">{{ r.args | args }}</span>{% endif %}
+        <form class="inline" method="post" action="/ui/evidence/{{ evidence_id }}/recommendations/restore"
+              hx-post="/ui/evidence/{{ evidence_id }}/recommendations/restore" hx-target="#recommendations" hx-swap="outerHTML">
+          <input type="hidden" name="plugin" value="{{ r.plugin }}">
+          <input type="hidden" name="tool" value="{{ r.tool }}">
+          <input type="hidden" name="args_json" value='{{ r.args | tojson }}'>
+          <button type="submit" class="small secondary">Restore</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  {% endif %}
+</section>

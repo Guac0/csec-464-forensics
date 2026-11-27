@@ -39,6 +39,7 @@ ROUTER_MODULES = (
     "app.api.ai",
     "app.web.pages",
     "app.web.cases_pages",
+    "app.web.recommendations_pages",
 )
 
 

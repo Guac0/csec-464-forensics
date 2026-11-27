@@ -443,16 +443,17 @@ def test_runs_fragment_polls_only_when_active(
 ) -> None:
     run = _run(session, ev, status=RunStatus.SUCCEEDED, row_count=7)
     r = web.get(f"/ui/evidence/{ev.id}/runs", headers=HX)
-    assert 'hx-trigger="every 3s"' not in r.text
+    assert "every 3s" not in r.text
+    assert 'hx-trigger="runs-changed from:body"' in r.text  # reloads when the panel queues runs
     assert "status-succeeded" in r.text and "Cancel" not in r.text
 
     active = _run(session, ev, status=RunStatus.RUNNING)
     r = web.get(f"/ui/evidence/{ev.id}/runs", headers=HX)
-    assert 'hx-trigger="every 3s"' in r.text
+    assert 'hx-trigger="runs-changed from:body, every 3s"' in r.text
     assert f'hx-post="/ui/runs/{active.id}/cancel"' in r.text
     assert f'hx-post="/ui/runs/{run.id}/cancel"' not in r.text
     # Evidence page itself also carries the polling attribute while active.
-    assert 'hx-trigger="every 3s"' in web.get(f"/evidence/{ev.id}").text
+    assert "runs-changed from:body, every 3s" in web.get(f"/evidence/{ev.id}").text
 
     r = web.post(f"/ui/runs/{active.id}/cancel", headers=HX)
     assert "status-cancelled" in r.text and 'hx-trigger="every 3s"' not in r.text
