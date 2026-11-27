@@ -29,6 +29,10 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
     monkeypatch.setenv("FT_AI_BASE_URL", "http://ai.test/v1")
     monkeypatch.setenv("FT_AI_API_KEY", "test-key")
     monkeypatch.setenv("FT_AI_MODEL", "test-model")
+    # Disk-space guards off by default so tests don't depend on the machine's free space
+    # (tests/test_resources.py turns them on).
+    monkeypatch.setenv("FT_MIN_FREE_DISK_BYTES", "0")
+    monkeypatch.setenv("FT_HARD_MIN_FREE_DISK_BYTES", "0")
     get_settings.cache_clear()
     yield get_settings()
     get_settings.cache_clear()

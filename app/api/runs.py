@@ -58,6 +58,7 @@ class RunOut(BaseModel):
     findings: list[dict[str, Any]] | None
     parent_run_id: int | None
     triggered_by_hook: str | None
+    rerun_of_id: int | None = None
     chain_depth: int
 
 
@@ -113,6 +114,8 @@ def create_run(body: RunCreate, session: SessionDep) -> Run:
         raise HTTPException(422, str(exc)) from exc
     except runs_service.IntegrityError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except runs_service.DiskSpaceError as exc:
+        raise HTTPException(status.HTTP_507_INSUFFICIENT_STORAGE, str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
@@ -166,6 +169,22 @@ def get_rows(
             for r in rows
         ],
     )
+
+
+@router.post("/{run_id}/rerun", response_model=RunOut, status_code=201)
+def rerun(run_id: int, session: SessionDep) -> Run:
+    """Queue a new run with the same plugin and args (e.g. after it was interrupted)."""
+    _get_or_404(session, run_id)
+    try:
+        return runs_service.rerun(session, run_id)
+    except runs_service.IntegrityError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except runs_service.DiskSpaceError as exc:
+        raise HTTPException(status.HTTP_507_INSUFFICIENT_STORAGE, str(exc)) from exc
+    except ArgValidationError as exc:
+        raise HTTPException(422, f"cannot re-run: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
 @router.post("/{run_id}/hooks/rerun", response_model=RunOut)

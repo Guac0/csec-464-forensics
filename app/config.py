@@ -27,8 +27,17 @@ class Settings(BaseSettings):
 
     # Max concurrent tool runs (volatility is memory hungry).
     max_concurrent_runs: int = 1
-    # Per-run timeout in seconds.
+    # Default per-run timeout in seconds (a catalog entry can set its own timeout_seconds).
     run_timeout_seconds: int = 3600
+
+    # Disk protection (app/services/resources.py), all in bytes:
+    # new runs are refused, and queued runs wait, while free space on the data volume is below
+    # this...
+    min_free_disk_bytes: int = 5 * 1024**3
+    # ...or while data_dir is larger than this (0 = no cap; warns from 80%).
+    max_data_bytes: int = 0
+    # A running run is stopped if free space drops below this (protects the SQLite database).
+    hard_min_free_disk_bytes: int = 1024**3
     # Executable used to invoke volatility3.
     vol_executable: str = "vol"
     # Pass --offline to volatility3 (no symbol downloads; pre-fill the symbols volume first).

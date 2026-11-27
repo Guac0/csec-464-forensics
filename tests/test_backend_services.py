@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db import SessionLocal
 from app.jobs import worker as worker_mod
-from app.jobs.worker import Worker, recover_stale_runs
+from app.jobs.worker import Worker, recover_interrupted_runs
 from app.models import Evidence, ResultRow, Run, RunOrigin, RunStatus
 from app.services import evidence as evidence_service
 from app.services import notes as notes_service
@@ -335,17 +335,18 @@ def test_cancel_running_without_worker_marks_cancelled(
     assert runs_service.cancel_run(session, run.id).status == RunStatus.CANCELLED
 
 
-def test_recover_stale_runs(session: Session, evidence: Evidence) -> None:
+def test_recover_interrupted_runs(session: Session, evidence: Evidence) -> None:
     for st in (RunStatus.RUNNING, RunStatus.RUNNING, RunStatus.QUEUED, RunStatus.SUCCEEDED):
         session.add(Run(evidence_id=evidence.id, plugin="windows.info.Info", status=st))
     session.commit()
-    assert recover_stale_runs(session) == 2
+    assert recover_interrupted_runs(session) == 2
     session.expire_all()
     with SessionLocal() as s:
-        failed = s.query(Run).filter(Run.status == RunStatus.FAILED).all()
-        assert len(failed) == 2
-        assert all(r.error == "interrupted by restart" for r in failed)
-    assert recover_stale_runs(session) == 0
+        stopped = s.query(Run).filter(Run.status == RunStatus.INTERRUPTED).all()
+        assert len(stopped) == 2
+        assert all(r.error.startswith("interrupted: the app stopped") for r in stopped)
+        assert s.query(Run).filter(Run.status == RunStatus.QUEUED).count() == 1
+    assert recover_interrupted_runs(session) == 0
 
 
 def test_scan_skips_docs_hashes_and_archives(settings, session):

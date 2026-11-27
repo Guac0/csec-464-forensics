@@ -36,6 +36,8 @@ class PluginSpec:
     auto_enumerate: bool = False  # include in the "auto-enumerate" batch
     # Hardcoded suggested queries shown in the UI: (label, args) pairs.
     presets: tuple[tuple[str, dict[str, Any]], ...] = ()
+    # Timeout for this plugin in seconds; None = FT_RUN_TIMEOUT_SECONDS.
+    timeout_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,8 @@ class ExecutionResult:
     cancelled: bool = False
     # True if the files the tool wrote to output_dir exceeded max_output_bytes and it was stopped.
     output_limit_exceeded: bool = False
+    # Set if should_stop() asked the executor to stop early (e.g. the disk is nearly full).
+    stop_reason: str | None = None
 
 
 class ToolRunner(ABC):

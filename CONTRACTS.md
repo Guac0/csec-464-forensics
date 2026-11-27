@@ -62,6 +62,24 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
 
+### Run recovery, limits and health
+- `RunStatus.INTERRUPTED`: the app stopped during the run (startup recovery or graceful
+  shutdown). User cancel stays `CANCELLED`. `Run.pid` (tool pid while running), `Run.rerun_of_id`.
+- `app/jobs/worker.py`: `recover_interrupted_runs(session) -> int` (at startup: kill orphaned
+  tool process group if its cwd is the run dir, keep/hash partial stdout and dumped files, audit
+  `run.interrupted`; SUCCEEDED runs stuck in post-processing get a hook error + audit
+  `run.hooks_interrupted`). Queued runs are left queued.
+- `app/services/runs.py`: `rerun(session, run_id) -> Run`; `create_run`/`enqueue_auto` raise
+  `DiskSpaceError` (API 507). `POST /api/runs/{id}/rerun`, UI `/ui/runs/{id}/rerun`.
+- `app/services/resources.py`: `disk_status()`, `check_can_start_run()`, `hard_floor_problem()`.
+  Settings `FT_MIN_FREE_DISK_BYTES`, `FT_MAX_DATA_BYTES`, `FT_HARD_MIN_FREE_DISK_BYTES`. The
+  worker does not claim queued runs while `disk_status().problem` is set.
+- `executor.execute(..., on_start=(pid, argv), should_stop=() -> reason|None)`;
+  `ExecutionResult.stop_reason`. `PluginSpec.timeout_seconds` overrides `FT_RUN_TIMEOUT_SECONDS`.
+- `app/services/health.py`: `quick_checks(session) -> list[Check]`, `run_volatility_test()`,
+  `run_ai_test()`, `badge(session)`, `settings_summary()`. `app/api/system.py`:
+  `GET /api/system/health`, `POST /api/system/health/{volatility,ai}`; UI `/system`.
+
 ### AI evaluation harness
 - `evals/` (dev tooling, not shipped in the image): `python -m evals.run` (CLI), `evals/cases/*.yaml`
   (cases), `evals/scoring.py` (pure scoring/aggregation/baseline comparison), `evals/judge.py`

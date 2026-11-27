@@ -105,6 +105,12 @@ report on purpose, regenerate it with `UPDATE_GOLDEN=1 pytest tests/test_export.
 diff in your PR. Any evidence-sourced text must go through `esc()`, `code()` or `fenced()` in
 `app/services/export.py`; `test_export.py` renders the report to check nothing gets through.
 
+## Disk guards in tests
+
+`tests/conftest.py` sets `FT_MIN_FREE_DISK_BYTES=0` and `FT_HARD_MIN_FREE_DISK_BYTES=0` so the
+suite does not depend on the machine's free space; `tests/test_resources.py` turns them on. If
+you add a new way to start a run, call `resources.check_can_start_run()` before queueing it.
+
 ## Audit log
 
 Everything that changes data must be recorded in the audit log, in the **same transaction** as

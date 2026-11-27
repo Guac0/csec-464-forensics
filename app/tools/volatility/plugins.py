@@ -33,12 +33,14 @@ How to add a plugin
 3. ``auto_enumerate=True`` puts the plugin in the "auto-enumerate" batch that is queued for
    each evidence item on request (one Run per plugin, no args). Choose cheap, high-value
    plugins; ``max_concurrent_runs`` defaults to 1 so the batch runs sequentially.
-4. ``presets``: (label, args) pairs shown as one-click suggested queries in the UI. The args
+4. ``timeout_seconds``: set this for slow plugins (e.g. filescan/dumpfiles on big images);
+   otherwise FT_RUN_TIMEOUT_SECONDS (1 h) applies.
+5. ``presets``: (label, args) pairs shown as one-click suggested queries in the UI. The args
    are validated exactly like manual input, so they must use the ArgSpec names above.
-5. OS detection: ``Evidence.os_info`` should be filled from ``windows.info.Info`` output
+6. OS detection: ``Evidence.os_info`` should be filled from ``windows.info.Info`` output
    (and linux/mac equivalents). That handling does not exist yet - it belongs in the worker's
    post-processing hook (see README.md in this directory).
-6. Add a test in tests/test_tools_volatility.py for any non-trivial ArgSpec, and a fixture
+7. Add a test in tests/test_tools_volatility.py for any non-trivial ArgSpec, and a fixture
    with real captured output under tests/fixtures/ (see README.md).
 """
 

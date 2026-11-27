@@ -169,10 +169,32 @@ Team workflow, branch rules and guidance for AI coding assistants:
 ### Activity (audit) log
 - **Status:** done
 - Every action is recorded in an append-only, tamper-evident log: evidence scans and hashing,
-  runs (queued, started, finished, cancelled), post-processing, notes, AI questions and answers,
+  runs (queued, started, finished, cancelled, interrupted), post-processing, notes, AI questions and answers,
   and (for now) every page and API request. "Activity" in the top bar shows and filters it;
   "Verify integrity" checks that nothing was edited or deleted. Evidence and run pages link to
   their own activity.
+
+### Crash recovery and disk protection
+- **Status:** done
+- If the app stops while a run is in progress (crash, restart, `docker compose down`), the run
+  is marked **interrupted** — not failed — on the next start. Any leftover `vol` process is
+  stopped, and whatever the run wrote so far is kept and hashed. **Re-run** queues the same
+  plugin and arguments again (also offered for failed runs). Queued runs simply start again.
+- New runs are refused while the disk is nearly full (less than 5 GiB free by default, or over
+  an optional cap on the data folder); queued runs wait until there is space. A run in progress
+  is stopped if free space falls under 1 GiB, so the database is never the thing that runs out.
+  See the `FT_*_DISK_BYTES` / `FT_MAX_DATA_BYTES` settings in `.env.example`.
+- Each plugin in the catalog can have its own timeout (`timeout_seconds`); the default is
+  `FT_RUN_TIMEOUT_SECONDS`.
+
+### System page
+- **Status:** done
+- **System** in the top bar (with a warning badge when something is wrong) checks disk space,
+  the evidence/data/symbol folders, the run worker, the database, the audit chain, hooks and
+  the AI settings, and lists all active settings (API key hidden). **Test volatility** runs
+  `vol -h` and checks every catalog plugin exists in the installed version; **Test AI** sends one
+  tiny request to the provider. Start here when something does not work on a new machine.
+  JSON: `GET /api/system/health` (`/health` stays a simple liveness check).
 
 ## Limitations
 
