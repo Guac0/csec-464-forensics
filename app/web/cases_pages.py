@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
@@ -66,6 +69,7 @@ def _case_page(
         unchecked=indicators.unchecked_count(session, case_id),
         check_job=indicators.job_state(case_id),
         indicator_types=[t.value for t in indicators.IndicatorType],
+        comparisons=_saved_comparisons(session, case_id),
         other_evidence=others,
         shared=sharing.resolved_for_case(session, case_id),
         notes=list_scoped_notes(session, None, case_id),
@@ -76,6 +80,13 @@ def _case_page(
         active_case_id=case_id,
         case_q=f"?case={case_id}",
     )
+
+
+def _saved_comparisons(session: Session, case_id: int) -> list[tuple[Any, str]]:
+    """(saved comparison, its page URL)."""
+    from app.services import compare
+
+    return [(s, compare.url(case_id, s)) for s in compare.list_saved(session, case_id)]
 
 
 @router.get("/cases/{case_id}", response_class=HTMLResponse)
@@ -304,3 +315,159 @@ def ui_indicator_from_row(
         targets=targets,
         types=[t.value for t in indicators.IndicatorType],
     )
+
+
+# --------------------------------------------------------------------------------- comparison
+
+
+def _compare_inputs(request: Request, session: Session, case_id: int) -> dict[str, Any]:
+    """Resolve the comparison page's query parameters into runs + settings (or a form state)."""
+    from app.services import compare
+
+    q = request.query_params
+    members = cases_svc.member_evidence(session, case_id)
+    member_ids = {ev.id for ev, _ in members}
+    state: dict[str, Any] = {
+        "members": members,
+        "a": _int(q.get("a")),
+        "b": _int(q.get("b")),
+        "plugin": (q.get("plugin") or "").strip(),
+        "cmp": None,
+        "error": None,
+    }
+    run_a_id, run_b_id = _int(q.get("run_a")), _int(q.get("run_b"))
+    try:
+        if run_a_id and run_b_id:
+            run_a, run_b = compare.get_run(session, run_a_id), compare.get_run(session, run_b_id)
+            state.update(a=run_a.evidence_id, b=run_b.evidence_id, plugin=run_a.plugin)
+        elif state["a"] and state["b"] and state["plugin"]:
+            runs_a = compare.runs_for(session, state["a"], state["plugin"])
+            runs_b = compare.runs_for(session, state["b"], state["plugin"])
+            if not runs_a or not runs_b:
+                raise compare.CompareError(
+                    f"{state['plugin']} has no finished run on both images; run it on each first"
+                )
+            run_a, run_b = runs_a[0], runs_b[0]
+        else:
+            if state["a"] and state["b"]:
+                state["plugins"] = compare.comparable_plugins(session, state["a"], state["b"])
+            return state
+        if run_a.evidence_id not in member_ids or run_b.evidence_id not in member_ids:
+            raise compare.CompareError("both images must be in this case")
+        if q.get("custom"):
+            cmp = compare.compare(session, run_a, run_b, q.getlist("keys"), q.getlist("ignore"))
+        else:
+            cmp = compare.compare(session, run_a, run_b)
+    except (LookupError, compare.CompareError) as exc:
+        state["error"] = str(exc)
+        if state["a"] and state["b"]:
+            state["plugins"] = compare.comparable_plugins(session, state["a"], state["b"])
+        return state
+    state.update(
+        cmp=cmp,
+        runs_a=compare.runs_for(session, cmp.run_a.evidence_id, cmp.run_a.plugin),
+        runs_b=compare.runs_for(session, cmp.run_b.evidence_id, cmp.run_b.plugin),
+        common=compare.common_columns(cmp.run_a, cmp.run_b),
+        plugins=compare.comparable_plugins(session, cmp.run_a.evidence_id, cmp.run_b.evidence_id),
+    )
+    return state
+
+
+@router.get("/cases/{case_id}/compare", response_class=HTMLResponse)
+def compare_page(request: Request, case_id: int, session: SessionDep) -> HTMLResponse:
+    """Before/after comparison of one plugin's results on two images of the case."""
+    from app.services import compare
+
+    case = _case_or_404(session, case_id)
+    state = _compare_inputs(request, session, case_id)
+    cmp = state["cmp"]
+    ctx: dict[str, Any] = {}
+    if cmp is not None:
+        lim = compare.DISPLAY_LIMIT
+        ctx = {
+            "data_a": compare.rows(
+                session, cmp.run_a.id, cmp.only_a[:lim] + [a for a, _, _ in cmp.changed[:lim]]
+            ),
+            "data_b": compare.rows(
+                session, cmp.run_b.id, cmp.only_b[:lim] + [b for _, b, _ in cmp.changed[:lim]]
+            ),
+            "limit": lim,
+            "csv_url": compare.url(case_id, cmp).replace("/compare?", "/compare.csv?", 1),
+            "keys_json": json.dumps(cmp.keys),
+            "ignore_json": json.dumps(cmp.ignored),
+            "ev_a": session.get(Evidence, cmp.run_a.evidence_id),
+            "ev_b": session.get(Evidence, cmp.run_b.evidence_id),
+        }
+    return render(
+        request,
+        "compare.html",
+        case=case,
+        labels=cases_svc.labels(session, case_id),
+        active_case_id=case_id,
+        case_q=f"?case={case_id}",
+        **state,
+        **ctx,
+    )
+
+
+@router.get("/cases/{case_id}/compare.csv")
+def compare_csv(request: Request, case_id: int, session: SessionDep) -> Response:
+    from app.services import audit, compare
+
+    _case_or_404(session, case_id)
+    state = _compare_inputs(request, session, case_id)
+    cmp = state["cmp"]
+    if cmp is None:
+        raise HTTPException(422, state["error"] or "choose two images and a plugin")
+    body = compare.to_csv(session, cmp)
+    audit.record(
+        session,
+        "comparison.export",
+        category=audit.KEY_READ,
+        object_type="case",
+        object_id=case_id,
+        summary=f"Downloaded comparison of runs {cmp.run_a.id} and {cmp.run_b.id} as CSV",
+        details={"run_a": cmp.run_a.id, "run_b": cmp.run_b.id, "counts": cmp.counts},
+    )
+    session.commit()
+    name = f"compare-run{cmp.run_a.id}-run{cmp.run_b.id}.csv"
+    return Response(
+        body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post("/ui/cases/{case_id}/comparisons", dependencies=[Depends(same_origin_post)])
+def ui_comparison_save(case_id: int, form: FormDep, session: SessionDep) -> Response:
+    from app.services import compare
+
+    _case_or_404(session, case_id)
+    try:
+        run_a = compare.get_run(session, _int(form.get("run_a")))
+        run_b = compare.get_run(session, _int(form.get("run_b")))
+        keys = json.loads(form.get("keys_json") or "[]")
+        ignore = json.loads(form.get("ignore_json") or "[]")
+        compare.check_scope(session, case_id, run_a, run_b)
+        cmp = compare.compare(session, run_a, run_b, keys, ignore)
+        compare.save(session, case_id, cmp, form.get("title") or "", form.get("comment") or "")
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, compare.CompareError) as exc:
+        session.rollback()
+        raise HTTPException(422, str(exc)) from exc
+    return redirect(f"/cases/{case_id}#comparisons")
+
+
+@router.post("/ui/comparisons/{comparison_id}/delete", dependencies=[Depends(same_origin_post)])
+def ui_comparison_delete(comparison_id: int, session: SessionDep) -> Response:
+    from app.services import compare
+
+    try:
+        case_id = compare.delete_saved(session, comparison_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return redirect(f"/cases/{case_id}#comparisons")

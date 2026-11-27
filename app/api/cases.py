@@ -322,3 +322,103 @@ def indicator_hits(
         }
         for h in indicators.hits(session, case_id, evidence_id=evidence_id)
     ]
+
+
+# --------------------------------------------------------------------------------- comparisons
+
+
+class ComparisonIn(BaseModel):
+    run_a: int
+    run_b: int
+    keys: list[str] | None = None
+    ignore: list[str] | None = None
+    title: str = ""
+    comment: str = ""
+
+
+def _comparison_out(cmp: Any) -> dict[str, Any]:
+    return {
+        "run_a": cmp.run_a.id,
+        "run_b": cmp.run_b.id,
+        "plugin": cmp.run_a.plugin,
+        "keys": cmp.keys,
+        "compared": cmp.compared,
+        "ignored": cmp.ignored,
+        "counts": cmp.counts,
+        "only_a": [f"R{cmp.run_a.id}:{i}" for i in cmp.only_a],
+        "only_b": [f"R{cmp.run_b.id}:{i}" for i in cmp.only_b],
+        "changed": [
+            {"a": f"R{cmp.run_a.id}:{a}", "b": f"R{cmp.run_b.id}:{b}", "columns": cols}
+            for a, b, cols in cmp.changed
+        ],
+        "warnings": cmp.warnings,
+    }
+
+
+def _compare_runs(session: Session, case_id: int, body: Any) -> Any:
+    from app.services import compare
+
+    cases_service.get_case(session, case_id)
+    run_a, run_b = compare.get_run(session, body.run_a), compare.get_run(session, body.run_b)
+    compare.check_scope(session, case_id, run_a, run_b)
+    return compare.compare(session, run_a, run_b, body.keys, body.ignore)
+
+
+@router.post("/{case_id}/compare")
+def compare_runs(case_id: int, body: ComparisonIn, session: SessionDep) -> dict[str, Any]:
+    """Compare two runs of the same plugin on images of this case (nothing is stored).
+    ``keys`` / ``ignore`` default to the catalog's compare_keys / volatile columns."""
+    try:
+        return _comparison_out(_compare_runs(session, case_id, body))
+    except LookupError as exc:
+        raise _err(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/{case_id}/comparisons")
+def list_comparisons(case_id: int, session: SessionDep) -> list[dict[str, Any]]:
+    from app.services import compare
+
+    return [
+        {
+            "id": s.id,
+            "title": s.title,
+            "plugin": s.plugin,
+            "run_a": s.run_a_id,
+            "run_b": s.run_b_id,
+            "keys": s.keys,
+            "ignore": s.ignore,
+            "counts_when_saved": s.counts,
+            "comment": s.comment,
+            "created_at": s.created_at.isoformat(),
+            "url": compare.url(case_id, s),
+        }
+        for s in compare.list_saved(session, case_id)
+    ]
+
+
+@router.post("/{case_id}/comparisons", status_code=201)
+def save_comparison(case_id: int, body: ComparisonIn, session: SessionDep) -> dict[str, Any]:
+    from app.services import compare
+
+    try:
+        cmp = _compare_runs(session, case_id, body)
+        saved = compare.save(session, case_id, cmp, body.title, body.comment)
+    except LookupError as exc:
+        raise _err(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"id": saved.id, "title": saved.title, "counts": saved.counts}
+
+
+@router.delete("/{case_id}/comparisons/{comparison_id}", status_code=204)
+def delete_comparison(case_id: int, comparison_id: int, session: SessionDep) -> Response:
+    from app.models import SavedComparison
+    from app.services import compare
+
+    saved = session.get(SavedComparison, comparison_id)
+    if saved is None or saved.case_id != case_id:
+        raise HTTPException(404, "comparison not found in this case")
+    compare.delete_saved(session, comparison_id)
+    return Response(status_code=204)

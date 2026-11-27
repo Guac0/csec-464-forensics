@@ -69,6 +69,36 @@
       {% endif %}
     </section>
 
+    <section class="panel" id="comparisons">
+      <div class="panel-head">
+        <h2>Comparisons</h2>
+        {% if members | length >= 2 %}
+        <form method="get" action="/cases/{{ case.id }}/compare" class="inline add-member">
+          <select name="a">{% for ev, label in members %}<option value="{{ ev.id }}">{{ label or ev.rel_path }}</option>{% endfor %}</select>
+          <span>vs</span>
+          <select name="b">{% for ev, label in members %}<option value="{{ ev.id }}"{% if loop.index == 2 %} selected{% endif %}>{{ label or ev.rel_path }}</option>{% endfor %}</select>
+          <button type="submit" class="small">Compare…</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if comparisons %}
+      <table class="data small-text">
+        <thead><tr><th>Saved comparison</th><th>When saved</th><th></th></tr></thead>
+        <tbody>
+        {% for s, url in comparisons %}
+          <tr><td><a href="{{ url }}">{{ s.title }}</a>{% if s.comment %}<div class="muted">{{ s.comment }}</div>{% endif %}</td>
+            <td>only A {{ s.counts.only_a }} · only B {{ s.counts.only_b }} · changed {{ s.counts.changed }} · same {{ s.counts.same }}<div class="muted">{{ s.created_at | dt }}</div></td>
+            <td><form method="post" action="/ui/comparisons/{{ s.id }}/delete" class="inline"><button type="submit" class="small danger">Delete</button></form></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% elif members | length < 2 %}
+      <p class="muted">Add at least two images to compare them.</p>
+      {% else %}
+      <p class="muted">Compare the same plugin's results on two images (e.g. before vs after). Saved comparisons appear here and in the case report.</p>
+      {% endif %}
+    </section>
+
     <section class="panel" id="indicators">
       <div class="panel-head">
         <h2>Indicators ({{ indicators | length }})</h2>
