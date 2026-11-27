@@ -50,6 +50,8 @@ How to add a plugin
    post-processing hook (see README.md in this directory).
 7. Add a test in tests/test_tools_volatility.py for any non-trivial ArgSpec, and a fixture
    with real captured output under tests/fixtures/ (see README.md).
+8. Recommendations: to have the app *suggest* the plugin (baseline step or "after X, run Y"),
+   add it to the investigation guide in ``guide.py`` (see the docs at the top of that file).
 """
 
 from __future__ import annotations
@@ -57,6 +59,8 @@ from __future__ import annotations
 from app.tools.base import ArgSpec, PluginSpec
 
 # Verified against volatility3 2.28.2 (installed package source + `vol <plugin> --help`):
+#   - windows.pstree.PsTree / windows.cmdline.CmdLine: `--pid [PID ...]` ListRequirement(int).
+#   - windows.netscan.NetScan: no plugin options.
 #   - windows.info.Info: no plugin options.
 #   - windows.pslist.PsList: `--pid [PID ...]` is ListRequirement(name="pid", element_type=int,
 #     optional=True); `--dump` is BooleanRequirement(name="dump", default=False) ("Extract listed
@@ -96,5 +100,24 @@ PLUGINS: list[PluginSpec] = [
         # EXAMPLE comparison keys - TODO(forensics): a better identity is name + path + parent
         # name, which needs pstree/cmdline data joined in.
         compare_keys=("ImageFileName",),
+    ),
+    # EXAMPLE entries below exist so the EXAMPLE investigation guide (guide.py) has something to
+    # recommend. TODO(forensics): review descriptions, options, timeouts and compare keys.
+    PluginSpec(
+        name="windows.pstree.PsTree",
+        description="EXAMPLE: processes as a parent/child tree.",
+        args=(ArgSpec(name="pid", flag="--pid", type="int_list", help="Only these process IDs"),),
+        compare_keys=("ImageFileName",),
+    ),
+    PluginSpec(
+        name="windows.cmdline.CmdLine",
+        description="EXAMPLE: command line of each process.",
+        args=(ArgSpec(name="pid", flag="--pid", type="int_list", help="Only these process IDs"),),
+        compare_keys=("Process", "Args"),
+    ),
+    PluginSpec(
+        name="windows.netscan.NetScan",
+        description="EXAMPLE: network connections and listening sockets (pool scan; slow).",
+        compare_keys=("Proto", "LocalAddr", "LocalPort", "ForeignAddr", "ForeignPort", "Owner"),
     ),
 ]

@@ -373,6 +373,27 @@ def check_catalog() -> Check:
     return Check("catalog", "Plugin catalog", "ok", f"{len(valid)} plugin(s), all valid.", details)
 
 
+def check_guide() -> Check:
+    """Investigation guide (app/tools/volatility/guide.py): invalid steps are skipped."""
+    from app.tools import registry
+    from app.tools.guide import check_guide as check
+
+    guide, problems = check(registry.get_runner("volatility3"))
+    steps = len(guide.baseline) + sum(len(v) for v in guide.next.values())
+    details = [("Baseline steps", str(len(guide.baseline))), ("Valid steps", str(steps))]
+    details += [(p.where, f"{p.plugin}: {p.problem}") for p in problems]
+    if problems:
+        return Check(
+            "guide",
+            "Investigation guide",
+            "warn",
+            f"{len(problems)} guide step(s) skipped as invalid (see /guide; fix "
+            "app/tools/volatility/guide.py).",
+            details,
+        )
+    return Check("guide", "Investigation guide", "ok", f"{steps} step(s), all valid.", details)
+
+
 def check_ai_config(settings: Settings) -> Check:
     details = [
         ("Base URL (FT_AI_BASE_URL)", settings.ai_base_url),
@@ -408,6 +429,7 @@ def quick_checks(session: Session, settings: Settings | None = None) -> list[Che
         lambda: check_audit(session, settings),
         lambda: check_hooks(settings),
         check_catalog,
+        check_guide,
         lambda: check_backups(session, settings),
         lambda: check_ai_config(settings),
     ):

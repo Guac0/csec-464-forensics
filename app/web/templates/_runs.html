@@ -1,4 +1,4 @@
-<div id="runs"{% if polling %} hx-get="/ui/evidence/{{ evidence_id }}/runs" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+<div id="runs" hx-get="/ui/evidence/{{ evidence_id }}/runs" hx-trigger="runs-changed from:body{% if polling %}, every 3s{% endif %}" hx-swap="outerHTML">
   {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
   {% if message %}<p class="flash">{{ message }}</p>{% endif %}
   {% if runs %}
