@@ -85,7 +85,19 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `ToolRunner.guide() -> InvestigationGuide(baseline, next)` (default empty).
 - `app/tools/guide.py`: `check_guide(runner) -> (valid guide with normalised args, [GuideProblem])`
   (invalid steps skipped), `to_markdown(runner)`, `main()` (CLI `python -m
-  app.tools.guide`, exit 1 on problems; problem `where` names the content file), `describe_when`, `args_key`.
+  app.tools.guide`, also `python -m forensics guide`; exit 1 on problems; problem `where` names the
+  content file), `describe_when`, `args_key`.
+- `app/tools/content_report.py`: `build_report() -> ContentReport(root, plugins: [PluginStatus],
+  prompts, citations, eval_cases, baselines, errors, todo; .ok)` on the current content root
+  (errors = broken/CI-failing; todo = EXAMPLE/TODO markers, missing fixtures/baselines),
+  `to_text(report)`, `fixture_columns(path)`. evals import optional (not in the image).
+- `app/tools/content_cli.py` (`python -m forensics` via `forensics/__main__.py`): `check`
+  (exit 1 on errors), `guide`, `new <plugin> [--no-vol]` (`cmd_new(plugin, root=None,
+  use_vol=True)`: writes `plugins/<os>/<module>.py`, pastes `vol <plugin> -h` options via
+  `vol_help(plugin) -> (text|None, version|why)`, refuses bad names (2) / existing (1)).
+- `/content` (app/web/content_pages.py, template content.html): read-only report page; nav link
+  "Content"; linked from /system and /guide. CI job `forensics-content` runs the check + content
+  tests; the `test` job ignores tests/test_forensics_content.py.
 - `app/services/recommendations.py`: `recommend(session, evidence_id) -> Recommendations`
   (`items` best first, `dismissed`, `baseline_total/done`, `identified`, `guide_problems`;
   `as_dict()`), `dismiss` / `restore` (table `dismissed_recommendations`, migration 0012),

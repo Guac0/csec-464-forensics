@@ -81,50 +81,12 @@ def test_no_stray_files() -> None:
 # --- prompts, citations, fixtures, eval cases ----------------------------------------------
 
 
-def test_prompt_files_exist_and_have_text(loaded: content.Content) -> None:
-    from app.ai import prompts
+def test_content_report_has_no_errors(loaded: content.Content) -> None:
+    """Everything `python -m forensics check` checks: prompts, citation settings, fixtures
+    (parse; compare_keys / ai_context columns exist), eval cases, file names, guide, hooks."""
+    from app.tools.content_report import build_report
 
-    missing = [n for n in prompts.GUIDANCE_FILES if not prompts.guidance(n)]
-    assert missing == [], f"empty or missing forensics/prompts/<name>.md: {missing}"
-    question = prompts.run_summary_question(5, "windows.x.X")
-    assert "R5" in question and "windows.x.X" in question, "run_summary.md lost {run_id}/{plugin}"
-
-
-def test_citation_settings_are_valid(loaded: content.Content) -> None:
-    settings = loaded.citations
-    assert settings is not None, "forensics/citations.py is missing"
-    assert all(isinstance(e, str) and e for e in settings.FILE_EXTENSIONS)
-    assert all(isinstance(w, str) and w for w in settings.NUMBER_LABELS)
-    assert isinstance(settings.TRUNCATED_NAME_LENGTH, int) and settings.TRUNCATED_NAME_LENGTH > 0
-
-
-def _fixture_columns(path: Path) -> set[str]:
-    rows = list(VolatilityRunner().parse_output(path))
-    assert rows, f"{path} has no rows"
-    return {k for r in rows for k in r.data}
-
-
-def test_fixtures_parse_and_match_their_plugin(loaded: content.Content) -> None:
-    by_module = {module: name for name, module in loaded.modules.items()}
-    specs = {p.name: p for p in loaded.plugins}
-    problems = []
-    for path in sorted((FORENSICS / "fixtures").rglob("*.jsonl")):
-        rel = path.relative_to(FORENSICS / "fixtures").with_suffix("")
-        name = by_module.get(".".join(rel.parts))
-        if name is None:
-            problems.append(f"{path.name}: no plugin file plugins/{rel.as_posix()}.py")
-            continue
-        columns = _fixture_columns(path)
-        rules = loaded.ai.get(name)
-        wanted = {
-            "compare_keys": set(specs[name].compare_keys),
-            "compare_ignore": set(specs[name].compare_ignore),
-            "ai_context columns": set(rules.settings.columns) if rules else set(),
-        }
-        for field, cols in wanted.items():
-            if cols - columns:
-                problems.append(f"{name}: {field} {sorted(cols - columns)} not in its output")
-    assert problems == []
+    assert build_report().errors == []
 
 
 def test_eval_cases_load() -> None:

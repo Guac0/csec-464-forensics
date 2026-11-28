@@ -7,7 +7,8 @@
     <h2>System checks <span class="badge health-{{ overall }}">{{ {"ok": "all OK", "warn": "warnings", "fail": "problems"}[overall] }}</span></h2>
     <a class="button" href="/system">Re-check</a>
   </div>
-  <p class="muted small-text">Checked when this page loads. The JSON version is at <a href="/api/system/health">/api/system/health</a>.</p>
+  <p class="muted small-text">Checked when this page loads. The JSON version is at <a href="/api/system/health">/api/system/health</a>.
+    Forensics content (plugins, guide, prompts): <a href="/content">status page</a>, <a href="/guide">guide</a>.</p>
   {% for check in checks %}{% include "_health_check.html" %}{% endfor %}
 </section>
 

@@ -15,6 +15,7 @@
     <span class="nav-right">
       {% set hb = health_badge() if health_badge is defined else none %}
       <a href="/system"{% if hb %} title="{{ hb[1] }}"{% endif %}>System{% if hb and hb[0] in ("warn", "fail") %} <span class="badge health-{{ hb[0] }}">{{ "!" if hb[0] == "fail" else "warning" }}</span>{% endif %}</a>
+      <a href="/content">Content</a>
       <a href="/activity">Activity</a>
       <a href="/settings">Settings</a>
     </span>

@@ -40,26 +40,38 @@ plugins (`app/tools/volatility/runner.py`); hooks are the place to interpret a p
    Never guess names, options or output columns, and don't trust an AI assistant's memory of
    them: they often mix up volatility 2 and 3.
 
-2. Copy `plugins/_template.py` into the folder for the plugin's OS. Name the file after the
-   plugin without its class name, with dots turned into underscores:
+2. Create the file:
+
+   ```bash
+   python -m forensics new windows.dlllist.DllList
+   ```
+
+   This writes `plugins/windows/dlllist.py` with the plugin's real options from `vol -h` pasted
+   in as notes to copy from (when volatility is installed where you run it; inside Docker use
+   `docker compose run --rm app python -m forensics new ...`). You can also copy
+   `plugins/_template.py` by hand. Files are named after the plugin without its class name,
+   with dots turned into underscores:
 
    | Plugin | File |
    |---|---|
    | `windows.pslist.PsList` | `plugins/windows/pslist.py` |
    | `windows.malware.malfind.Malfind` | `plugins/windows/malware_malfind.py` |
 
-3. Fill in the fields you need and delete the rest. Only `name` is required. The template
-   explains each field; the table below is a summary.
+3. Fill in the fields you need. Only `name` is required. `plugins/_template.py` explains every
+   field; the table below is a summary.
 
 4. Check your work:
 
    ```bash
-   python -m app.tools.guide                   # prints the guide and lists any problems
-   pytest tests/test_forensics_content.py      # the same checks CI runs on this folder
+   python -m forensics check                   # every check on this folder, plus a to-do list
+   pytest tests/test_forensics_content.py      # the same checks as tests (CI runs both)
    ```
 
-5. Start the app and look at the run form, the `/guide` page and the System page. A file with a
-   mistake is skipped (the other plugins keep working) and the error is shown on the System page.
+5. Start the app and look at the run form and the **Content** page (`/content`, in the top bar).
+   It shows every plugin with its status (error, example, reviewed), options, guide steps,
+   hooks, captured output and evaluation cases, plus what is still to do. A file with a mistake
+   is skipped (the other plugins keep working) and the error is shown there and on the System
+   page.
 
 A short example (`plugins/windows/cmdline.py`):
 
@@ -137,7 +149,7 @@ The guide can't use values from the output ("dlllist for the flagged PID") or de
 plugins at once. For that, write a hook that queues the follow-up run.
 
 Everything in the guide is checked against the plugins' options, so a typo is reported
-by `python -m app.tools.guide`, on the `/guide` page and in CI. The report names the file.
+by `python -m forensics check`, on the `/guide` and `/content` pages and in CI. The report names the file.
 
 ## Hooks
 
@@ -263,9 +275,22 @@ When the AI writes "explorer.exe (PID 2000) [R12:3]", the app checks that `explo
 decides which values are checked: file extensions, the words that mark a number as a PID or
 port, and how long Windows process names can be before they are cut off.
 
+## Tools
+
+| Command / page | What it does |
+|---|---|
+| `python -m forensics new <plugin>` | Creates a plugin file, with the real options from `vol -h`. |
+| `python -m forensics check` | Runs every check below and lists what is still EXAMPLE or missing. Exit code 1 on errors. |
+| `python -m forensics guide` | Prints the investigation guide as a Markdown table. |
+| `/content` page | The same report in the app, per plugin. |
+| `/guide` page | The investigation guide as analysts see it. |
+
+On GitHub, the "forensics-content" check runs `python -m forensics check` and the content tests
+on every pull request, separately from the infrastructure tests.
+
 ## What the checks look for
 
-`pytest tests/test_forensics_content.py` (also run in CI) fails if:
+`python -m forensics check` and `pytest tests/test_forensics_content.py` fail if:
 
 - a plugin file has an error or no `PLUGIN = Plugin(...)`,
 - two files define the same plugin,

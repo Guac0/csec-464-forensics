@@ -1,12 +1,12 @@
 """TEMPLATE for a new plugin file. This file is NOT loaded (its name starts with "_").
 
 To add a plugin:
-1. Copy this file into the folder for its OS and name it after the plugin, without the class
-   name, dots becoming underscores:
+1. Run `python -m forensics new <plugin name>`, or copy this file into the folder for its OS
+   and name it after the plugin, without the class name, dots becoming underscores:
        windows.pslist.PsList            -> plugins/windows/pslist.py
        windows.malware.malfind.Malfind  -> plugins/windows/malware_malfind.py
 2. Fill in the fields below. Delete the ones you don't need: only `name` is required.
-3. Check it: `python -m app.tools.guide` and `pytest tests/test_forensics_content.py`.
+3. Check it: `python -m forensics check`.
 
 Never guess plugin names, options or column names: copy them from `vol -h`,
 `vol <plugin> -h` and real output. Write down which volatility version you checked here.
