@@ -5,8 +5,9 @@
 - `main` is always deployable: it builds, tests pass, `docker compose up` works.
 - Work on short-lived branches (`feat/run-search`, `fix/worker-cancel`, `forensics/pslist-parser`),
   open a PR early (draft is fine), keep PRs small (one concern, < ~400 changed lines).
-- Every PR needs **1 approving review** and green CI (`lint`, `test`, `docker`). Forensics-owned
-  paths (see `.github/CODEOWNERS`) need a review from a forensics owner.
+- Every PR needs **1 approving review** and green CI (`lint`, `test`, `forensics-content`,
+  `docker`). The `forensics/` folder (see `.github/CODEOWNERS`) needs a review from a forensics
+  owner.
 - Squash-merge; write the PR title as the commit message ("Add pslist parser").
 - Run `pre-commit run --all-files` and `pytest -q` before pushing; CI runs the same.
 - Frozen contract files (listed in `CONTRACTS.md`, incl. `pyproject.toml` dependencies) change
@@ -21,8 +22,9 @@
 3. Enable **Require a pull request before merging**: required approvals `1`, dismiss stale
    approvals on new commits, (optional) require review from Code Owners - only after the
    placeholder handles in `.github/CODEOWNERS` are replaced with real usernames.
-4. Enable **Require status checks to pass**, add `lint`, `test`, `docker` (they appear in the
-   picker after CI ran once), and enable "Require branches to be up to date".
+4. Enable **Require status checks to pass**, add `lint`, `test`, `forensics-content`, `docker`
+   (they appear in the picker after CI ran once), and enable "Require branches to be up to
+   date".
 5. Save. (Classic alternative: Settings > Branches > Add branch protection rule for `main`.)
 
 **With the GitHub CLI** (repo admin; replace `Guac0/csec-464-forensics`):
@@ -49,7 +51,8 @@ gh api --method POST repos/Guac0/csec-464-forensics/rulesets --input - <<'EOF'
       "parameters": {
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          { "context": "lint" }, { "context": "test" }, { "context": "docker" }
+          { "context": "lint" }, { "context": "test" },
+          { "context": "forensics-content" }, { "context": "docker" }
         ]
       } }
   ]
@@ -64,13 +67,13 @@ make the repo public or agree on the rules socially.
 
 AI coding assistants are allowed and encouraged, with these rules:
 
-1. **Give it `CONTRACTS.md` first** (and the module you are working on). Ask it to stay inside your
-   module's public interface. It must not change frozen files (`app/config.py`, `app/db.py`,
-   `app/models.py`, `app/tools/base.py`, `tests/conftest.py`, `pyproject.toml` deps) - if it
-   wants to, that is a team discussion.
+1. **Point it at [AGENTS.md](../AGENTS.md) first.** That file tells the assistant how the
+   project is laid out, which files it must not change, and the coding and testing rules. Most
+   tools (Claude Code, Codex, Copilot, Cursor) read it automatically. If it wants to change a
+   frozen file, that is a team discussion.
 2. **Never let it invent volatility3 plugins, flags or output columns.** Assistants confidently
    produce plugin names and options from volatility 2 or from nowhere. Every plugin/flag in
-   `app/tools/volatility/plugins.py` must be checked against the installed version:
+   `forensics/plugins/` must be checked against the installed version:
 
    ```bash
    docker compose run --rm app vol -h                       # global options, plugin list
@@ -88,8 +91,9 @@ AI coding assistants are allowed and encouraged, with these rules:
 ## Changing the AI prompts or context
 
 Measure, don't guess: run `python -m evals.run` before and after the change (see
-[evals/README.md](../evals/README.md)), bump `PROMPT_VERSION` in `app/ai/prompts.py`, and if the
-change is an improvement, commit a new baseline (`--save-baseline`) in the same PR.
+[evals/README.md](../evals/README.md)). The prompt version changes by itself when a prompt file in
+`forensics/prompts/` changes. If the change is an improvement, commit a new baseline
+(`--save-baseline`) in the same PR.
 
 ## Performance check for big runs
 
@@ -105,12 +109,22 @@ report on purpose, regenerate it with `UPDATE_GOLDEN=1 pytest tests/test_export.
 diff in your PR. Any evidence-sourced text must go through `esc()`, `code()` or `fenced()` in
 `app/services/export.py`; `test_export.py` renders the report to check nothing gets through.
 
-## Plugin catalog
+## Forensics content
 
-`tests/test_catalog.py::test_shipped_catalog_is_valid` fails if an entry in
-`app/tools/volatility/plugins.py` is invalid (wrong plugin name, clashing or duplicate flags,
-an undeclared file-writing option, a broken preset). At runtime such entries are skipped and
-shown on the System page instead of stopping the app.
+The forensics content (plugins, guide, hooks, prompts, eval cases, captured output) lives in
+`forensics/`; how to edit it is in
+[forensics/README.md](../forensics/README.md). `tests/test_forensics_content.py` fails if a plugin
+file is invalid (wrong plugin name, clashing or duplicate flags, an undeclared file-writing
+option, a broken preset or guide step). At runtime a broken file is skipped and shown on the
+System page instead of stopping the app.
+
+`python -m forensics check` runs the same checks and prints a to-do list; the Content page
+(`/content`) shows the same report in the app. In CI the content checks run as their own job
+(`forensics-content`), separate from the infrastructure tests.
+
+The other tests never load `forensics/`. They use a small frozen copy in `tests/content/`, so the
+forensics team can change their files without breaking infrastructure tests. Change that copy
+only when an infrastructure test needs different content.
 
 ## Developing on Windows
 
@@ -168,8 +182,11 @@ session.commit()
 
 The schema is managed with [Alembic](https://alembic.sqlalchemy.org/). The app runs
 `app.db.migrate()` at startup, which upgrades the database to the latest migration, so users
-never lose their data when they pull a new version. (Databases created before Alembic was added
-are detected and adopted automatically.)
+never lose their data when they pull a new version.
+
+All migrations up to the team handoff were combined into one, `0001_initial.py`. Databases
+created before that can't be upgraded: the app stops with a message saying so. Delete them
+(`docker compose down -v`) and start again. New migrations build on `0001_initial`.
 
 **Any change to `app/models.py` must ship with a migration in the same PR:**
 
@@ -189,6 +206,9 @@ the truth):
   for you. Keep them.
 - Renames are detected as drop + add (data loss). Edit them into `alter_column(new_column_name=...)`.
 - Fill in `downgrade()` and check it works: `alembic downgrade -1 && alembic upgrade head`.
+- Triggers and the search table are created with raw SQL at the end of `0001_initial.py`
+  (autogenerate can't see them). A migration that rebuilds `audit_events`, `note_versions`,
+  `integrity_checks` or `audit_head` must recreate their triggers.
 - Data migrations (backfilling values) go in the same file using `op.execute(...)`.
 
 Rules:
@@ -204,7 +224,9 @@ Rules:
 ## Fixtures: adding real volatility3 output
 
 Unit tests never run real volatility: they use `tests/fixtures/fake_vol.py` and recorded
-outputs. To add a real recording:
+outputs. Real recordings belong to the forensics team in `forensics/fixtures/<os>/<plugin>.jsonl`
+(see [forensics/fixtures/README.md](../forensics/fixtures/README.md)); `tests/fixtures/` only
+holds synthetic data for infrastructure tests. To add a real recording:
 
 1. Use a **public, non-sensitive** Windows memory sample (e.g. from a published CTF/training
    dataset). Note where it came from and its SHA-256.
@@ -212,7 +234,7 @@ outputs. To add a real recording:
 
    ```bash
    docker compose run --rm app vol -q -r jsonl -s /symbols -f /evidence/<image> windows.pslist.PsList \
-     > tests/fixtures/real_windows_pslist.jsonl
+     > forensics/fixtures/windows/pslist.jsonl
    ```
 
    No local Docker/RAM to spare? Run the **Integration** workflow (Actions tab >
@@ -220,9 +242,10 @@ outputs. To add a real recording:
    plugin, then download the `vol-...` artifact.
 3. Trim it to a few dozen rows (keep the structure: leading blank line, one JSON object per root,
    nested `__children`). Keep it well under 1 MB (pre-commit rejects larger files).
-4. Record provenance next to it in `tests/fixtures/README.md`: image name + SHA-256, plugin,
+4. Record provenance in `forensics/fixtures/README.md`: image name + SHA-256, plugin,
    volatility3 version (`vol -h | head -1`), date.
-5. Add parser/summary tests against it. Fixture changes are reviewed by the forensics owners.
+5. Run `python -m forensics check`: it parses the file and checks the plugin's `compare_keys`
+   and `ai_context` columns against it.
 
 Never commit memory images or dumps; `.gitignore` and a pre-commit hook block the common
 extensions, but check `git status` anyway.

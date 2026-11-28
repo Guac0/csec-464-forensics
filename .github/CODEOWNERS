@@ -4,8 +4,7 @@
 # Default owner: everything not matched below.
 *                               @guac0
 
-# Forensics-owned: plugin catalog, argument allowlist, parsers, prompts, recorded fixtures.
-# TODO
-# /app/tools/volatility/          @TEAM_MEMBER_FORENSICS_1 @TEAM_MEMBER_FORENSICS_2
-# /app/ai/prompts.py              @TEAM_MEMBER_FORENSICS_1 @TEAM_MEMBER_FORENSICS_2
-# /tests/fixtures/                @TEAM_MEMBER_FORENSICS_1 @TEAM_MEMBER_FORENSICS_2
+# Forensics-owned: everything in forensics/ (plugins, guide, hooks, prompts, citation settings,
+# eval cases, captured output). TODO: replace the placeholders with the forensics team's
+# GitHub usernames, then uncomment.
+# /forensics/                     @TEAM_MEMBER_FORENSICS_1 @TEAM_MEMBER_FORENSICS_2

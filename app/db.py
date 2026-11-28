@@ -7,7 +7,7 @@ from pathlib import Path
 
 from alembic.config import Config
 from sqlalchemy import create_engine, event, inspect
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -70,8 +70,6 @@ def get_engine() -> Engine:
 
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
-# The first migration, equal to the schema the PoC created with create_all() before Alembic.
-BASELINE_REVISION = "0001_baseline"
 
 
 def alembic_config() -> Config:
@@ -81,11 +79,27 @@ def alembic_config() -> Config:
     return cfg
 
 
+def _refuse_unknown_schema(conn: Connection) -> None:
+    """Stop with a clear message instead of corrupting a database Alembic can't upgrade."""
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    tables = set(inspect(conn).get_table_names())
+    current = MigrationContext.configure(conn).get_current_revision()
+    known = {s.revision for s in ScriptDirectory.from_config(alembic_config()).walk_revisions()}
+    if (current is None and "evidence" in tables) or (current and current not in known):
+        raise RuntimeError(
+            f"database schema {current or '(no version)'} is from before the migration squash "
+            "(handoff cleanup) and cannot be upgraded: back up what you need, delete the "
+            "database (e.g. `docker compose down -v`) and start again"
+        )
+
+
 def migrate(engine: Engine | None = None) -> None:
     """Bring the database schema up to date by running Alembic migrations to ``head``.
 
-    Databases created before Alembic was introduced (tables present, no ``alembic_version``) are
-    stamped at the baseline revision first, so existing work is kept and later migrations apply.
+    A database with tables but no ``alembic_version`` (or one from before the migration squash)
+    is refused with a clear error: recreate it.
     """
     from alembic import command
 
@@ -103,10 +117,7 @@ def migrate(engine: Engine | None = None) -> None:
         try:
             with conn.begin():
                 cfg.attributes["connection"] = conn
-                tables = set(inspect(conn).get_table_names())
-                if "alembic_version" not in tables and "evidence" in tables:
-                    logger.info("pre-Alembic database detected; stamping %s", BASELINE_REVISION)
-                    command.stamp(cfg, BASELINE_REVISION)
+                _refuse_unknown_schema(conn)
                 command.upgrade(cfg, "head")
                 problems = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
                 if problems:

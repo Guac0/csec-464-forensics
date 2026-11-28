@@ -7,8 +7,10 @@
   <p class="small-text muted">What the "Recommended next" panel on an image page suggests. First the
     <b>baseline</b> steps that have not run yet, in order; then <b>next</b> steps from the image's succeeded
     runs, ranked by priority. Steps that already ran (or are queued) and steps dismissed for that image are
-    not shown. Developers: edit <span class="mono">app/tools/volatility/guide.py</span> and check it with
-    <span class="mono">python -m app.tools.volatility.guide</span>.</p>
+    not shown. Developers: edit <span class="mono">baseline=</span> / <span class="mono">next=</span> in the plugin files in
+    <span class="mono">forensics/plugins/</span> and check them with
+    <span class="mono">python -m forensics check</span>. Status of all forensics content:
+    <a href="/content">Forensics content</a>.</p>
 </section>
 
 <section class="panel">

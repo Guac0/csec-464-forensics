@@ -27,7 +27,7 @@ the same command with the provider from repository secrets. It first checks the 
 (`python -m app.ai.probe`, fails fast if unreachable), then runs the cases you pick (e.g. `agent`,
 `recommend`, or all), puts the summary table on the run page and attaches the reports. Options:
 model, cases, repeats, agent tool protocol, AI judge, fail on regression, and "save baseline"
-(the new baseline is attached as an artifact: commit it to `evals/baselines/` in a PR). It never
+(the new baseline is attached as an artifact: commit it to `forensics/evals/baselines/` in a PR). It never
 runs on pull requests. Setup: secrets `FT_AI_BASE_URL`, `FT_AI_API_KEY`; variables `FT_AI_MODEL`,
 optional `FT_AI_MAX_TOKENS` (default 8000 there) and `EVAL_RUNNER` (a self-hosted runner label
 if the provider is only reachable from your network). Normal CI only unit-tests the scoring code
@@ -50,7 +50,7 @@ Deterministic checks (always), per attempt:
 | `latency_s`, `total_tokens` | cost |
 
 Checks that fail a case: an invented citation, a cited row that doesn't contain a value stated
-next to it (see `app/ai/citations.py`), an expected row not cited, too few citations, a
+next to it (see `forensics/citations.py`), an expected row not cited, too few citations, a
 required term missing, a forbidden term present, no valid suggestion of an expected plugin, any
 invalid suggestion.
 
@@ -65,7 +65,7 @@ report shows mean/min/max/stdev.
 ## Baselines and regressions
 
 ```bash
-python -m evals.run --save-baseline          # writes evals/baselines/<model>.json - commit it
+python -m evals.run --save-baseline          # writes forensics/evals/baselines/<model>.json
 python -m evals.run --fail-on-regression     # exit 1 if a metric dropped vs that baseline
 ```
 
@@ -74,15 +74,16 @@ i.e. 10 points; for `judge_score` 0.4 on the 1-5 scale). Reports also list new c
 missing from the baseline. Save a new baseline when a change is an intended improvement, in the
 same PR, so reviewers can see the before/after.
 
-Every AI answer in the app and every report records `PROMPT_VERSION` (`app/ai/prompts.py`). **Bump
-it whenever you change the prompts or the context format**, so scores and answers can be tied to
-the prompt that produced them.
+Every AI answer in the app and every report records a prompt version such as `p-3fa9c2d1`. It is
+worked out automatically from the prompt files in `forensics/prompts/` and the app's fixed rules,
+so it changes by itself whenever a prompt changes. Use it to tie scores and answers to the prompt
+that produced them.
 
 ## Writing a case
 
-One YAML file per case in `evals/cases/`. Use **real** captured `vol -r jsonl` output as fixtures
-(see `docs/DEVELOPMENT.md`, "Fixtures"); the two `*_example.yaml` cases use a synthetic fixture and
-only demonstrate the format.
+One YAML file per case in `forensics/evals/cases/`. Use **real** captured `vol -r jsonl` output
+from `forensics/fixtures/` (see the README there); the `*_example.yaml` cases use synthetic
+fixtures and only demonstrate the format.
 
 ```yaml
 id: pslist-unusual-parent          # unique; defaults to the file name

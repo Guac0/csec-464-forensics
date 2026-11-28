@@ -20,6 +20,7 @@ dependencies = [
 volatility = ["volatility3>=2.7"]
 dev = [
     "pytest>=8",
+    "pytest-xdist>=3.5",  # parallel tests: `pytest -n auto` (CI uses it)
     "ruff>=0.6",
     "pre-commit>=3.7",
     "pyyaml>=6",  # evaluation case files (evals/)
@@ -31,7 +32,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "forensics*"]
 
 [tool.setuptools.package-data]
 app = [

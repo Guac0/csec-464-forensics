@@ -10,14 +10,12 @@ FROM ${PYTHON_IMAGE}
 
 ARG APP_UID=1000
 ARG APP_GID=1000
-ARG VERSION=0.1.0-dev
-ARG VCS_REF=unknown
 
 LABEL org.opencontainers.image.title="forensics-tool" \
-      org.opencontainers.image.description="PoC: single-user web GUI for AI-assisted volatility3 RAM analysis" \
-      org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.revision="${VCS_REF}"
-# (source/created/etc. labels are added by docker/metadata-action in publish.yml)
+      org.opencontainers.image.description="PoC: single-user web GUI for AI-assisted volatility3 RAM analysis"
+# (version/revision labels are set at the END of this file: VCS_REF changes on every commit, and
+# Docker rebuilds every step after the first one that uses a changed build arg. Source/created/
+# etc. labels are added by docker/metadata-action in publish.yml.)
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -47,6 +45,7 @@ EOF
 
 # --- Application layer ---------------------------------------------------------------------
 COPY app ./app
+COPY forensics ./forensics
 # Editable install: registers the package (`pip install .[volatility]` equivalent, deps are
 # already present) while serving templates/static straight from /app/app.
 RUN pip install --no-deps --no-build-isolation -e ".[volatility]"
@@ -74,3 +73,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s -
     CMD ["python", "-c", "import sys, urllib.request as u; r = u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8000/health', timeout=4); sys.exit(0 if r.status == 200 else 1)"]
 
 CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+
+# Per-build values last, so a new commit (VCS_REF) or version does not invalidate the cached
+# dependency and application layers above.
+ARG VERSION=0.1.0-dev
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}"

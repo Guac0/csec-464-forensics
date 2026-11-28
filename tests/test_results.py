@@ -9,12 +9,10 @@ import json
 from typing import Any
 
 import pytest
-from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app import db
 from app.config import Settings
 from app.models import AuditEvent, Evidence, ResultRow, Run, RunStatus
 from app.services import evidence as evidence_service
@@ -262,41 +260,6 @@ def test_get_rows_service_signature(session: Session, evidence: Evidence) -> Non
 
 
 # ------------------------------------------------------------------------------- migration
-
-
-def test_migration_backfills_columns(settings: Settings) -> None:
-    engine = create_engine(f"sqlite:///{settings.data_dir / 'upgrade.db'}")
-    cfg = db.alembic_config()
-    with engine.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.upgrade(cfg, "0005_artifacts")
-        conn.execute(
-            text(
-                "INSERT INTO evidence (id, rel_path, size_bytes, mtime, description, created_at) "
-                "VALUES (1, 'a.raw', 1, 0, '', '2026-01-01 00:00:00')"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO runs (id, evidence_id, tool, plugin, args, origin, status, "
-                "created_at, row_count, chain_depth) VALUES (1, 1, 'volatility3', 'p', '{}', "
-                "'MANUAL', 'SUCCEEDED', '2026-01-01 00:00:00', 2, 0)"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO result_rows (run_id, row_idx, depth, data) VALUES "
-                """(1, 0, 0, '{"A": 1, "B": "x"}'), (1, 1, 0, '{"A": 2.5, "C": null}')"""
-            )
-        )
-    db.migrate(engine)
-    with engine.connect() as conn:
-        cols = json.loads(conn.execute(text("SELECT columns FROM runs WHERE id = 1")).scalar_one())
-    assert cols == [
-        {"name": "A", "type": "float"},
-        {"name": "B", "type": "str"},
-        {"name": "C", "type": "null"},
-    ]
 
 
 def test_worker_ingest_records_columns(session: Session, evidence: Evidence, monkeypatch) -> None:  # noqa: ANN001

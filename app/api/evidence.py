@@ -197,7 +197,7 @@ def cleanup(evidence_id: int, body: CleanupIn, session: SessionDep) -> dict[str,
 
 @router.get("/{evidence_id}/recommendations")
 def get_recommendations(evidence_id: int, session: SessionDep) -> dict[str, Any]:
-    """Recommended next plugins from the investigation guide (app/tools/volatility/guide.py):
+    """Recommended next plugins from the investigation guide (baseline/next in forensics/plugins/):
     remaining baseline steps first, then follow-ups of succeeded runs. See CONTRACTS.md."""
     from app.services import recommendations
 

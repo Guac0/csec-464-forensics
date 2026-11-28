@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import service as ai_service
 from app.ai.client import AIClient
+from app.ai.prompts import prompt_version
 from app.config import Settings, get_settings
 from app.models import AuditEvent, DerivedArtifact, Evidence, Run, RunStatus
 from app.services import audit, export, integrity, results, sharing
@@ -163,7 +164,7 @@ def test_evidence_report_content_and_scope(session: Session, case: dict) -> None
     assert "**high** Odd" in report and f"rows R{run.id}:1" in report
     assert "`pid.4.dmp`" in report and hashlib.sha256(case["dumped"]).hexdigest() in report
     assert export.AI_LABEL.split(" — ")[0].replace("-", "\\-") in report
-    assert "2 (1 invalid: R" in report and "`placeholder-4`" in report
+    assert "2 (1 invalid: R" in report and f"`{prompt_version()}`" in report
     assert "Analyst note" in report
     # Scope: other images' data and case notes are not in a per-evidence export, except what
     # was explicitly shared to its case, in its own labelled section.
@@ -350,9 +351,7 @@ def test_citations_summary_support_states() -> None:
                 "support": "unsupported",
                 "unsupported_values": ["PID/port 9"],
             },
-            {"key": "R1:4", "valid": True},  # stored before support checking existed
         ]
     )
-    assert out.startswith("4 (1 invalid: R1:2; 1 cited row(s) don't support the stated values: ")
+    assert out.startswith("3 (1 invalid: R1:2; 1 cited row(s) don't support the stated values: ")
     assert "R1:3" in out and "PID/port 9" in out
-    assert "value support not checked (older answer)" in out

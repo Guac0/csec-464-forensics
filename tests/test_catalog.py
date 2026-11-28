@@ -6,14 +6,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.services import health
+from app.tools import content
 from app.tools.base import ArgSpec, ArgValidationError, PluginSpec, ToolRequest
-from app.tools.volatility import plugins as plugin_catalog
 from app.tools.volatility.runner import VolatilityRunner, catalog_problems
 
 
 def test_shipped_catalog_is_valid() -> None:
-    """Fails CI when someone adds an invalid entry to app/tools/volatility/plugins.py."""
-    assert catalog_problems(plugin_catalog.PLUGINS) == {}
+    """Fails CI when someone adds an invalid entry to the test content (tests/content/)."""
+    assert catalog_problems(content.current().plugins) == {}
 
 
 @pytest.mark.parametrize(
@@ -63,7 +63,7 @@ def test_duplicates_are_both_skipped() -> None:
 def test_invalid_entries_are_skipped_not_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
     good = PluginSpec("good.Good")
     bad = PluginSpec("bad", args=(ArgSpec("x", "--x", "str"),))
-    monkeypatch.setattr(plugin_catalog, "PLUGINS", [good, bad])
+    monkeypatch.setattr(content.current(), "plugins", [good, bad])
     runner = VolatilityRunner()
     assert [p.name for p in runner.plugins()] == ["good.Good"]
     assert list(runner.catalog_problems()) == ["bad"]
@@ -87,7 +87,7 @@ def test_system_page_and_form_show_catalog_state(
     assert "writes files" in form
 
     monkeypatch.setattr(
-        plugin_catalog, "PLUGINS", [*plugin_catalog.PLUGINS, PluginSpec("windows.broken")]
+        content.current(), "plugins", [*content.current().plugins, PluginSpec("windows.broken")]
     )
     check = health.check_catalog()
     assert check.status == "fail" and "Skipped: windows.broken" in dict(check.details)

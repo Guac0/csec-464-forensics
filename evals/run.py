@@ -3,7 +3,7 @@
     python -m evals.run                         # all cases, 3 repeats, model from FT_AI_MODEL
     python -m evals.run --cases pstree-example --repeat 5
     python -m evals.run --judge                 # also grade answers with an AI judge
-    python -m evals.run --save-baseline         # store results as evals/baselines/<model>.json
+    python -m evals.run --save-baseline         # store as forensics/evals/baselines/<model>.json
     python -m evals.run --fail-on-regression    # exit 1 if a metric dropped vs the baseline
 
 Exit codes: 0 ok, 1 regression (with --fail-on-regression), 2 no matching cases, 3 every attempt
@@ -37,7 +37,7 @@ from evals import scoring
 from evals.cases import CASES_DIR, Case, load_cases
 
 EVALS_DIR = Path(__file__).resolve().parent
-BASELINES_DIR = EVALS_DIR / "baselines"
+BASELINES_DIR = EVALS_DIR.parent / "forensics" / "evals" / "baselines"
 REPORTS_DIR = EVALS_DIR / "reports"
 
 ClientFactory = Callable[[Any], Any]  # settings -> AIClient
@@ -238,12 +238,10 @@ def run_attempt(
         client = client_factory(get_settings())
         started = time.perf_counter()
         if case.summarize_run is not None:
-            from app.ai.prompts import SUMMARIZE_RUN_QUESTION
+            from app.ai.prompts import run_summary_question
 
             target = run_ids[case.summarize_run]
-            question = SUMMARIZE_RUN_QUESTION.format(
-                run_id=target, plugin=case.runs[case.summarize_run].plugin
-            )
+            question = run_summary_question(target, case.runs[case.summarize_run].plugin)
             msg = ai_service.summarize_run(session, target, client=client)
         elif case.recommend is not None:
             from app.ai.prompts import RECOMMEND_DISPLAY
@@ -385,7 +383,7 @@ def main(argv: list[str] | None = None, client_factory: ClientFactory | None = N
     args = parser.parse_args(argv)
 
     from app.ai.client import AIClient
-    from app.ai.prompts import PROMPT_VERSION
+    from app.ai.prompts import prompt_version
     from app.config import get_settings
 
     if args.model:
@@ -424,7 +422,7 @@ def main(argv: list[str] | None = None, client_factory: ClientFactory | None = N
     report = {
         "meta": {
             "model": model,
-            "prompt_version": PROMPT_VERSION,
+            "prompt_version": prompt_version(),
             "provider_base_url": settings.ai_base_url,
             "repeat": args.repeat,
             "cases": len(cases),
@@ -458,7 +456,7 @@ def main(argv: list[str] | None = None, client_factory: ClientFactory | None = N
             json.dumps(
                 {
                     "model": model,
-                    "prompt_version": PROMPT_VERSION,
+                    "prompt_version": prompt_version(),
                     "created_at": created,
                     "repeat": args.repeat,
                     "cases": aggregate,

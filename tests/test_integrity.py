@@ -9,9 +9,8 @@ import time
 from pathlib import Path
 
 import pytest
-from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import select, text
 from sqlalchemy.exc import DatabaseError
 from sqlalchemy.orm import Session
 
@@ -384,24 +383,3 @@ def test_ui(client: TestClient, session: Session, mode) -> None:  # noqa: ANN001
     client.post(f"/ui/evidence/{ev_id}/acknowledge", data={"reason": "lab copy"})
     page = client.get(f"/evidence/{ev_id}").text
     assert "mismatch (acknowledged)" in page and "lab copy" in page
-
-
-def test_migration_backfills_existing_hashes(settings: Settings) -> None:
-    engine = create_engine(f"sqlite:///{settings.data_dir / 'upgrade.db'}")
-    cfg = db.alembic_config()
-    with engine.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.upgrade(cfg, "0003_audit")
-        conn.execute(
-            text(
-                "INSERT INTO evidence (id, rel_path, size_bytes, mtime, sha256, description, "
-                "created_at) VALUES (3, 'old.raw', 10, 1.5, :h, '', '2026-01-01 00:00:00')"
-            ),
-            {"h": SHA256},
-        )
-    db.migrate(engine)
-    with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT evidence_id, kind, result, sha256 FROM integrity_checks")
-        ).one()
-    assert tuple(row) == (3, "initial", "ok", SHA256)

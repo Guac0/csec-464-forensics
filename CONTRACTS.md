@@ -1,3 +1,5 @@
+> Written mainly for AI coding assistants. People: start with README.md or forensics/README.md.
+
 # Module Contracts (Basic Version / PoC)
 
 Single-user, local-workstation PoC: FastAPI + Jinja/HTMX UI + in-process job worker + SQLite,
@@ -14,7 +16,10 @@ auto-enumeration list, per-plugin parsing/summaries, OS detection and the analys
 - `app/db.py` — `Base`, `init_engine()`, `migrate()`, `alembic_config()`,
   `SessionLocal`, `get_session()`
 - `app/migrations/versions/` — applied migrations are never edited; every change to
-  `app/models.py` ships with a new migration in the same PR (see docs/DEVELOPMENT.md)
+  `app/models.py` ships with a new migration in the same PR (see docs/DEVELOPMENT.md).
+  Migrations 0001-0017 were squashed into `0001_initial` at the handoff (migration numbers
+  below are historical); `db.migrate()` refuses pre-squash databases (`RuntimeError`) and runs
+  with `PRAGMA foreign_keys=OFF`.
 - `app/models.py` — `Evidence`, `Run`, `RunStatus`, `RunOrigin`, `ResultRow`, `Note`, `AIMessage`
 - `app/tools/base.py` — `ToolRunner`, `PluginSpec`, `ArgSpec`, `ToolRequest`, `ParsedRow`,
   `ExecutionResult`, `ArgValidationError`
@@ -60,16 +65,42 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   (no shell; stdout/stderr streamed to files in run_dir; kills process group on timeout/cancel)
 - `app/tools/registry.py`: `get_runner(name: str = "volatility3") -> ToolRunner`, `available_tools() -> list[str]`
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
-- `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
-- `app/tools/volatility/guide.py`: `BASELINE: list[Step]`, `NEXT: dict[plugin, list[Step]]` —
-  **TODO(forensics)**; EXAMPLE content. `Step` = `app.tools.base.GuideStep(plugin, reason,
+- `app/tools/content.py` (forensics content loader): `Plugin(name, description, args, presets,
+  auto_enumerate, timeout_seconds, writes_files, compare_keys, compare_ignore, baseline, next)`
+  (`.spec -> PluginSpec`, `.post_run(version, name, description)` decorator, hook name
+  `<os>.<module>.<func>`), `Baseline(order, reason, args={})`, `Preset(label, **args)`,
+  `expected_module(plugin_name)`, `load(root) -> Content(root, plugins, baseline, next,
+  problems, modules)`, `current()`, `reload()`, `use_root(root)` (tests; also resets hook
+  packages/registry), `iter_modules`, `module_file`. Plugins sorted by name; baseline by
+  `(order, name)`; bad files skipped, problems keyed by file path. Lock order: hook registry
+  lock, then content lock (import deadlock otherwise).
+- `forensics/` (**TODO(forensics)**, team-owned): `sdk.py` (re-exports `Arg`=ArgSpec,
+  `Next`=GuideStep, `Plugin`, `Baseline`, `Preset`, `HookContext`, `post_run`), `common.py`
+  (`PID_FILTER`), `plugins/<os>/<module>.py` each defining `PLUGIN`, `plugins/_template.py`
+  (not loaded; checked by tests), `hooks/` (cross-plugin hooks). `GuideStep(plugin, reason,
   args={}, when="succeeded"|"has_rows"|"has_flags"|"tag:<tag>", priority=0)`.
+- Tests: infrastructure tests use the frozen copy `tests/content/` (session fixture in
+  conftest: `content.use_root("tests.content")`; change catalog/guide via
+  `monkeypatch.setattr(content.current(), "plugins"|"baseline"|"next", ...)`). Only
+  `tests/test_forensics_content.py` loads `forensics/`.
 
 ### Investigation guide and recommendations
 - `ToolRunner.guide() -> InvestigationGuide(baseline, next)` (default empty).
 - `app/tools/guide.py`: `check_guide(runner) -> (valid guide with normalised args, [GuideProblem])`
   (invalid steps skipped), `to_markdown(runner)`, `main()` (CLI `python -m
-  app.tools.volatility.guide`, exit 1 on problems), `describe_when`, `args_key`.
+  app.tools.guide`, also `python -m forensics guide`; exit 1 on problems; problem `where` names the
+  content file), `describe_when`, `args_key`.
+- `app/tools/content_report.py`: `build_report() -> ContentReport(root, plugins: [PluginStatus],
+  prompts, citations, eval_cases, baselines, errors, todo; .ok)` on the current content root
+  (errors = broken/CI-failing; todo = EXAMPLE/TODO markers, missing fixtures/baselines),
+  `to_text(report)`, `fixture_columns(path)`. evals import optional (not in the image).
+- `app/tools/content_cli.py` (`python -m forensics` via `forensics/__main__.py`): `check`
+  (exit 1 on errors), `guide`, `new <plugin> [--no-vol]` (`cmd_new(plugin, root=None,
+  use_vol=True)`: writes `plugins/<os>/<module>.py`, pastes `vol <plugin> -h` options via
+  `vol_help(plugin) -> (text|None, version|why)`, refuses bad names (2) / existing (1)).
+- `/content` (app/web/content_pages.py, template content.html): read-only report page; nav link
+  "Content"; linked from /system and /guide. CI job `forensics-content` runs the check + content
+  tests; the `test` job ignores tests/test_forensics_content.py.
 - `app/services/recommendations.py`: `recommend(session, evidence_id) -> Recommendations`
   (`items` best first, `dismissed`, `baseline_total/done`, `identified`, `guide_problems`;
   `as_dict()`), `dismiss` / `restore` (table `dismissed_recommendations`, migration 0012),
@@ -122,11 +153,14 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `GET /api/system/biggest-runs`. Audit `backup.create|failed|prune|restore`.
 
 ### AI evaluation harness
-- `evals/` (dev tooling, not shipped in the image): `python -m evals.run` (CLI), `evals/cases/*.yaml`
-  (cases), `evals/scoring.py` (pure scoring/aggregation/baseline comparison), `evals/judge.py`
-  (optional AI judge), `evals/baselines/<model>.json` (committed), `evals/reports/` (ignored).
-- `app/ai/prompts.PROMPT_VERSION`: bump on any prompt/context change; stored in
-  `AIMessage.params["prompt_version"]`, the `ai.*.request` audit event and eval reports.
+- `evals/` (dev tooling, not shipped in the image): `python -m evals.run` (CLI; `--cases-dir`,
+  default `evals.cases.CASES_DIR` = `forensics/evals/cases/`), `evals/scoring.py` (pure
+  scoring/aggregation/baseline comparison), `evals/judge.py` (optional AI judge),
+  `forensics/evals/baselines/<model>.json` (committed), `evals/reports/` (ignored). Infra tests
+  use `tests/content/evals/cases/` (copies referencing `tests/fixtures/`).
+- `app/ai/prompts.prompt_version()`: `p-<sha256[:8]>` of the guidance files + fixed rules (no
+  manual bump); stored in `AIMessage.params["prompt_version"]`, the `ai.*.request` audit event,
+  exports and eval reports.
 - Manual GitHub workflow `.github/workflows/evals.yml` (provider from repo secrets).
 
 ### Large results
@@ -136,7 +170,7 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `export_rows(session, run, view, "csv"|"jsonl")`, `store_rows(...)` (worker ingest: columns +
   optional index), `index_run(session, run_id)`, `ColumnTracker`, `parse_filter`.
 - `Run.columns` ([{name, type}] recorded at ingest), `Run.search_indexed`. FTS5 table
-  `result_rows_fts` (rowid = result_rows.id) is created by migration 0006 and ignored by the ORM
+  `result_rows_fts` (rowid = result_rows.id) is created by `0001_initial` and ignored by the ORM
   (`app/migrations/env.py` UNMANAGED_TABLE_PREFIXES).
 - API: `GET /api/runs/{id}/rows` (+ `sort`, `desc`, `f.<column>`), `GET /api/runs/{id}/export?
   format=csv|jsonl|raw` (+ view params; audited key_read), `POST /api/runs/{id}/search-index`.
@@ -206,8 +240,7 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - Models `Case`, `CaseEvidence` (case_id, evidence_id, label; many-to-many), `SharedItem`
   (case_id, kind row|finding|note|ai_answer, source_evidence_id, source_key "R12:3"/"F12:hook/
   title"/"N7"/"A9", comment, source_sha256 at share time). `Note.case_id` (a note has exactly one
-  of evidence_id / case_id), `NoteVersion.case_id`. Migration `0009_cases` moves global notes
-  into a "General" case.
+  of evidence_id / case_id), `NoteVersion.case_id`.
 - `app/services/cases.py`: create/update/delete (empty only)/list, add_evidence, set_label,
   remove_evidence (un-shares its items), cases_for_evidence, member_evidence, labels.
 - `app/services/sharing.py`: `share(session, case_id, kind, ...)`, `unshare`, `list_items`,
@@ -237,21 +270,33 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `HookContext` (`rows`, `latest_run`, `annotate`, `add_finding`, `update_evidence_metadata`,
   `queue_follow_up`), `run_hooks(session, run_id) -> list[dict]`, `load_hooks()`,
   `registered_hooks()`, `hooks_for(tool, plugin)`, `load_errors()`, `SEVERITIES`.
-- `app/tools/volatility/hooks/*.py`: hook modules, auto-discovered — **TODO(forensics)**.
+- Hook modules: discovered recursively in `HOOK_PACKAGES` (default `forensics.plugins`,
+  `forensics.hooks`; `set_packages()` clears the registry), `_*` parts skipped — **TODO(forensics)**.
+  `registry_lock()` exposes the registry RLock (taken by app.tools.content first).
 - Stored on `Run`: `hook_results`, `findings`, `parent_run_id`, `triggered_by_hook`, `chain_depth`;
   on `ResultRow`: `annotations`. `RunOrigin.HOOK` marks follow-up runs (not accepted from the API).
 - API: `GET /api/hooks`, `POST /api/runs/{id}/hooks/rerun`, rows filter `?annotated=true&tag=`.
 
 ### AI layer
 - `app/ai/client.py`: `AIClient(settings, transport=None).chat(messages, **overrides) -> AIResult`
-- `app/ai/context.py`: `build_context(session, evidence_id, run_ids=None, row_refs=None) -> tuple[str, dict]`
-- `app/ai/prompts.py`: system prompt templates — **TODO(forensics)** refine
+- `app/ai/context.py`: `build_context(session, evidence_id, run_ids=None, row_refs=None) -> tuple[str, dict]`;
+  per plugin `content.current().ai[plugin]` (`AIRows(settings=AIContext(max_rows, columns),
+  select)`): `max_rows` replaces `max_rows_per_run`, `columns` filters `format_row(row,
+  columns)`, `select(rows: Iterator[HookRow]) -> Iterable[row_idx]` picks rows (capped; errors
+  fall back to first rows with a header note); hook-flagged rows always added.
+- `app/ai/prompts.py`: fixed rules (`ANALYSIS_RULES`, `RECOMMEND_RULES`, `AGENT_RULES`,
+  `AGENT_TEXT_PROTOCOL`) appended to team guidance `<root>/prompts/{analysis,run_summary,
+  recommend_next,agent}.md` (leading `<!-- -->` stripped; `{run_id}`/`{plugin}` replaced
+  literally; missing file = no guidance). API: `guidance(name)`, `build_system_prompt(tool)`,
+  `run_summary_question(run_id, plugin)`, `recommend_question(focus)`,
+  `agent_system_prompt(max_runs, max_steps)`, `prompt_version()`, `render_allowlist`.
+- `app/ai/citations.py` tunables from `<root>/citations.py` (`FILE_EXTENSIONS`, `NUMBER_LABELS`,
+  `TRUNCATED_NAME_LENGTH`; defaults `DEFAULT_*`), compiled + cached per value set.
 - `app/ai/citations.py`: `extract_citations(text) -> list[str]`, `validate_citations(session, text) -> list[dict]`
   - Each citation dict (stored in `AIMessage.citations`): `key`, `run_id`, `row_idx`, `url`,
     `valid` (row exists), `support` (`supported` | `unsupported` | `unchecked` | `not_found`),
     `checked` and `unsupported_values` (typed values from the same sentence, see
-    `extract_values`). Answers stored before this field have no `support`:
-    `citation_status(c)` returns `not_checked` for them. Audit `ai.*.response` details include
+    `extract_values`); `citation_status(c)` (missing `support` = `unchecked`). Audit `ai.*.response` details include
     `unsupported_citations`; evals metric `citation_support`.
 - `app/ai/suggestions.py`: `parse_suggestions(text) -> list[dict]`, `validate_suggestions(list) -> list[dict]`
 - `app/ai/service.py`: `ask(session, evidence_id, question, run_ids=None, row_refs=None) -> AIMessage`,

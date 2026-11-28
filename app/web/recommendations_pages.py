@@ -1,5 +1,5 @@
 """UI for the investigation guide: the "Recommended next" panel on the image page and the
-read-only /guide page (see app/services/recommendations.py and app/tools/volatility/guide.py)."""
+read-only /guide page (see app/services/recommendations.py and forensics/README.md)."""
 
 from __future__ import annotations
 
