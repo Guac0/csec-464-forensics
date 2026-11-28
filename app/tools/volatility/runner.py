@@ -200,6 +200,9 @@ def vol_command(executable: str) -> list[str]:
     """The command that starts volatility: ``FT_VOL_EXECUTABLE``, except that a ``.py`` script
     is run with the current Python interpreter. (Windows cannot execute scripts directly; this
     is how tests run tests/fixtures/fake_vol.py, and works the same on Linux/macOS.)"""
+    path = Path(executable)
+    if not path.is_absolute() and ("/" in executable or "\\" in executable):
+        executable = str(path.resolve())
     if executable.lower().endswith(".py"):
         return [sys.executable, executable]
     return [executable]
@@ -264,20 +267,20 @@ class VolatilityRunner(ToolRunner):
         args = self.validate(request)
         spec = self.get_plugin(request.plugin)
         settings = get_settings()
-        cache_dir = settings.data_dir / "vol_cache"
+        cache_dir = settings.data_dir.resolve() / "vol_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)  # vol requires it to exist
 
         argv = [
             *vol_command(settings.vol_executable),
             "-q",
             "-r", "jsonl",
-            "-s", str(settings.symbols_dir),
+            "-s", str(settings.symbols_dir.resolve()),
             "--cache-path", str(cache_dir),
-            "-o", str(output_dir),
+            "-o", str(output_dir.resolve()),
         ]  # fmt: skip
         if self.offline:
             argv.append("--offline")
-        argv += ["-f", str(evidence_path), spec.name]
+        argv += ["-f", str(evidence_path.resolve()), spec.name]
 
         for arg in spec.args:  # catalog order => deterministic argv
             if arg.name not in args:

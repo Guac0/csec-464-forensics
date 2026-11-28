@@ -100,12 +100,24 @@ Team workflow, branch rules and guidance for AI coding assistants:
 - _TODO: describe OS detection and what is shown per image._
 
 ### Volatility plugins
-- **Status:** TODO
-- _TODO: list the supported plugins, what each is used for, and their allowed arguments._
+
+The app exposes these Windows plugins from Volatility 3, verified with version 2.28.2.
+All listed arguments are optional. For plugins with a PID filter, enter one or more PIDs
+separated by spaces or commas.
 
 | Plugin | Purpose | Arguments | Auto-enumerate |
 |---|---|---|---|
-| _e.g. `windows.pslist.PsList`_ | _TODO_ | _TODO_ | _TODO_ |
+| `windows.info.Info` | Windows version and kernel details | — | Yes |
+| `windows.pslist.PsList` | Active process list | PID filter, dump process executables | Yes |
+| `windows.pstree.PsTree` | Parent-child process tree | — | — |
+| `windows.psscan.PsScan` | Process objects in memory, including remnants of exited processes | — | — |
+| `windows.cmdline.CmdLine` | Process command lines | PID filter | — |
+| `windows.dlllist.DllList` | Loaded DLLs and their paths by process | PID filter | — |
+| `windows.handles.Handles` | Open object handles by process | PID filter | — |
+| `windows.malware.malfind.Malfind` | Memory regions that may contain injected code | PID filter | — |
+| `windows.netscan.NetScan` | TCP connections, TCP listeners, and UDP endpoints | — | — |
+| `windows.svcscan.SvcScan` | Windows service records, including names and states | — | — |
+| `windows.filescan.FileScan` | File objects and their paths | — | — |
 
 ### Preset queries
 - **Status:** TODO

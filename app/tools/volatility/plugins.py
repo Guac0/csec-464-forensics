@@ -2,11 +2,6 @@
 
 Only plugins listed here can ever be run, and only with the args declared in their ArgSpecs.
 
-=====================================================================================
-TODO(forensics): this catalog is owned by the forensic analysts. The two entries below
-are EXAMPLES that prove the mechanism works; replace/extend them with the real catalog.
-=====================================================================================
-
 How to add a plugin
 -------------------
 1. ``name`` must be the FULL volatility3 plugin name exactly as listed by ``vol -h``
@@ -65,29 +60,26 @@ from app.tools.base import ArgSpec, PluginSpec
 #   - windows.pslist.PsList: `--pid [PID ...]` is ListRequirement(name="pid", element_type=int,
 #     optional=True); `--dump` is BooleanRequirement(name="dump", default=False) ("Extract listed
 #     processes"); dumped files are named in the "File output" column. --physical not exposed.
+_PID_FILTER = ArgSpec(
+    name="pid",
+    flag="--pid",
+    type="int_list",
+    help="Only include these process IDs",
+)
+
 PLUGINS: list[PluginSpec] = [
-    # EXAMPLE entry - TODO(forensics): review/replace.
     PluginSpec(
         name="windows.info.Info",
-        description="EXAMPLE: OS & kernel details of the memory sample.",
+        description="Show Windows version and kernel details from the memory image.",
         auto_enumerate=True,
         # EXAMPLE comparison keys: a row is one variable; "changed" = its value differs.
         compare_keys=("Variable",),
     ),
-    # EXAMPLE entry - TODO(forensics): review/replace.
     PluginSpec(
         name="windows.pslist.PsList",
-        description="EXAMPLE: processes from the active process list.",
+        description="List processes from the active process list.",
         args=(
-            ArgSpec(
-                name="pid",
-                flag="--pid",
-                type="int_list",
-                help="Only include these process IDs",
-            ),
-            # EXAMPLE of a file-writing option - TODO(forensics): decide which plugins may dump.
-            # Output goes to runs/<id>/output, is hashed and downloadable (see
-            # app/services/artifacts.py), and is capped by FT_MAX_ARTIFACT_BYTES.
+            _PID_FILTER,
             ArgSpec(
                 name="dump",
                 flag="--dump",
@@ -103,21 +95,64 @@ PLUGINS: list[PluginSpec] = [
     ),
     # EXAMPLE entries below exist so the EXAMPLE investigation guide (guide.py) has something to
     # recommend. TODO(forensics): review descriptions, options, timeouts and compare keys.
-    PluginSpec(
-        name="windows.pstree.PsTree",
-        description="EXAMPLE: processes as a parent/child tree.",
-        args=(ArgSpec(name="pid", flag="--pid", type="int_list", help="Only these process IDs"),),
-        compare_keys=("ImageFileName",),
-    ),
-    PluginSpec(
-        name="windows.cmdline.CmdLine",
-        description="EXAMPLE: command line of each process.",
-        args=(ArgSpec(name="pid", flag="--pid", type="int_list", help="Only these process IDs"),),
-        compare_keys=("Process", "Args"),
-    ),
+    # PluginSpec(
+    #    name="windows.pstree.PsTree",
+    #    description="EXAMPLE: processes as a parent/child tree.",
+    #    args=(ArgSpec(name="pid", flag="--pid", type="int_list", help="Only these process IDs"),),
+    #    compare_keys=("ImageFileName",),
+    # ),
+    # PluginSpec(
+    #    name="windows.cmdline.CmdLine",
+    #    description="EXAMPLE: command line of each process.",
+    #    args=(ArgSpec(name="pid", flag="--pid", type="int_list", help="Only these process IDs"),),
+    #    compare_keys=("Process", "Args"),
+    # ),
+    # TODO these were manually created before Andrew's refactor and may need to
+    # be updated to the new standard/functionality
     PluginSpec(
         name="windows.netscan.NetScan",
         description="EXAMPLE: network connections and listening sockets (pool scan; slow).",
         compare_keys=("Proto", "LocalAddr", "LocalPort", "ForeignAddr", "ForeignPort", "Owner"),
+        presets=(("PID 4 (System)", {"pid": [4]}),),
+    ),
+    PluginSpec(
+        name="windows.pstree.PsTree",
+        description="Show processes in a tree grouped by parent process.",
+    ),
+    PluginSpec(
+        name="windows.psscan.PsScan",
+        description="Scan memory for process objects, including remnants of exited processes.",
+    ),
+    PluginSpec(
+        name="windows.cmdline.CmdLine",
+        description="Show the command line used to start each process.",
+        args=(_PID_FILTER,),
+    ),
+    PluginSpec(
+        name="windows.dlllist.DllList",
+        description="List loaded DLLs and their paths by process.",
+        args=(_PID_FILTER,),
+    ),
+    PluginSpec(
+        name="windows.handles.Handles",
+        description="List open object handles by process.",
+        args=(_PID_FILTER,),
+    ),
+    PluginSpec(
+        name="windows.malware.malfind.Malfind",
+        description="Flag process memory regions that may contain injected code.",
+        args=(_PID_FILTER,),
+    ),
+    PluginSpec(
+        name="windows.netscan.NetScan",
+        description="Scan for TCP connections, TCP listeners, and UDP endpoints.",
+    ),
+    PluginSpec(
+        name="windows.svcscan.SvcScan",
+        description="Scan for Windows service records, including service names and states.",
+    ),
+    PluginSpec(
+        name="windows.filescan.FileScan",
+        description="Scan memory for Windows file objects and report their paths.",
     ),
 ]

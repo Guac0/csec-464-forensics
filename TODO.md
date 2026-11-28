@@ -49,8 +49,8 @@ Checklist of what is left after the infrastructure scaffold. Tick items off as t
 Everything marked `TODO(forensics)` in the code. Find it with `git grep -n "TODO(forensics)"`;
 the background is in [app/tools/volatility/README.md](app/tools/volatility/README.md).
 
-- [ ] **Plugin catalog** — `app/tools/volatility/plugins.py`: replace the two EXAMPLE entries with
-      the real allowlist of plugins and arguments.
+- [x] **Plugin catalog** — add the Windows triage allowlist and supported PID filters in
+      `app/tools/volatility/plugins.py`.
 - [ ] **Preset queries** — add `presets` to each plugin.
 - [ ] **Investigation guide** — `app/tools/volatility/guide.py`: replace the EXAMPLE baseline and
       "after X, suggest Y" steps with the team's workflow (how-to: README.md in that folder,
