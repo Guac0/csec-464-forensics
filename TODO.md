@@ -84,8 +84,11 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] **Audit level:** `FT_AUDIT_LEVEL` defaults to `all` (every page/API request) for the PoC.
       Switch the default in `app/config.py` to `key_reads` when evaluation is over.
 - [ ] Audit log has no retention/archiving; at level `all` it grows with every request.
-- [ ] Add `.github/workflows/evals.yml` (provided separately) and the repo secrets
-      `FT_AI_BASE_URL`, `FT_AI_API_KEY` + variable `FT_AI_MODEL` for manual evaluation runs.
+- [ ] Replace `.github/workflows/evals.yml` with the updated version (provided separately: provider
+      check, agent tool mode, step summary, save-baseline artifact, optional self-hosted runner)
+      and add the repo secrets `FT_AI_BASE_URL`, `FT_AI_API_KEY` + variables `FT_AI_MODEL`
+      (optional `FT_AI_MAX_TOKENS`, `EVAL_RUNNER`). Check whether the RIT endpoint is reachable
+      from GitHub-hosted runners; if not, use a self-hosted runner. Then save a first baseline.
 - [ ] Large results: decide whether to enable `FT_SEARCH_INDEX` after measuring real runs on the
       team's machines (`python -m scripts.bench_rows --rows 1000000`); existing runs can be
       indexed later with `POST /api/runs/{id}/search-index`.

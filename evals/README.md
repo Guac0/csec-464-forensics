@@ -23,8 +23,15 @@ is printed. Exit codes: 0 ok, 1 regression (with `--fail-on-regression`), 2 no m
 3 every attempt failed with a provider error.
 
 **GitHub:** the manual "AI evaluation" workflow (Actions tab > AI evaluation > Run workflow) runs
-the same command with the provider from repository secrets and attaches the report. It never runs
-on pull requests. Normal CI only unit-tests the scoring code (`tests/test_evals.py`).
+the same command with the provider from repository secrets. It first checks the provider
+(`python -m app.ai.probe`, fails fast if unreachable), then runs the cases you pick (e.g. `agent`,
+`recommend`, or all), puts the summary table on the run page and attaches the reports. Options:
+model, cases, repeats, agent tool protocol, AI judge, fail on regression, and "save baseline"
+(the new baseline is attached as an artifact: commit it to `evals/baselines/` in a PR). It never
+runs on pull requests. Setup: secrets `FT_AI_BASE_URL`, `FT_AI_API_KEY`; variables `FT_AI_MODEL`,
+optional `FT_AI_MAX_TOKENS` (default 8000 there) and `EVAL_RUNNER` (a self-hosted runner label
+if the provider is only reachable from your network). Normal CI only unit-tests the scoring code
+(`tests/test_evals.py`).
 
 ## What is measured
 
