@@ -216,7 +216,7 @@ def test_end_to_end_run_baseline_and_regression(
     assert code == 0
     report = json.loads(next(out.glob("*.json")).read_text())
     assert report["meta"]["prompt_version"] == PROMPT_VERSION
-    assert report["meta"]["model"] == "test-model" and len(report["attempts"]) == 4
+    assert report["meta"]["model"] == "test-model" and len(report["attempts"]) == 6
     parent = report["aggregate"]["pstree-parent-example"]
     assert parent["pass"]["mean"] == 1.0 and parent["judge_score"]["mean"] == 5.0
     assert parent["total_tokens"]["mean"] == 123
@@ -241,3 +241,37 @@ def test_end_to_end_run_baseline_and_regression(
 
 def test_unknown_case_selector(settings: Settings) -> None:
     assert run.main(["--cases", "nope"], mocked_factory(GOOD, [])) == 2
+
+
+def test_recommend_case_and_query_expectations(tmp_path: Path) -> None:
+    case = {c.id: c for c in load_cases()}["recommend-next-example"]
+    assert case.recommend == "" and case.question is None
+    focused = parse_case(
+        {
+            "runs": [{"plugin": "windows.pslist.PsList", "fixture": FIXTURE}],
+            "recommend": "lateral movement",
+            "expect": {
+                "suggest_queries": [{"plugin": "windows.cmdline.CmdLine", "args": {"pid": [4]}}]
+            },
+        },
+        tmp_path / "r.yaml",
+    )
+    assert focused.recommend == "lateral movement"
+    assert focused.expect.suggest_queries == (("windows.cmdline.CmdLine", {"pid": [4]}),)
+    with pytest.raises(CaseError, match="exactly one of"):
+        parse_case(
+            {"runs": [{"plugin": "p.P", "fixture": FIXTURE}], "question": "q", "recommend": True},
+            tmp_path / "x.yaml",
+        )
+
+    expect = scoring.ResolvedExpectations(
+        suggest_queries=(("windows.cmdline.CmdLine", {"pid": [4]}), ("windows.netscan.NetScan", {}))
+    )
+    suggestion = {
+        "plugin": "windows.cmdline.CmdLine",
+        "valid": True,
+        "normalized_args": {"pid": [4], "x": 1},
+    }
+    out = scoring.score_answer("Run cmdline next.", [], [suggestion], expect)
+    assert out["metrics"]["expected_query_recall"] == 0.5
+    assert any("did not suggest expected queries" in c for c in out["failed_checks"])

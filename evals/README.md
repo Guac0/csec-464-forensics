@@ -39,6 +39,7 @@ Deterministic checks (always), per attempt:
 | `cited_sentence_ratio` | sentences carrying a citation / sentences (rough: claims should be cited) |
 | `mention_recall` | required terms present / required terms |
 | `suggestion_validity` | suggested queries that pass the plugin allowlist / suggestions |
+| `expected_query_recall` | expected queries (plugin + options) suggested / expected queries (`suggest_queries`) |
 | `latency_s`, `total_tokens` | cost |
 
 Checks that fail a case: an invented citation, a cited row that doesn't contain a value stated
@@ -91,11 +92,14 @@ runs:                              # recorded tool output, in order (run index 0
     fixture: tests/fixtures/real/win10_pslist.jsonl
     args: {}
 question: Which processes have a parent that is not in the list?   # or: summarize_run: 0
+                                   # or: recommend: true / recommend: "<focus>" ("what next?")
 expect:
   cite_rows: ["0:5"]               # "<run index>:<row index>" that must be cited
   must_mention: ["explorer.exe"]   # case-insensitive substrings
   must_not_mention: ["mimikatz"]   # e.g. things NOT in the data (would be invented)
   suggest_plugins: ["windows.pstree.PsTree"]   # optional: a valid suggestion must use one
+  suggest_queries:                 # optional: each must be suggested (given args must match)
+    - {plugin: windows.cmdline.CmdLine, args: {pid: [2000]}}
   min_citations: 1
 judge:
   rubric: What a good answer contains and must not claim (used only with --judge).

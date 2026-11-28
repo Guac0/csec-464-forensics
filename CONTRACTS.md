@@ -255,8 +255,15 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
     `unsupported_citations`; evals metric `citation_support`.
 - `app/ai/suggestions.py`: `parse_suggestions(text) -> list[dict]`, `validate_suggestions(list) -> list[dict]`
 - `app/ai/service.py`: `ask(session, evidence_id, question, run_ids=None, row_refs=None) -> AIMessage`,
-  `summarize_run(session, run_id) -> AIMessage`
-- `app/api/ai.py`: `/api/ai/...`
+  `summarize_run(session, run_id) -> AIMessage`,
+  `recommend_next(session, evidence_id, focus="") -> AIMessage` ("what should I run next?";
+  context `build_state_context`: runs, hook tags/findings, the guide's static and dismissed
+  recommendations, up to 30 flagged rows; `context_refs["kind"] == "recommend"`; audit
+  `ai.recommend.request|response`), `latest_recommendation(session, evidence_id)`.
+- `Run.ai_message_id` (migration `0013_run_ai_message`): the AI answer whose suggestion started the
+  run; only with origin `ai`, same evidence, assistant message (`runs.create_run(...,
+  ai_message_id=)`, UI form field `ai_message_id`, API `RunCreate.ai_message_id`).
+- `app/api/ai.py`: `/api/ai/...` (incl. `POST /api/ai/recommend {evidence_id, focus}`)
 
 ### Web UI (temporary)
 - `app/web/pages.py`: `router` (HTML pages, HTMX fragments), templates in `app/web/templates`,

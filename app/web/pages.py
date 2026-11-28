@@ -434,7 +434,27 @@ def recommendations_context(
         "recs_all": show_all,
         "recs_shown": recs_svc.DEFAULT_SHOWN,
         "recs_polling": any(r.status in ACTIVE_STATUSES for r in runs),
+        **_ai_recommendation_context(session, evidence_id, runs),
     }
+
+
+def _ai_recommendation_context(
+    session: Session, evidence_id: int, runs: list[Run]
+) -> dict[str, Any]:
+    """Latest "what should I run next?" AI answer for the panel, and how many runs were
+    queued after it (its advice may be out of date)."""
+    latest = getattr(ai_svc, "latest_recommendation", lambda *_: None)(session, evidence_id)
+    newer = 0
+    if latest is not None and latest.created_at is not None:
+        asked = latest.created_at.replace(tzinfo=None)
+        newer = sum(
+            1
+            for r in runs
+            if r.created_at is not None
+            and r.created_at.replace(tzinfo=None) > asked
+            and r.ai_message_id != latest.id
+        )
+    return {"ai_rec": latest, "ai_rec_newer_runs": newer}
 
 
 def _cleanup_summary(session: Session, evidence_id: int) -> dict[str, Any]:
@@ -578,6 +598,39 @@ def ioc_rows(case_id: int | None, run_id: int) -> dict[int, list[str]]:
 
 
 templates.env.globals.update(ioc_rows=ioc_rows)
+
+
+def suggestion_runs(evidence_id: int | None) -> dict[str, dict[str, Any]]:
+    """{step key: {"id", "status"}} of the newest run per plugin + args on an image, so AI
+    suggestions can show "queued / ran (run N)". Keys: recommendations.step_key."""
+    from app.db import SessionLocal
+    from app.services.recommendations import step_key
+
+    if not evidence_id:
+        return {}
+    try:
+        with SessionLocal() as s:
+            runs = s.scalars(
+                select(Run)
+                .where(Run.evidence_id == evidence_id, Run.deleted_at.is_(None))
+                .order_by(Run.id)
+            )
+            return {
+                step_key(r.tool, r.plugin, r.args or {}): {"id": r.id, "status": r.status.value}
+                for r in runs
+            }
+    except Exception:
+        return {}
+
+
+def suggestion_key(s: dict[str, Any]) -> str:
+    from app.services.recommendations import step_key
+
+    args = s.get("normalized_args", s.get("args")) or {}
+    return step_key(s.get("tool") or "volatility3", str(s.get("plugin")), args)
+
+
+templates.env.globals.update(suggestion_runs=suggestion_runs, suggestion_key=suggestion_key)
 templates.env.globals.update(zip_password=lambda: get_settings().artifact_zip_password)
 
 
@@ -893,6 +946,8 @@ def ui_create_run(
     origin = UI_ORIGINS.get(form.get("origin") or "manual", RunOrigin.MANUAL)
     error: str | None = None
     try:
+        raw_msg_id = (form.get("ai_message_id") or "").strip()
+        ai_message_id = int(raw_msg_id) if raw_msg_id and origin == RunOrigin.AI_SUGGESTED else None
         if not plugin_name:
             raise ArgValidationError("choose a plugin")
         if "args_json" in form:  # presets and AI suggestions carry their args as JSON
@@ -908,6 +963,7 @@ def ui_create_run(
             ToolRequest(plugin=plugin_name, args=args),
             origin=origin,
             tool=tool,
+            **({"ai_message_id": ai_message_id} if ai_message_id is not None else {}),
         )
         session.commit()
     except (ValueError, KeyError) as exc:  # ArgValidationError and JSON errors are ValueErrors

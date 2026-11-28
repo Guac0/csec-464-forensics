@@ -62,6 +62,7 @@ class RunOut(BaseModel):
     deleted_at: datetime | None = None
     delete_reason: str | None = None
     chain_depth: int
+    ai_message_id: int | None = None
 
 
 class RunCreate(BaseModel):
@@ -70,6 +71,8 @@ class RunCreate(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     origin: RunOrigin = RunOrigin.MANUAL
     tool: str = "volatility3"
+    # The AI answer whose suggestion this is (origin "ai" only).
+    ai_message_id: int | None = None
 
 
 class RowOut(BaseModel):
@@ -111,6 +114,7 @@ def create_run(body: RunCreate, session: SessionDep) -> Run:
             ToolRequest(plugin=body.plugin, args=body.args),
             origin=body.origin,
             tool=body.tool,
+            ai_message_id=body.ai_message_id,
         )
     except ArgValidationError as exc:
         raise HTTPException(422, str(exc)) from exc

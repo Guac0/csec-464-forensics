@@ -64,7 +64,8 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] **Post-run hooks** — `app/tools/volatility/hooks/` (guide: `hooks/README.md`). Review the
       EXAMPLE `windows_info.py` OS-detection hook against real output, and add hooks that flag
       suspicious rows, summarise runs as findings, and queue sensible follow-up plugins.
-- [ ] **AI prompts** — `app/ai/prompts.py`: the analysis system prompt and the run-summary question.
+- [ ] **AI prompts** — `app/ai/prompts.py`: the analysis system prompt, the run-summary question
+      and the "what should I run next?" question (`RECOMMEND_QUESTION`).
       Bump `PROMPT_VERSION` with each change and compare with `python -m evals.run`.
 - [ ] **Evaluation cases** — replace the two `evals/cases/*_example.yaml` (synthetic fixture) with
       cases built from real captured output, then save a baseline per model you use.

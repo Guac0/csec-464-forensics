@@ -118,6 +118,12 @@ Team workflow, branch rules and guidance for AI coding assistants:
   follow-ups of the image's succeeded runs ("pslist found processes -> run pstree"), some only
   when a hook flagged rows. Each step has a reason; Run it, Edit its options first, Dismiss it
   for this image, or "Run remaining baseline". No AI involved.
+- **Ask AI what to run next** (button on the same panel, optional focus such as "suspect
+  credential theft"): the AI sees the investigation state (runs so far, hook findings, flagged
+  rows, the guide's recommendations) and suggests 1-5 plugins with specific options and a short
+  rationale. The answer appears in the AI chat; the panel shows its runnable suggestions. Runs
+  started from any AI suggestion link back to the answer ("suggested by AI answer N"), and
+  suggestions show when they already ran.
 - The guide is data in `app/tools/volatility/guide.py`; `/guide` shows it, and
   `python -m app.tools.volatility.guide` prints it with any problems. How to extend it:
   [app/tools/volatility/README.md](app/tools/volatility/README.md#investigation-guide).

@@ -131,6 +131,7 @@ def _resolve(case: Case, run_ids: list[int], session: Any) -> scoring.ResolvedEx
         must_mention=case.expect.must_mention,
         must_not_mention=case.expect.must_not_mention,
         suggest_plugins=case.expect.suggest_plugins,
+        suggest_queries=case.expect.suggest_queries,
         min_citations=case.expect.min_citations,
     )
 
@@ -161,6 +162,11 @@ def run_attempt(
                 run_id=target, plugin=case.runs[case.summarize_run].plugin
             )
             msg = ai_service.summarize_run(session, target, client=client)
+        elif case.recommend is not None:
+            from app.ai.prompts import RECOMMEND_DISPLAY
+
+            question = RECOMMEND_DISPLAY + (f" Focus: {case.recommend}" if case.recommend else "")
+            msg = ai_service.recommend_next(session, ev.id, case.recommend, client=client)
         else:
             question = case.question or ""
             msg = ai_service.ask(session, ev.id, question, client=client)

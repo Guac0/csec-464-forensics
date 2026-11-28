@@ -18,6 +18,7 @@
   {% endif %}
 
   {% if msg.suggestions %}
+  {% set sruns = suggestion_runs(ev_id) %}
   <div class="suggestions">
     <div class="small-label">Suggested queries</div>
     {% for s in msg.suggestions %}
@@ -25,13 +26,16 @@
       <div><span class="mono">{{ s.plugin }}</span> <span class="mono small-text">{{ s.get("normalized_args", s.args) | args }}</span></div>
       {% if s.reason %}<div class="prewrap small-text">{{ s.reason }}</div>{% endif %}
       {% if s.valid and ev_id %}
+      {% set srun = sruns.get(suggestion_key(s)) %}
+      {% if srun %}<span class="small-text muted">{{ srun.status }}: <a href="/runs/{{ srun.id }}">run {{ srun.id }}</a></span>{% endif %}
       <form class="inline" method="post" action="/ui/evidence/{{ ev_id }}/runs"
             {% if runs_panel %}hx-post="/ui/evidence/{{ ev_id }}/runs" hx-target="#runs" hx-swap="outerHTML"{% endif %}>
         <input type="hidden" name="plugin" value="{{ s.plugin }}">
         <input type="hidden" name="tool" value="{{ s.tool or 'volatility3' }}">
         <input type="hidden" name="origin" value="ai">
+        <input type="hidden" name="ai_message_id" value="{{ msg.id }}">
         <input type="hidden" name="args_json" value='{{ s.get("normalized_args", s.args) | tojson }}'>
-        <button type="submit" class="small">Run</button>
+        <button type="submit" class="small{% if srun %} secondary{% endif %}">{% if srun %}Run again{% else %}Run{% endif %}</button>
       </form>
       {% else %}
       <button type="button" class="small" disabled>Run</button>

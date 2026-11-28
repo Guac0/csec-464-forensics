@@ -37,6 +37,9 @@ class Expectations:
     must_not_mention: tuple[str, ...] = ()
     suggest_plugins: tuple[str, ...] = ()  # at least one valid suggestion uses one of these
     min_citations: int = 0
+    # Each (plugin, args) must be suggested validly; args match if every given key is equal in
+    # the suggestion's normalised args (extra suggested args are fine).
+    suggest_queries: tuple[tuple[str, dict[str, Any]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,8 @@ class Case:
     question: str | None
     summarize_run: int | None
     expect: Expectations
+    # "What should I run next?" (app.ai.service.recommend_next); value = the optional focus.
+    recommend: str | None = None
     notes: tuple[str, ...] = ()
     evidence: dict[str, Any] = field(default_factory=dict)  # rel_path, description, os_info
     rubric: str | None = None  # for the optional AI judge
@@ -56,9 +61,26 @@ class Case:
 
 _TOP_KEYS = {
     "id", "description", "runs", "question", "summarize_run", "expect", "notes", "evidence",
-    "judge", "tags",
+    "judge", "tags", "recommend",
 }  # fmt: skip
-_EXPECT_KEYS = {"cite_rows", "must_mention", "must_not_mention", "suggest_plugins", "min_citations"}
+_EXPECT_KEYS = {
+    "cite_rows", "must_mention", "must_not_mention", "suggest_plugins", "min_citations",
+    "suggest_queries",
+}  # fmt: skip
+
+
+def _queries(value: Any, where: str) -> tuple[tuple[str, dict[str, Any]], ...]:
+    if value is None:
+        return ()
+    ok = isinstance(value, list) and all(
+        isinstance(v, dict)
+        and isinstance(v.get("plugin"), str)
+        and isinstance(v.get("args", {}), dict)
+        for v in value
+    )
+    if not ok:
+        raise CaseError(f"{where} must be a list of {{plugin: <name>, args: {{...}}}}")
+    return tuple((v["plugin"], dict(v.get("args") or {})) for v in value)
 
 
 def _strs(value: Any, where: str) -> tuple[str, ...]:
@@ -100,8 +122,11 @@ def parse_case(data: Any, path: Path) -> Case:
             raise CaseError(f"{where}: runs[{i}] fixture not found: {r['fixture']}")
         runs.append(CaseRun(str(r["plugin"]), fixture, dict(r.get("args") or {})))
     question, summarize = data.get("question"), data.get("summarize_run")
-    if (question is None) == (summarize is None):
-        raise CaseError(f"{where}: give exactly one of 'question' or 'summarize_run'")
+    recommend = data.get("recommend")
+    if sum(v is not None and v is not False for v in (question, summarize, recommend)) != 1:
+        raise CaseError(f"{where}: give exactly one of 'question', 'summarize_run' or 'recommend'")
+    if recommend is not None and not isinstance(recommend, bool | str):
+        raise CaseError(f"{where}: 'recommend' must be true or a focus string")
     if summarize is not None and not (isinstance(summarize, int) and 0 <= summarize < len(runs)):
         raise CaseError(f"{where}: 'summarize_run' must be a run index")
     raw_expect = data.get("expect") or {}
@@ -118,6 +143,9 @@ def parse_case(data: Any, path: Path) -> Case:
         ),
         suggest_plugins=_strs(raw_expect.get("suggest_plugins"), f"{where} expect.suggest_plugins"),
         min_citations=int(raw_expect.get("min_citations") or 0),
+        suggest_queries=_queries(
+            raw_expect.get("suggest_queries"), f"{where} expect.suggest_queries"
+        ),
     )
     judge = data.get("judge") or {}
     return Case(
@@ -128,6 +156,7 @@ def parse_case(data: Any, path: Path) -> Case:
         question=str(question) if question is not None else None,
         summarize_run=summarize,
         expect=expect,
+        recommend=(recommend if isinstance(recommend, str) else "") if recommend else None,
         notes=_strs(data.get("notes"), f"{where} notes"),
         evidence=dict(data.get("evidence") or {}),
         rubric=str(judge["rubric"]) if isinstance(judge, dict) and judge.get("rubric") else None,

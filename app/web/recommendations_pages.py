@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import HTMLResponse
 
+from app.ai import service as ai_svc
 from app.services import integrity as integrity_svc
 from app.services import recommendations as recs_svc
 from app.services.resources import DiskSpaceError
@@ -142,6 +143,26 @@ def ui_restore(request: Request, evidence_id: int, form: FormDep, session: Sessi
         session.rollback()
         return _done(request, session, evidence_id, error=str(exc))
     return _done(request, session, evidence_id)
+
+
+AI_HISTORY_CHANGED = "ai-history-changed"  # the AI chat panel reloads
+
+
+@router.post(
+    "/ui/evidence/{evidence_id}/recommendations/ai", dependencies=[Depends(same_origin_post)]
+)
+def ui_ai_recommend(
+    request: Request, evidence_id: int, form: FormDep, session: SessionDep
+) -> Response:
+    """Ask the AI what to run next (blocks on the provider; provider errors are stored on the
+    answer, never raised). The answer goes to the AI chat; the panel shows its suggestions."""
+    get_evidence_or_404(session, evidence_id)
+    ai_svc.recommend_next(session, evidence_id, form.get("focus") or "")
+    session.commit()
+    resp = _done(request, session, evidence_id)
+    if is_htmx(request):
+        resp.headers["HX-Trigger"] = AI_HISTORY_CHANGED
+    return resp
 
 
 @router.get("/guide", response_class=HTMLResponse)

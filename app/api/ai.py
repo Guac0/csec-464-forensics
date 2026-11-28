@@ -25,6 +25,11 @@ class AskRequest(BaseModel):
     row_refs: list[str] | None = None
 
 
+class RecommendRequest(BaseModel):
+    evidence_id: int
+    focus: str = Field(default="", max_length=300)
+
+
 class AIMessageOut(BaseModel):
     id: int
     evidence_id: int | None
@@ -75,6 +80,17 @@ def ask(body: AskRequest, session: Session = Depends(get_session)) -> AIMessageO
             run_ids=body.run_ids,
             row_refs=body.row_refs,
         )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return message_out(msg)
+
+
+@router.post("/recommend", response_model=AIMessageOut)
+def recommend(body: RecommendRequest, session: Session = Depends(get_session)) -> AIMessageOut:  # noqa: B008
+    """ "What should I run next?": suggestions from the investigation state (runs, hook
+    findings, flagged rows, the guide's static recommendations). Stored in the chat history."""
+    try:
+        msg = service.recommend_next(session, body.evidence_id, body.focus)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return message_out(msg)

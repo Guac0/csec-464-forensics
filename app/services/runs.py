@@ -80,8 +80,12 @@ def create_run(
     triggered_by_hook: str | None = None,
     chain_depth: int = 0,
     rerun_of_id: int | None = None,
+    ai_message_id: int | None = None,
 ) -> Run:
     """Validate the request against the tool's allowlist and queue a run.
+
+    ``ai_message_id``: the AI answer whose suggestion this is (only with origin AI_SUGGESTED;
+    must be an assistant message of the same evidence, else ArgValidationError).
 
     The keyword-only arguments record follow-up provenance for runs queued by post-run hooks.
     Raises ArgValidationError for disallowed plugins/args, LookupError for unknown evidence and
@@ -92,6 +96,8 @@ def create_run(
     resources.check_can_start_run()
     runner = get_runner(tool)
     args = runner.validate(request)
+    if ai_message_id is not None:
+        _check_ai_message(session, evidence_id, origin, ai_message_id)
     run = Run(
         evidence_id=evidence_id,
         tool=tool,
@@ -103,6 +109,7 @@ def create_run(
         triggered_by_hook=triggered_by_hook,
         chain_depth=chain_depth,
         rerun_of_id=rerun_of_id,
+        ai_message_id=ai_message_id,
     )
     session.add(run)
     session.flush()  # assign run.id for the audit event
@@ -122,6 +129,7 @@ def create_run(
             "triggered_by_hook": triggered_by_hook,
             "chain_depth": chain_depth,
             "rerun_of_id": rerun_of_id,
+            "ai_message_id": ai_message_id,
         },
     )
     session.commit()
@@ -146,6 +154,18 @@ def rerun(session: Session, run_id: int) -> Run:
         original.tool,
         rerun_of_id=original.id,
     )
+
+
+def _check_ai_message(
+    session: Session, evidence_id: int, origin: RunOrigin, ai_message_id: int
+) -> None:
+    from app.models import AIMessage
+
+    msg = session.get(AIMessage, ai_message_id)
+    if origin != RunOrigin.AI_SUGGESTED:
+        raise ArgValidationError("ai_message_id is only allowed for origin 'ai'")
+    if msg is None or msg.role != "assistant" or msg.evidence_id != evidence_id:
+        raise ArgValidationError(f"AI answer {ai_message_id} not found for this evidence")
 
 
 def enqueue_auto(session: Session, evidence_id: int, tool: str = "volatility3") -> list[Run]:
