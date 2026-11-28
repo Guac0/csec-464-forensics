@@ -84,7 +84,7 @@ class ExecutionResult:
     stop_reason: str | None = None
 
 
-# Conditions a NEXT step can have (see app/tools/volatility/guide.py and docs there).
+# Conditions a NEXT step can have (see forensics/README.md).
 WHEN_SUCCEEDED = "succeeded"  # the source run succeeded (default)
 WHEN_HAS_ROWS = "has_rows"  # ... and returned at least one row
 WHEN_HAS_FLAGS = "has_flags"  # ... and a post-run hook flagged at least one row
@@ -110,7 +110,7 @@ class GuideStep:
 @dataclass(frozen=True)
 class InvestigationGuide:
     """Baseline steps (in order) and plugin -> follow-up relationships. Content, not code: the
-    volatility guide lives in app/tools/volatility/guide.py."""
+    volatility guide comes from forensics/plugins/ (app/tools/content.py)."""
 
     baseline: tuple[GuideStep, ...] = ()
     next: dict[str, tuple[GuideStep, ...]] = field(default_factory=dict)

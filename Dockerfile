@@ -45,6 +45,7 @@ EOF
 
 # --- Application layer ---------------------------------------------------------------------
 COPY app ./app
+COPY forensics ./forensics
 # Editable install: registers the package (`pip install .[volatility]` equivalent, deps are
 # already present) while serving templates/static straight from /app/app.
 RUN pip install --no-deps --no-build-isolation -e ".[volatility]"

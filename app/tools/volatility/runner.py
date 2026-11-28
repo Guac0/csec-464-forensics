@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
+from app.tools import content
 from app.tools.base import (
     ArgSpec,
     ArgValidationError,
@@ -41,7 +42,6 @@ from app.tools.base import (
     ToolRequest,
     ToolRunner,
 )
-from app.tools.volatility import plugins as plugin_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -216,19 +216,20 @@ class VolatilityRunner(ToolRunner):
         self.offline = offline
 
     def _catalog(self) -> list[PluginSpec]:
-        return plugin_catalog.PLUGINS
+        return content.current().plugins
 
     def guide(self) -> InvestigationGuide:
-        """The investigation guide in guide.py (read on each call, like the catalog)."""
-        from app.tools.volatility import guide as guide_module
-
+        """The investigation guide from the plugin files' ``baseline`` / ``next``."""
+        loaded = content.current()
         return InvestigationGuide(
-            baseline=tuple(guide_module.BASELINE),
-            next={source: tuple(steps) for source, steps in guide_module.NEXT.items()},
+            baseline=tuple(loaded.baseline),
+            next={source: tuple(steps) for source, steps in loaded.next.items()},
         )
 
     def catalog_problems(self) -> dict[str, list[str]]:
-        problems = catalog_problems(self._catalog())
+        """Invalid catalog entries by plugin name, plus content files that failed to load (by
+        file path; those plugins are missing from the catalog altogether)."""
+        problems = {**content.current().problems, **catalog_problems(self._catalog())}
         global _logged_problems
         if problems != _logged_problems:  # log each new set of problems once
             _logged_problems = problems

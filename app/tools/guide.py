@@ -1,4 +1,6 @@
-"""Checking and printing a tool's investigation guide (see app/tools/volatility/guide.py).
+"""Checking and printing a tool's investigation guide (content: ``baseline`` / ``next`` in the
+plugin files under forensics/plugins/, loaded by app/tools/content.py). CLI:
+``python -m app.tools.guide``.
 
 Tool-agnostic: works on ``ToolRunner.guide()``. The recommendations themselves (which steps to
 show for an image) are computed in app/services/recommendations.py.
@@ -33,7 +35,7 @@ WHEN_TEXT = {
 
 @dataclass(frozen=True)
 class GuideProblem:
-    where: str  # e.g. "BASELINE #2" or "NEXT['windows.pslist.PsList'] #1"
+    where: str  # e.g. "BASELINE #2 (forensics/plugins/windows/pslist.py)"
     plugin: str
     problem: str
 
@@ -60,7 +62,7 @@ def _check_step(
         return [f"not a Step(...): {step!r}"], None
     errs: list[str] = []
     if step.plugin not in plugins:
-        errs.append("unknown plugin: not in plugins.py (or skipped there as invalid)")
+        errs.append("unknown plugin: not in the catalog (or skipped there as invalid)")
     if not isinstance(step.reason, str) or not step.reason.strip():
         errs.append("reason is required (one short sentence for the analyst)")
     elif len(step.reason) > MAX_REASON:
@@ -91,17 +93,26 @@ def _check_step(
     return [], replace(step, args=normalized)
 
 
+def _file_of(plugin: str) -> str:
+    """`` (forensics/plugins/windows/pslist.py)`` for a plugin loaded from a content file."""
+    from app.tools import content
+
+    loaded = content.current()
+    module = loaded.modules.get(plugin)
+    return f" ({content.module_file(f'{loaded.root}.plugins.{module}')})" if module else ""
+
+
 def check_guide(runner: ToolRunner) -> tuple[InvestigationGuide, list[GuideProblem]]:
     """The guide with invalid steps removed (args normalised), and the problems found."""
     raw = runner.guide()
     plugins = {p.name for p in runner.plugins()}
     problems: list[GuideProblem] = []
 
-    def collect(steps: Any, label: str, baseline: bool) -> list[GuideStep]:
+    def collect(steps: Any, label: str, baseline: bool, source: str = "") -> list[GuideStep]:
         out: list[GuideStep] = []
         seen: set[tuple[str, str]] = set()
         for n, step in enumerate(steps, start=1):
-            where = f"{label} #{n}"
+            where = f"{label} #{n}{_file_of(getattr(step, 'plugin', '') if baseline else source)}"
             errs, ok = _check_step(runner, plugins, step, baseline)
             if ok is not None:
                 key = (ok.plugin, args_key(ok.args))
@@ -117,13 +128,13 @@ def check_guide(runner: ToolRunner) -> tuple[InvestigationGuide, list[GuideProbl
     baseline = collect(raw.baseline, "BASELINE", baseline=True)
     next_steps: dict[str, tuple[GuideStep, ...]] = {}
     for source, steps in raw.next.items():
-        label = f"NEXT[{source!r}]"
+        label = f"NEXT[{source!r}]{_file_of(source)}"
         if source not in plugins:
             problems.append(
-                GuideProblem(label, str(source), "source plugin not in plugins.py: never fires")
+                GuideProblem(label, str(source), "source plugin not in the catalog: never fires")
             )
             continue
-        valid = collect(steps, label, baseline=False)
+        valid = collect(steps, f"NEXT[{source!r}]", baseline=False, source=source)
         if valid:
             next_steps[source] = tuple(valid)
     return InvestigationGuide(baseline=tuple(baseline), next=next_steps), problems
@@ -160,3 +171,7 @@ def main(tool: str = "volatility3") -> int:
     runner = registry.get_runner(tool)
     sys.stdout.write(to_markdown(runner))
     return 1 if check_guide(runner)[1] else 0
+
+
+if __name__ == "__main__":  # python -m app.tools.guide -> print the guide + problems
+    raise SystemExit(main())

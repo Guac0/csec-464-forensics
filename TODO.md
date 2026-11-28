@@ -47,22 +47,22 @@ Checklist of what is left after the infrastructure scaffold. Tick items off as t
 ## 2. Forensics hand-off (human team)
 
 Everything marked `TODO(forensics)` in the code. Find it with `git grep -n "TODO(forensics)"`;
-the background is in [app/tools/volatility/README.md](app/tools/volatility/README.md).
+the how-to is [forensics/README.md](forensics/README.md).
 
 - [x] **Plugin catalog** — add the Windows triage allowlist and supported PID filters in
-      `app/tools/volatility/plugins.py`.
+      `forensics/plugins/`.
 - [ ] **Preset queries** — add `presets` to each plugin.
-- [ ] **Investigation guide** — `app/tools/volatility/guide.py`: replace the EXAMPLE baseline and
-      "after X, suggest Y" steps with the team's workflow (how-to: README.md in that folder,
-      "Investigation guide"). Also review the EXAMPLE catalog entries added for it (pstree,
-      cmdline, netscan).
+- [ ] **Investigation guide** — the `baseline` / `next` fields in `forensics/plugins/`: replace
+      the EXAMPLE steps with the team's workflow (how-to: forensics/README.md, "Investigation
+      guide").
 - [ ] **Auto-enumerate set** — set `auto_enumerate=True` on the plugins that should run first.
 - [ ] **Real output fixtures** — capture `vol -r jsonl` output for every catalog plugin into
       `tests/fixtures/` and replace the synthetic `sample_pstree.jsonl`.
 - [ ] **Output parsing** — check `VolatilityRunner.parse_output` (`app/tools/volatility/runner.py`)
       against those fixtures; add per-plugin post-processing where needed.
-- [ ] **Post-run hooks** — `app/tools/volatility/hooks/` (guide: `hooks/README.md`). Review the
-      EXAMPLE `windows_info.py` OS-detection hook against real output, and add hooks that flag
+- [ ] **Post-run hooks** — in the plugin files (how-to: forensics/README.md, "Hooks"). Review the
+      EXAMPLE OS-detection hook in `forensics/plugins/windows/info.py` against real output, and
+      add hooks that flag
       suspicious rows, summarise runs as findings, and queue sensible follow-up plugins.
 - [ ] **AI prompts** — `app/ai/prompts.py`: the analysis system prompt, the run-summary question
       and the "what should I run next?" question (`RECOMMEND_QUESTION`), and the agent prompt

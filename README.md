@@ -136,9 +136,9 @@ separated by spaces or commas.
   rationale. The answer appears in the AI chat; the panel shows its runnable suggestions. Runs
   started from any AI suggestion link back to the answer ("suggested by AI answer N"), and
   suggestions show when they already ran.
-- The guide is data in `app/tools/volatility/guide.py`; `/guide` shows it, and
-  `python -m app.tools.volatility.guide` prints it with any problems. How to extend it:
-  [app/tools/volatility/README.md](app/tools/volatility/README.md#investigation-guide).
+- The guide is the `baseline` and `next` fields in the plugin files under `forensics/plugins/`;
+  `/guide` shows it, and `python -m app.tools.guide` prints it with any problems. How to extend
+  it: [forensics/README.md](forensics/README.md#investigation-guide-recommended-next).
 
 ### Auto-enumeration
 - **Status:** infrastructure done, plugin set TODO

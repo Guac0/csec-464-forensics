@@ -367,14 +367,14 @@ def check_catalog() -> Check:
             "Plugin catalog",
             "fail",
             f"{len(problems)} catalog entr{'y' if len(problems) == 1 else 'ies'} skipped as "
-            "invalid (see details; fix app/tools/volatility/plugins.py).",
+            "invalid (see details; fix the named files in forensics/plugins/).",
             details,
         )
     return Check("catalog", "Plugin catalog", "ok", f"{len(valid)} plugin(s), all valid.", details)
 
 
 def check_guide() -> Check:
-    """Investigation guide (app/tools/volatility/guide.py): invalid steps are skipped."""
+    """Investigation guide (baseline/next in forensics/plugins/): invalid steps are skipped."""
     from app.tools import registry
     from app.tools.guide import check_guide as check
 
@@ -387,8 +387,8 @@ def check_guide() -> Check:
             "guide",
             "Investigation guide",
             "warn",
-            f"{len(problems)} guide step(s) skipped as invalid (see /guide; fix "
-            "app/tools/volatility/guide.py).",
+            f"{len(problems)} guide step(s) skipped as invalid (see /guide; fix the named "
+            "files in forensics/plugins/).",
             details,
         )
     return Check("guide", "Investigation guide", "ok", f"{steps} step(s), all valid.", details)

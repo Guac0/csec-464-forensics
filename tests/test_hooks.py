@@ -153,7 +153,7 @@ def test_discovery_loads_package_and_reports_broken_modules(
 
 
 def test_example_windows_info_hook_is_discovered(registry: None) -> None:
-    assert "windows_info.record_os_info" in [h.name for h in hooks.hooks_for("volatility3", INFO)]
+    assert "windows.info.record_os_info" in [h.name for h in hooks.hooks_for("volatility3", INFO)]
     assert hooks.load_errors() == {}
 
 
@@ -438,7 +438,7 @@ def test_example_windows_info_hook(registry: None, session: Session, evidence: E
     ]
     run = make_run(session, evidence, plugin=INFO, rows=rows)
     results = hooks.run_hooks(session, run.id)
-    assert {r["hook"]: r["status"] for r in results}["windows_info.record_os_info"] == "ok"
+    assert {r["hook"]: r["status"] for r in results}["windows.info.record_os_info"] == "ok"
     session.refresh(evidence)
     assert evidence.os_info["os"] == "windows"
     assert evidence.os_info["nt_version"] == "10.0"

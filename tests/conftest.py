@@ -12,6 +12,18 @@ from app import db
 from app.config import Settings, get_settings
 
 FIXTURES = Path(__file__).parent / "fixtures"
+TEST_CONTENT_ROOT = "tests.content"
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _test_content() -> Iterator[None]:
+    """Infrastructure tests run against the frozen copy in tests/content/, not forensics/, so the
+    forensics team can change their content without breaking these tests. Tests change the
+    catalog/guide by monkeypatching attributes of ``content.current()``."""
+    from app.tools import content
+
+    content.use_root(TEST_CONTENT_ROOT)
+    yield
 
 
 def symlinks_supported(tmp_path: Path) -> bool:
