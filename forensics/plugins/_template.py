@@ -13,7 +13,7 @@ Never guess plugin names, options or column names: copy them from `vol -h`,
 """
 
 from forensics.common import PID_FILTER
-from forensics.sdk import Arg, Baseline, HookContext, Next, Plugin, Preset
+from forensics.sdk import AIContext, Arg, Baseline, HookContext, Next, Plugin, Preset
 
 PLUGIN = Plugin(
     # Full name exactly as `vol -h` lists it (volatility matches parts of names, so a short
@@ -56,7 +56,20 @@ PLUGIN = Plugin(
             priority=10,
         ),
     ],
+    # Which rows of a run are sent to the AI. max_rows: how many (default 50, 200 for "Summarize
+    # this run"); columns: only these columns (empty = all). Rows flagged by a hook are always
+    # sent as well. For anything smarter, write select_ai_rows below.
+    ai_context=AIContext(max_rows=100, columns=["PID", "ImageFileName"]),
 )
+
+
+# Optional: choose exactly which rows the AI sees. Gets every row of the run in order and returns
+# the row_idx numbers to send, most important first (at most max_rows are used). If it raises an
+# error, the AI gets the first rows instead. Delete this if you don't need it.
+def select_ai_rows(rows):
+    for row in rows:
+        if row.data.get("SomeColumn") == "something interesting":
+            yield row.row_idx
 
 
 # Optional hook: Python that runs after each successful run of this plugin.

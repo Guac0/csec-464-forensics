@@ -11,10 +11,11 @@ operations). Open work: `TODO.md`.
 
 - **Forensics content (human team):** `forensics/` (one file per plugin in
   `forensics/plugins/<os>/`: catalog entry, presets, compare keys, guide `baseline`/`next`,
-  hooks; shared bits in `forensics/common.py`). Still outside it (moving there later): prompts
-  `app/ai/prompts.py`, AI row selection in `app/ai/context.py`, citation tuning in
-  `app/ai/citations.py`, eval cases `evals/cases/`, real fixtures in `tests/fixtures/`. Marked
-  `TODO(forensics)` / `EXAMPLE`.
+  hooks, AI row selection `ai_context`/`select_ai_rows`; shared bits in `forensics/common.py`),
+  prompt guidance `forensics/prompts/*.md`, citation tunables `forensics/citations.py`, eval
+  cases/baselines `forensics/evals/`, captured output `forensics/fixtures/<os>/<module>.jsonl`.
+  Marked `TODO(forensics)` / `EXAMPLE`. Fixed prompt rules stay in `app/ai/prompts.py`
+  (infrastructure); output parsing stays shared in `runner.parse_output`.
 - `forensics/sdk.py` and the loader `app/tools/content.py` are infrastructure (keep the names
   the team imports stable). Infrastructure tests must not depend on `forensics/`: use
   `tests/content/` (see CONTRACTS.md "Tool runner").

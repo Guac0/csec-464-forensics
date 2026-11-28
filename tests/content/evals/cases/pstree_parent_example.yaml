@@ -1,0 +1,28 @@
+# EXAMPLE case - TODO(forensics): replace with cases built from REAL captured output.
+# The fixture is synthetic (tests/fixtures/sample_pstree.jsonl): explorer.exe (PID 2000) has
+# parent PID 1900, which is not in the list - a classic "missing parent" lead.
+id: pstree-parent-example
+description: Spot a process whose parent is not in the process list.
+tags: [example, processes]
+evidence:
+  rel_path: example.raw
+  description: Synthetic example image
+  os_info: {os: windows}
+notes:
+  - Triage of a workstation; user reported a pop-up at login.
+runs:
+  - plugin: windows.pslist.PsList
+    fixture: tests/fixtures/sample_pstree.jsonl
+question: >-
+  Which processes have a parent process ID that does not appear in the process list?
+  Cite the rows you rely on.
+expect:
+  cite_rows: ["0:5"]         # run 0, row 5 = explorer.exe
+  must_mention: ["explorer.exe", "1900"]
+  must_not_mention: ["mimikatz", "lsass"]   # not in the data: would be invented
+  min_citations: 1
+judge:
+  rubric: >-
+    Identifies explorer.exe (PID 2000) as the only process whose parent (PPID 1900) is not in
+    the list, cites its row, notes this can have benign explanations (parent exited), and does
+    not claim any other process is orphaned.

@@ -10,6 +10,11 @@ Layout (root = ``forensics`` in production, ``tests.content`` in infrastructure 
   Expected path for ``windows.malware.malfind.Malfind`` is ``plugins/windows/malware_malfind.py``
   (``expected_module``); checked by tests/test_forensics_content.py, not at runtime.
 - ``<root>/hooks/``: cross-plugin hook modules (imported by app.tools.hooks).
+- ``<root>/prompts/*.md``: AI guidance text (app/ai/prompts.py adds the fixed rules).
+- ``<root>/citations.py``: citation-check tunables (app/ai/citations.py), optional.
+- ``<root>/evals/cases/``, ``<root>/fixtures/<os>/<module>.jsonl``: eval cases, captured output.
+- A plugin module may define ``select_ai_rows(rows) -> list[int]`` (row_idx to send the AI);
+  with ``Plugin.ai_context`` it is exposed as ``Content.ai[plugin]``.
 - Modules/packages whose name starts with ``_`` are skipped (``_template.py``).
 
 Load problems (import errors, missing/invalid ``PLUGIN``, duplicate names) are returned keyed by
@@ -28,6 +33,7 @@ import pkgutil
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from app.tools.base import ArgSpec, GuideStep, PluginSpec
@@ -56,6 +62,24 @@ class Baseline:
     args: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class AIContext:
+    """Which rows of a run go to the AI. ``max_rows``: rows per run (None = the app default);
+    ``columns``: only these columns are shown (empty = all). Rows flagged by hooks are always
+    added on top."""
+
+    max_rows: int | None = None
+    columns: tuple[str, ...] | list[str] = ()
+
+
+@dataclass(frozen=True)
+class AIRows:
+    """Per-plugin AI row selection: settings + optional ``select_ai_rows`` function."""
+
+    settings: AIContext
+    select: Callable[[Iterable[Any]], Iterable[int]] | None = None
+
+
 @dataclass
 class Plugin:
     """Everything about one plugin. ``spec`` is what the runner uses; ``baseline`` / ``next``
@@ -72,6 +96,7 @@ class Plugin:
     compare_ignore: Iterable[str] = ()
     baseline: Baseline | Iterable[Baseline] | None = None
     next: Iterable[GuideStep] = ()
+    ai_context: AIContext | None = None
 
     @property
     def spec(self) -> PluginSpec:
@@ -139,6 +164,8 @@ class Content:
     next: dict[str, list[GuideStep]] = field(default_factory=dict)
     problems: dict[str, list[str]] = field(default_factory=dict)
     modules: dict[str, str] = field(default_factory=dict)  # plugin name -> module (below plugins)
+    ai: dict[str, AIRows] = field(default_factory=dict)
+    citations: Any = None  # the <root>.citations module, if any
 
 
 def module_file(module: str) -> str:
@@ -161,7 +188,7 @@ def iter_modules(package_name: str) -> Iterable[str]:
 def load(root: str = DEFAULT_ROOT) -> Content:
     content = Content(root=root)
     package_name = f"{root}.plugins"
-    found: list[tuple[str, Plugin]] = []
+    found: list[tuple[str, Plugin, Any]] = []
     try:
         names = list(iter_modules(package_name))
     except Exception as exc:  # noqa: BLE001
@@ -180,11 +207,11 @@ def load(root: str = DEFAULT_ROOT) -> Content:
         if not isinstance(plugin, Plugin):
             content.problems[where] = ["no `PLUGIN = Plugin(...)` in this file"]
             continue
-        found.append((module_name, plugin))
+        found.append((module_name, plugin, getattr(module, "select_ai_rows", None)))
 
     seen: dict[str, str] = {}
     baseline: list[tuple[int, str, GuideStep]] = []
-    for module_name, plugin in found:
+    for module_name, plugin, select in found:
         where = module_file(module_name)
         if plugin.name in seen:
             content.problems[where] = [f"{plugin.name} is already defined in {seen[plugin.name]}"]
@@ -204,7 +231,18 @@ def load(root: str = DEFAULT_ROOT) -> Content:
             baseline.append((entry.order, plugin.name, step))
         if next_steps:
             content.next[plugin.name] = next_steps
+        if plugin.ai_context is not None or callable(select):
+            settings = plugin.ai_context or AIContext()
+            settings = AIContext(settings.max_rows, tuple(settings.columns))
+            content.ai[plugin.name] = AIRows(settings, select if callable(select) else None)
     content.plugins.sort(key=lambda p: p.name)
+    try:
+        content.citations = importlib.import_module(f"{root}.citations")
+    except ModuleNotFoundError as exc:
+        if exc.name != f"{root}.citations":
+            content.problems[f"{root}/citations.py"] = [f"{type(exc).__name__}: {exc}"]
+    except Exception as exc:  # noqa: BLE001
+        content.problems[f"{root}/citations.py"] = [f"{type(exc).__name__}: {exc}"]
     content.baseline = [step for _, _, step in sorted(baseline, key=lambda t: (t[0], t[1]))]
     return content
 
@@ -241,6 +279,12 @@ def reload() -> Content:
 
 def root() -> str:
     return _root
+
+
+def root_dir(name: str | None = None) -> Path:
+    """Folder of the content package (``forensics/``)."""
+    module = importlib.import_module(name or _root)
+    return Path(next(iter(module.__path__))).resolve()
 
 
 def use_root(new_root: str) -> Content:

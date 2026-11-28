@@ -1,0 +1,20 @@
+# EXAMPLE case - TODO(forensics): replace with cases built from REAL captured output.
+# "What should I run next?" (the AI button on the Recommended-next panel). The AI sees the
+# investigation STATE (runs, hook findings, flagged rows, the guide's static recommendations),
+# not bulk rows. Here only a process list exists, so a sensible next step is a process-related
+# plugin. Use expect.suggest_queries to require specific options, e.g.
+#   suggest_queries: [{plugin: windows.cmdline.CmdLine, args: {pid: [2000]}}]
+id: recommend-next-example
+description: Suggest sensible next plugins after a process list.
+tags: [example, recommend]
+evidence:
+  rel_path: example.raw
+  description: Synthetic example image
+  os_info: {os: windows}
+runs:
+  - plugin: windows.pslist.PsList
+    fixture: forensics/fixtures/windows/pstree.jsonl
+recommend: true
+expect:
+  suggest_plugins: [windows.pstree.PsTree, windows.cmdline.CmdLine, windows.pslist.PsList]
+  must_not_mention: ["mimikatz"]

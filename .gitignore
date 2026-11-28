@@ -76,7 +76,7 @@ desktop.ini
 # Scratch output from AI assistant sessions
 Claude outputs/
 
-# AI evaluation reports (baselines in evals/baselines/ ARE committed)
+# AI evaluation reports (baselines in forensics/evals/baselines/ ARE committed)
 evals/reports/
 
 # Reports from `python -m app.ai.probe` (may contain evidence values)

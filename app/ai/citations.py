@@ -18,6 +18,8 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import select, tuple_
@@ -61,21 +63,55 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _IPV4 = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w.]*\d)")
 _IPV6 = re.compile(r"(?<![\w:])([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?![\w:])")
 _WIN_PATH = re.compile(r"(?:[A-Za-z]:\\|\\\\?)[^\s\"'`<>|,;()\[\]]+(?:\\[^\s\"'`<>|,;()\[\]]+)*")
-_FILE_EXT = "exe|dll|sys|scr|bat|cmd|ps1|vbs|js|cpl|ocx|com|msi|lnk|dmp|bin|dat|tmp|log|txt|zip|db"
-_FILE_NAME = re.compile(rf"(?<![\w\\/.-])([\w.-]+\.(?:{_FILE_EXT}))(?![\w-])", re.IGNORECASE)
 _HEX = re.compile(r"(?<![\w])0x([0-9A-Fa-f]{2,16})(?![\w])")
-_LABELLED_NUMBER = re.compile(
-    r"\b(PPID|PID|TID|port|parent(?:\s+process)?\s+id|process\s+id|thread\s+id)s?"
-    r"\s*(?:[:=#]|of|is|was)?\s*(\d+)\b",
-    re.IGNORECASE,
-)
 _QUOTED = re.compile(r"`([^`\n]{2,200})`|\"([^\"\n]{2,200})\"|\u201c([^\u201d\n]{2,200})\u201d")
 _TRAILING = ".,;:!?)]}'\""
 # Volatility path forms that name the same file: \Device\HarddiskVolume3\x, C:\x, \??\C:\x,
 # \SystemRoot\x (= \Windows\x).
 _PATH_PREFIX = re.compile(r"^(?:\\\?\?\\|\\\\\?\\)?(?:[a-z]:|\\device\\harddiskvolume\d+)", re.I)
-# pslist's ImageFileName is truncated by Windows to 14 characters.
-_TRUNCATED_NAME = 14
+
+# Tunables owned by the forensics team: ``<content root>/citations.py`` (forensics/citations.py)
+# may define FILE_EXTENSIONS, NUMBER_LABELS, TRUNCATED_NAME_LENGTH; these are the defaults.
+DEFAULT_FILE_EXTENSIONS = (
+    "exe dll sys scr bat cmd ps1 vbs js cpl ocx com msi lnk dmp bin dat tmp log txt zip db".split()
+)
+DEFAULT_NUMBER_LABELS = (
+    "PPID", "PID", "TID", "port", "parent process id", "parent id", "process id", "thread id",
+)  # fmt: skip
+DEFAULT_TRUNCATED_NAME_LENGTH = 14  # pslist's ImageFileName is truncated by Windows to 14 chars
+
+
+@dataclass(frozen=True)
+class _Rules:
+    file_name: re.Pattern[str]
+    labelled_number: re.Pattern[str]
+    truncated_name: int
+
+
+@lru_cache(maxsize=8)
+def _compile(exts: tuple[str, ...], labels: tuple[str, ...], truncated: int) -> _Rules:
+    ext = "|".join(re.escape(e.lstrip(".")) for e in exts if e.strip()) or "exe"
+    # Longest labels first so "parent process id" wins over "id"-like shorter ones.
+    words = sorted((lab for lab in labels if lab.strip()), key=len, reverse=True) or ["PID"]
+    label = "|".join(r"\s+".join(map(re.escape, w.split())) for w in words)
+    return _Rules(
+        file_name=re.compile(rf"(?<![\w\\/.-])([\w.-]+\.(?:{ext}))(?![\w-])", re.IGNORECASE),
+        labelled_number=re.compile(
+            rf"\b({label})s?\s*(?:[:=#]|of|is|was)?\s*(\d+)\b", re.IGNORECASE
+        ),
+        truncated_name=int(truncated),
+    )
+
+
+def _rules() -> _Rules:
+    from app.tools import content
+
+    module = content.current().citations
+    return _compile(
+        tuple(getattr(module, "FILE_EXTENSIONS", DEFAULT_FILE_EXTENSIONS)),
+        tuple(getattr(module, "NUMBER_LABELS", DEFAULT_NUMBER_LABELS)),
+        getattr(module, "TRUNCATED_NAME_LENGTH", DEFAULT_TRUNCATED_NAME_LENGTH),
+    )
 
 
 def _norm_text(value: str) -> str:
@@ -119,7 +155,8 @@ def extract_values(text: str) -> list[tuple[str, str]]:
     paths = [p for p in paths if p.count("\\") >= 2 or re.match(r"[A-Za-z]:\\.", p)]
     for p in paths:
         add("path", p)
-    for m in _FILE_NAME.finditer(text):
+    rules = _rules()
+    for m in rules.file_name.finditer(text):
         name = m.group(1)
         if not any(_norm_path(p).endswith("\\" + name.casefold()) for p in paths):
             add("file", name)
@@ -131,7 +168,7 @@ def extract_values(text: str) -> list[tuple[str, str]]:
             add("ip", m.group(1))
     for m in _HEX.finditer(text):
         add("hex", "0x" + m.group(1))
-    for m in _LABELLED_NUMBER.finditer(text):
+    for m in rules.labelled_number.finditer(text):
         add("number", m.group(2))
     for m in _QUOTED.finditer(text):
         quoted = next(g for g in m.groups() if g is not None).strip()
@@ -196,9 +233,10 @@ class _RowIndex:
             )
         needle = _norm_text(value)
         if kind == "file":
+            trunc = _rules().truncated_name
             return any(
                 needle in cell
-                or (len(cell) >= _TRUNCATED_NAME and " " not in cell and needle.startswith(cell))
+                or (len(cell) >= trunc and " " not in cell and needle.startswith(cell))
                 for cell in self.texts
             )
         return any(needle in cell for cell in self.texts)

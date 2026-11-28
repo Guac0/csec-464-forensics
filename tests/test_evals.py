@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from app.ai.client import AIClient
-from app.ai.prompts import PROMPT_VERSION
+from app.ai.prompts import prompt_version
 from app.config import Settings
 from evals import judge, run, scoring
 from evals.cases import CaseError, load_cases, parse_case
@@ -129,14 +129,16 @@ def test_judge_verdict_parsing() -> None:
 
 
 def test_example_cases_load() -> None:
-    cases = {c.id: c for c in load_cases()}
+    cases = {c.id: c for c in load_cases(cases_dir=TEST_CASES)}
     assert {"pstree-parent-example", "pstree-summary-example"} <= set(cases)
     parent = cases["pstree-parent-example"]
     assert parent.expect.cite_rows == ((0, 5),) and parent.rubric
-    assert [c.id for c in load_cases(["summary"])] == ["pstree-summary-example"]  # by tag
+    assert [c.id for c in load_cases(["summary"], TEST_CASES)] == ["pstree-summary-example"]  # tag
 
 
 FIXTURE = "tests/fixtures/sample_pstree.jsonl"
+# Infrastructure tests use the frozen copy of the example cases, not forensics/evals/cases/.
+TEST_CASES = Path(__file__).parent / "content" / "evals" / "cases"
 
 
 @pytest.mark.parametrize(
@@ -212,11 +214,12 @@ def test_end_to_end_run_baseline_and_regression(
     seen: list[dict] = []
     out, baseline = tmp_path / "reports", tmp_path / "baseline.json"
     common = ["--repeat", "2", "--out", str(out), "--baseline", str(baseline)]
+    common += ["--cases-dir", str(TEST_CASES)]
 
     code = run.main([*common, "--judge", "--save-baseline"], mocked_factory(GOOD, seen))
     assert code == 0
     report = json.loads(next(out.glob("*.json")).read_text())
-    assert report["meta"]["prompt_version"] == PROMPT_VERSION
+    assert report["meta"]["prompt_version"] == prompt_version()
     assert report["meta"]["model"] == "test-model" and len(report["attempts"]) == 8
     parent = report["aggregate"]["pstree-parent-example"]
     assert parent["pass"]["mean"] == 1.0 and parent["judge_score"]["mean"] == 5.0
@@ -232,7 +235,7 @@ def test_end_to_end_run_baseline_and_regression(
     ]
     assert "windows.pslist.PsList" in asks[0]["messages"][0]["content"]
     assert "[R1:5]" in asks[0]["messages"][1]["content"]
-    assert json.loads(baseline.read_text())["prompt_version"] == PROMPT_VERSION
+    assert json.loads(baseline.read_text())["prompt_version"] == prompt_version()
     assert "| pstree-parent-example | 100% |" in capsys.readouterr().out
 
     code = run.main(
@@ -250,7 +253,7 @@ def test_unknown_case_selector(settings: Settings) -> None:
 
 
 def test_recommend_case_and_query_expectations(tmp_path: Path) -> None:
-    case = {c.id: c for c in load_cases()}["recommend-next-example"]
+    case = {c.id: c for c in load_cases(cases_dir=TEST_CASES)}["recommend-next-example"]
     assert case.recommend == "" and case.question is None
     focused = parse_case(
         {
@@ -285,7 +288,7 @@ def test_recommend_case_and_query_expectations(tmp_path: Path) -> None:
 
 def test_agent_goal_case(settings: Settings, tmp_path: Path) -> None:
     """The agent queues cmdline; the harness completes it from the case's fixture."""
-    case = {c.id: c for c in load_cases()}["agent-goal-example"]
+    case = {c.id: c for c in load_cases(cases_dir=TEST_CASES)}["agent-goal-example"]
     assert case.goal and case.available_runs[0].plugin == "windows.cmdline.CmdLine"
     assert case.expect.queue_plugins == ("windows.cmdline.CmdLine",)
     replies = [

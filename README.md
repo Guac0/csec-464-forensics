@@ -222,7 +222,7 @@ separated by spaces or commas.
   before they get a Run button.
 - **Provider:** any OpenAI-compatible API (`FT_AI_BASE_URL`, `FT_AI_MODEL`, `FT_AI_API_KEY`).
   Context is sent to that provider: use a local model (e.g. Ollama) when evidence must not
-  leave the machine. Each answer records the model, parameters and `PROMPT_VERSION`.
+  leave the machine. Each answer records the model, parameters and the prompt version.
 - **Known limitations:** the prompts are placeholders until the forensics team writes them;
   row selection is "first N rows per run" (no per-plugin selection yet), so large runs are only
   partly seen; the support check matches values, not meaning (it can't tell whether a claim

@@ -60,9 +60,9 @@ from app.ai.context import build_state_context, format_row
 from app.ai.prompts import (
     AGENT_GOAL,
     AGENT_LIMIT_REACHED,
-    AGENT_SYSTEM_PROMPT,
     AGENT_TEXT_PROTOCOL,
-    PROMPT_VERSION,
+    agent_system_prompt,
+    prompt_version,
     render_allowlist,
 )
 from app.ai.suggestions import parse_suggestions, strip_suggestions_block, validate_suggestions
@@ -585,8 +585,8 @@ class _Loop:
 
     def _system(self) -> str:
         limits = self.task.limits
-        text = AGENT_SYSTEM_PROMPT.format(
-            max_steps=limits["max_steps"], max_runs=limits.get("max_runs", 0)
+        text = agent_system_prompt(
+            max_runs=limits.get("max_runs", 0), max_steps=limits["max_steps"]
         )
         text += "\n" + render_allowlist() + "\n"
         if self.mode == "text":
@@ -1092,7 +1092,7 @@ class _Loop:
             provider_base_url=self.client.base_url,
             params={
                 **(last.params if last else {}),
-                "prompt_version": PROMPT_VERSION,
+                "prompt_version": prompt_version(),
                 "tool_mode": self.mode,
             },
             request_messages=self.messages,

@@ -12,7 +12,7 @@
 #                                              from your network, e.g. a campus-only endpoint)
 #
 # Saving a baseline: run with "save_baseline" ticked, download the "ai-evaluation-baseline"
-# artifact and commit the file to evals/baselines/ in a pull request (this workflow is read-only).
+# artifact and commit the file to forensics/evals/baselines/ in a pull request (this workflow is read-only).
 name: AI evaluation
 
 on:
@@ -137,5 +137,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ai-evaluation-baseline
-          path: evals/baselines/
+          path: forensics/evals/baselines/
           if-no-files-found: warn
