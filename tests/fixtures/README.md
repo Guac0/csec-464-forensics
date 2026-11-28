@@ -1,3 +1,5 @@
+> Written mainly for AI coding assistants. People: start with README.md or forensics/README.md.
+
 # Test fixtures (tool runner)
 
 - `fake_vol.py` — executable stand-in for `vol` used by executor tests (see its docstring).
