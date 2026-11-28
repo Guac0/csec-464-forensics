@@ -64,10 +64,10 @@ make the repo public or agree on the rules socially.
 
 AI coding assistants are allowed and encouraged, with these rules:
 
-1. **Give it `CONTRACTS.md` first** (and the module you are working on). Ask it to stay inside your
-   module's public interface. It must not change frozen files (`app/config.py`, `app/db.py`,
-   `app/models.py`, `app/tools/base.py`, `tests/conftest.py`, `pyproject.toml` deps) - if it
-   wants to, that is a team discussion.
+1. **Point it at [AGENTS.md](../AGENTS.md) first.** That file tells the assistant how the
+   project is laid out, which files it must not change, and the coding and testing rules. Most
+   tools (Claude Code, Codex, Copilot, Cursor) read it automatically. If it wants to change a
+   frozen file, that is a team discussion.
 2. **Never let it invent volatility3 plugins, flags or output columns.** Assistants confidently
    produce plugin names and options from volatility 2 or from nowhere. Every plugin/flag in
    `app/tools/volatility/plugins.py` must be checked against the installed version:

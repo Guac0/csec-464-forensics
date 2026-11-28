@@ -1,3 +1,5 @@
+> Written mainly for AI coding assistants. People: start with README.md or forensics/README.md.
+
 # Module Contracts (Basic Version / PoC)
 
 Single-user, local-workstation PoC: FastAPI + Jinja/HTMX UI + in-process job worker + SQLite,

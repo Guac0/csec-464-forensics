@@ -73,6 +73,9 @@ vol-output/
 Thumbs.db
 desktop.ini
 
+# Scratch output from AI assistant sessions
+Claude outputs/
+
 # AI evaluation reports (baselines in evals/baselines/ ARE committed)
 evals/reports/
 

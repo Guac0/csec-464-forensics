@@ -22,7 +22,7 @@ project wraps it in a local web app so an analyst can:
 verified against the cited rows.
 
 This is a deliberately small proof of concept: **single user, runs on your own workstation, bound to
-`127.0.0.1`, no login.** See [basic_version_notes.md](basic_version_notes.md) for the design and
+`127.0.0.1`, no login.** See [docs/design/architecture.md](docs/design/architecture.md) for the design and
 [CONTRACTS.md](CONTRACTS.md) for the code structure.
 
 ## Running it
