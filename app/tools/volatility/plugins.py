@@ -109,12 +109,12 @@ PLUGINS: list[PluginSpec] = [
     # ),
     # TODO these were manually created before Andrew's refactor and may need to
     # be updated to the new standard/functionality
-    PluginSpec(
-        name="windows.netscan.NetScan",
-        description="EXAMPLE: network connections and listening sockets (pool scan; slow).",
-        compare_keys=("Proto", "LocalAddr", "LocalPort", "ForeignAddr", "ForeignPort", "Owner"),
-        presets=(("PID 4 (System)", {"pid": [4]}),),
-    ),
+    # PluginSpec( # bad! incompatible!
+    #    name="windows.netscan.NetScan",
+    #    description="EXAMPLE: network connections and listening sockets (pool scan; slow).",
+    #    compare_keys=("Proto", "LocalAddr", "LocalPort", "ForeignAddr", "ForeignPort", "Owner"),
+    #    presets=(("PID 4 (System)", {"pid": [4]}),),
+    # ),
     PluginSpec(
         name="windows.pstree.PsTree",
         description="Show processes in a tree grouped by parent process.",
@@ -146,6 +146,7 @@ PLUGINS: list[PluginSpec] = [
     PluginSpec(
         name="windows.netscan.NetScan",
         description="Scan for TCP connections, TCP listeners, and UDP endpoints.",
+        compare_keys=("Proto", "LocalAddr", "LocalPort", "ForeignAddr", "ForeignPort", "Owner"),
     ),
     PluginSpec(
         name="windows.svcscan.SvcScan",
