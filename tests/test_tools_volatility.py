@@ -206,11 +206,12 @@ def test_build_argv_uses_vol_executable(
     assert argv[0] == executable
 
 
-def test_python_script_runs_via_interpreter() -> None:
+def test_python_script_runs_via_interpreter(tmp_path: Path) -> None:
     import sys
 
+    script = str(tmp_path / "fake_vol.PY")
     assert vol_command("vol") == ["vol"]
-    assert vol_command("C:/tools/fake_vol.PY") == [sys.executable, "C:/tools/fake_vol.PY"]
+    assert vol_command(script) == [sys.executable, script]
 
 
 def test_build_argv_validates(runner: VolatilityRunner, settings: Settings, tmp_path: Path) -> None:
