@@ -301,7 +301,8 @@ def build_context(
         if rows and run.row_count > len(rows):
             what = "chosen by the plugin's row selection" if custom else "first"
             note = f"(showing {what} {shown_first} of {run.row_count} rows"
-            note += f" plus {len(flagged)} other flagged rows)" if flagged else ")"
+            later = "other" if custom else "later"
+            note += f" plus {len(flagged)} {later} flagged rows)" if flagged else ")"
             header.append(note)
         if not b.add("\n".join(header)):
             break
