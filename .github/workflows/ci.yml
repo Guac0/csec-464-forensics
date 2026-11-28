@@ -58,11 +58,14 @@ jobs:
 
       # Tests use a fake `vol` executable fixture and recorded outputs in tests/fixtures;
       # no real memory images and no volatility3 install are needed here.
+      # `-n auto`: one pytest worker per CPU (pytest-xdist); every test uses its own temp
+      # dirs and database, so they are safe to run in parallel.
       - name: Run tests
-        run: pytest -q
+        run: pytest -q -n auto
 
   docker:
-    needs: test
+    # Runs in parallel with lint/test (no `needs:`): total CI time is the slowest job, not the
+    # sum. The trade-off: the image is still built when tests fail.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
