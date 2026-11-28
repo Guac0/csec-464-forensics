@@ -1,132 +1,65 @@
 # TODO
 
-Checklist of what is left after the infrastructure scaffold. Tick items off as they are done.
+What is still open. Tick items off as they are done, and delete them once merged.
 
-## 1. Git and GitHub setup (repo owner)
+For the forensics team's progress (which plugins, prompts and checks are still examples), the
+**Content** page in the app and `python -m forensics check` are always up to date. The checklist
+for the team is in [forensics/README.md](forensics/README.md#checklist-before-the-first-real-case).
 
-### Before the first commit
+## Repo owner
 
-- [X] **Replace placeholders:**
-  - `.github/CODEOWNERS`: `@TEAM_MEMBER_DEFAULT`, `@TEAM_MEMBER_FORENSICS_1`,
-    `@TEAM_MEMBER_FORENSICS_2` → real GitHub usernames.
-  - `.github/ISSUE_TEMPLATE/config.yml`: `OWNER/REPO` → `Guac0/csec-464-forensics`.
-- [X] **Set up pre-commit** (pins could not all be verified from the build sandbox):
-  ```bash
-  pip install -e ".[dev]"
-  pre-commit autoupdate
-  pre-commit install
-  pre-commit run --all-files
-  ```
-- [X] **Check nothing sensitive is staged:** `git add -A && git status` — no `.env`, no memory
-      images, no `data/`, `symbols/` or `__pycache__/`.
-- [X] **First commit and push:** `git commit -m "Initial scaffold" && git push -u origin main`.
-
-### On GitHub
-- [ ] **Watch the first CI run.** The `docker` job is the first real build against the
-      `python:3.12-slim` base image (the sandbox couldn't download it), so fix anything it finds.
+- [ ] **Watch the first CI run** of each job, especially `docker` (the first real build of the
+      image) and the new `forensics-content` job.
 - [ ] **Protect `main`** (Settings → Rules → Rulesets, or the `gh api` command in
-      [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)):
-  - require a pull request with 1 approval and Code Owner review,
-  - require status checks `lint`, `test`, `docker`,
-  - block force pushes and deletion.
-- [X] **Actions settings:** leave default workflow permissions as read-only (the workflows request
-      what they need).
-- [X] **Security settings:** enable secret scanning + push protection and Dependabot alerts if your
-      plan offers them (free on public repos).
-- [X] **Dependabot: alerts only, no PRs.** Delete `.github/dependabot.yml` after unzipping (it
-      only configures routine version-update PRs). In Settings → Code security, turn on
-      *Dependency graph* and *Dependabot alerts*, and leave *Dependabot security updates* **off**
-      (that setting is what opens security-fix PRs).
-- [ ] **Optional:** create a Projects board, labels (`volatility`, `ai`, `ui`, `infra`) and a
-      milestone for the demo date.
+      [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)): pull request with 1 approval, required checks
+      `lint`, `test`, `forensics-content`, `docker`, no force pushes or deletion.
+- [ ] **CODEOWNERS:** put the forensics team's GitHub usernames on `/forensics/` in
+      `.github/CODEOWNERS` and uncomment the line.
+- [ ] **AI evaluation on GitHub:** add the secrets `FT_AI_BASE_URL`, `FT_AI_API_KEY` and the
+      variable `FT_AI_MODEL` (optional `FT_AI_MAX_TOKENS`, `EVAL_RUNNER`). Check whether the RIT
+      endpoint is reachable from GitHub's runners; if not, use a self-hosted runner. Then save a
+      first baseline.
+- [ ] **Test the AI agent against the real provider:** `python -m app.ai.probe`, then a real
+      goal, then `python -m app.ai.probe task <id>`.
 - [ ] **Integration workflow:** pick a small public Windows memory sample, record its URL and
-      SHA-256, and run `integration.yml` manually once to check real volatility works in the image.
-- [ ] **Releases (optional):** pushing a tag `v*` publishes the image to
+      SHA-256, and run `integration.yml` once to check real volatility works in the image.
+- [ ] Optional: labels (`volatility`, `ai`, `ui`, `infra`), a project board and a milestone for
+      the demo date.
+- [ ] Optional: releases. Pushing a tag `v*` publishes the image to
       `ghcr.io/guac0/csec-464-forensics`; set the package visibility afterwards.
 
-## 2. Forensics hand-off (human team)
+## Decisions for later
 
-Everything marked `TODO(forensics)` in the code. Find it with `git grep -n "TODO(forensics)"`;
-the how-to is [forensics/README.md](forensics/README.md).
+- [ ] **Activity log level:** `FT_AUDIT_LEVEL` is `all` (every page and API request) during the
+      proof of concept. Switch the default in `app/config.py` to `key_reads` afterwards. The log
+      has no clean-up, so at `all` it keeps growing.
+- [ ] **Search index:** decide whether to turn on `FT_SEARCH_INDEX` after measuring real runs
+      (`python -m scripts.bench_rows --rows 1000000`). Existing runs can be indexed later with
+      `POST /api/runs/{id}/search-index`.
+- [ ] **Full re-hash before every run** (`FT_VERIFY_ON_RUN`) is off; the default check is size
+      and modification time. Decide per deployment.
+- [ ] **Volatility extras:** decide whether to depend on `volatility3[full]` (some Windows plugins
+      need its extra libraries). This changes `pyproject.toml`.
 
-- [x] **Plugin catalog** — add the Windows triage allowlist and supported PID filters in
-      `forensics/plugins/`.
-- [ ] **Preset queries** — add `presets` to each plugin.
-- [ ] **Investigation guide** — the `baseline` / `next` fields in `forensics/plugins/`: replace
-      the EXAMPLE steps with the team's workflow (how-to: forensics/README.md, "Investigation
-      guide").
-- [ ] **Auto-enumerate set** — set `auto_enumerate=True` on the plugins that should run first.
-- [ ] **Real output fixtures** — capture `vol -r jsonl` output for every catalog plugin into
-      `forensics/fixtures/<os>/` and replace the synthetic `windows/pstree.jsonl` and
-      `windows/cmdline.jsonl` (how-to: forensics/fixtures/README.md).
-- [ ] **Output parsing** — check `VolatilityRunner.parse_output` (`app/tools/volatility/runner.py`)
-      against those fixtures; add per-plugin post-processing where needed.
-- [ ] **Post-run hooks** — in the plugin files (how-to: forensics/README.md, "Hooks"). Review the
-      EXAMPLE OS-detection hook in `forensics/plugins/windows/info.py` against real output, and
-      add hooks that flag
-      suspicious rows, summarise runs as findings, and queue sensible follow-up plugins.
-- [ ] **AI prompts** — the four guidance files in `forensics/prompts/` (analysis, run summary,
-      "what should I run next?", agent). Compare before/after with `python -m evals.run`.
-- [ ] **Evaluation cases** — replace the `forensics/evals/cases/*_example.yaml` (synthetic
-      fixtures) with cases built from real captured output, then save a baseline per model.
-- [ ] **AI context** — `ai_context` / `select_ai_rows` in the plugin files: choose which rows of
-      each plugin are worth sending to the AI.
-- [ ] **Citation checking** — `forensics/citations.py`: which file extensions and number labels
-      are checked next to a citation. Review against real output and answers; meaning-level
-      checks (is the claim *true*?) are still manual.
-- [ ] **Dependencies** — decide whether to depend on `volatility3[full]` (some Windows plugins need
-      its extra libraries); this changes `pyproject.toml`.
-- [ ] **README** — fill in the stubbed **Features** section.
+## Known limitations
 
-## 3. Known infrastructure follow-ups
-
-- [ ] **Audit level:** `FT_AUDIT_LEVEL` defaults to `all` (every page/API request) for the PoC.
-      Switch the default in `app/config.py` to `key_reads` when evaluation is over.
-- [ ] Audit log has no retention/archiving; at level `all` it grows with every request.
-- [ ] Replace `.github/workflows/evals.yml` with the updated version (provided separately: provider
-      check, agent tool mode, step summary, save-baseline artifact, optional self-hosted runner)
-      and add the repo secrets `FT_AI_BASE_URL`, `FT_AI_API_KEY` + variables `FT_AI_MODEL`
-      (optional `FT_AI_MAX_TOKENS`, `EVAL_RUNNER`). Check whether the RIT endpoint is reachable
-      from GitHub-hosted runners; if not, use a self-hosted runner. Then save a first baseline.
-- [ ] Large results: decide whether to enable `FT_SEARCH_INDEX` after measuring real runs on the
-      team's machines (`python -m scripts.bench_rows --rows 1000000`); existing runs can be
-      indexed later with `POST /api/runs/{id}/search-index`.
-- [ ] Run deletion is manual (single or bulk clean-up); there is no automatic retention.
-      Deleting a whole evidence item is not supported yet.
-- [ ] Backups exclude dumped files by design, and live on the same machine (separate Docker
-      volume, usually the same disk). Copying them off-machine is manual
-      (`docker compose cp app:/backups ...`).
-- [ ] Set real `timeout_seconds` per catalog plugin once the catalog is final (filescan/dumpfiles
-      on big images may need more than the 1 h default).
-- [ ] Orphaned `vol` processes are only found after a crash on Linux (uses /proc); in Docker a
-      container restart ends them anyway.
-- [ ] A stalled run's Python thread cannot be killed: the watchdog frees its slot, but if the
-      thread is stuck holding SQLite's write lock the whole app waits until it lets go.
-- [ ] Decide (forensics team) which plugins may write files; they must be declared with
-      `writes_files=True`. Only the EXAMPLE pslist `--dump` is.
-- [ ] Audit anchors (`audit-anchors.jsonl`) live in the backup folder; someone with write access
-      to both volumes could still rewrite both. Copy backups/anchors off-machine for stronger
-      guarantees.
-
-- [ ] Comparison: set real `compare_keys` / `compare_ignore` for each catalog plugin (only EXAMPLE
-      keys for pslist and info exist). Comparisons hold both runs' key values in memory: fine
-      for typical runs, heavy for multi-million-row filescan runs. Values are compared exactly
-      (no case-insensitivity or path normalisation yet).
-- [ ] Indicators: no regex mode, no import/export of watchlists (e.g. STIX/CSV), and "Check all
-      images" re-reads every row (no incremental index). Indicator types are generic; columns
-      per plugin (e.g. which column holds a remote IP) are not used yet.
-- [ ] Case export: the report has no row data inline (it is in the ZIP's CSVs), skips page/API
-      request events, note edit history and full AI prompts. Revisit if reviewers need them.
-- [ ] Case export ZIPs are built in a temp file; very large runs or dumped files make big
-      downloads. No size limit or progress indicator yet.
-- [ ] Integrity: a full re-hash before each run is off by default (`FT_VERIFY_ON_RUN`); the
-      default pre-run check is size + modification time only. Decide per deployment.
-- [ ] The UI doesn't refresh automatically after hashing finishes (reload the page).
-- [x] Failed AI requests show the error text twice in the AI panel.
-- [ ] The gitleaks pre-commit hook only protects local commits; in CI it checks nothing.
-- [ ] Linux/macOS memory images (custom symbol tables) are out of scope for the PoC.
-- [ ] AI agent: test against the real provider (`python -m app.ai.probe`, then a real goal and
-      `python -m app.ai.probe task <id>`); replace the EXAMPLE agent eval case with real ones.
-      Design choices to revisit if needed: waiting for runs counts against the time limit (only
-      approval time is paused); runs a task queued keep going if the task ends by its time
-      limit; resumed tasks redo an AI call that was in progress when the app stopped.
+- Run deletion is manual (one run, or "Clean up"); there is no automatic retention, and a
+  whole image can't be deleted yet.
+- Backups skip dumped files on purpose and live on the same machine as the app. Copy them off
+  the machine yourself (`docker compose cp app:/backups ...`); the same goes for the audit
+  anchors stored next to them.
+- A stalled run's thread can't be killed: the watchdog frees its slot, but if it holds the
+  database's write lock, the app waits until it lets go. Leftover `vol` processes are only found
+  after a crash on Linux.
+- Comparisons keep both runs' key values in memory (heavy for multi-million-row runs) and
+  compare values exactly (no case or path normalisation).
+- Indicators have no regex mode and no watchlist import/export, "Check all images" re-reads
+  every row, and indicator types don't know which plugin column holds what.
+- Case reports have no row data inline (it's in the ZIP's CSVs) and skip page/API request
+  events, note edit history and full AI prompts. Export ZIPs have no size limit or progress bar.
+- The image page doesn't refresh by itself after hashing finishes.
+- The gitleaks pre-commit hook only protects local commits; CI doesn't run it.
+- Linux and macOS memory images are out of scope (they need custom symbol files).
+- AI agent design choices to revisit if needed: waiting for runs counts against the time limit
+  (only waiting for approval is paused); runs a task queued keep going if the task hits its time
+  limit; a resumed task redoes an AI call that was in progress when the app stopped.

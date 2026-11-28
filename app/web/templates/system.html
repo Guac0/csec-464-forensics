@@ -45,7 +45,7 @@
       <button type="submit">Back up now</button>
     </form>
   </div>
-  <p class="muted small-text">Database snapshot + raw tool output (no dumped files), with a manifest of SHA-256 hashes. Safe while the app runs. Restore with <span class="mono">python -m app.backup restore &lt;name&gt;</span> while the app is stopped (see README).</p>
+  <p class="muted small-text">Database snapshot + raw tool output (no dumped files), with a manifest of SHA-256 hashes. Safe while the app runs. Restore with <span class="mono">python -m app.backup restore &lt;name&gt;</span> while the app is stopped (see docs/USER_GUIDE.md, "Keeping data safe").</p>
   {% set state = backup_state %}{% include "_backup_status.html" %}
   {% if backups %}
   <table class="data small-text">

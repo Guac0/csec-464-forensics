@@ -70,8 +70,10 @@ operations). Open work: `TODO.md`.
 
 ## Documentation
 
-- Human docs, plain language, no AI phrasing: README.md, docs/DEVELOPMENT.md, TODO.md,
-  evidence/README.md, evals/README.md, forensics/README.md.
+- Human docs, plain language, no AI phrasing: README.md (short: run it + where to go next),
+  docs/USER_GUIDE.md (every feature, for analysts), docs/DEVELOPMENT.md, TODO.md,
+  evidence/README.md, evals/README.md, forensics/README.md (+ fixtures/README.md). When a
+  user-visible feature changes, update docs/USER_GUIDE.md; don't add feature lists to README.
 - AI docs, dense, start with the one-line "Written mainly for AI coding assistants" note:
   this file, CONTRACTS.md, docs/design/*, READMEs under app/, tests/fixtures/README.md.
 - Code comments in forensics content are written for humans; elsewhere they can be terse.

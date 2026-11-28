@@ -275,6 +275,27 @@ When the AI writes "explorer.exe (PID 2000) [R12:3]", the app checks that `explo
 decides which values are checked: file extensions, the words that mark a number as a PID or
 port, and how long Windows process names can be before they are cut off.
 
+## Checklist before the first real case
+
+The **Content** page and `python -m forensics check` show the live status of each item.
+
+- [ ] **Plugins:** review each plugin's options, description and `timeout_seconds` (big scans
+      may need more than the 1-hour default). Decide which plugins may write files.
+- [ ] **Presets:** add one-click queries where they help.
+- [ ] **Auto-enumerate:** choose the plugins that run automatically on every new image.
+- [ ] **Investigation guide:** replace the EXAMPLE `baseline` and `next` steps with the team's
+      workflow.
+- [ ] **Hooks:** review the EXAMPLE OS-detection hook in `plugins/windows/info.py`, then add
+      hooks that flag suspicious rows, summarise runs and queue sensible follow-ups.
+- [ ] **Comparison keys:** set `compare_keys` (and `compare_ignore`) for each plugin.
+- [ ] **Captured output:** capture real output for every plugin into `fixtures/` and replace
+      the two synthetic files. Check that the shared parser reads each one correctly.
+- [ ] **What the AI sees:** set `ai_context` (or `select_ai_rows`) for plugins with large output.
+- [ ] **Prompts:** replace the four EXAMPLE files in `prompts/`.
+- [ ] **Citation settings:** review `citations.py` against real answers.
+- [ ] **Evaluation cases:** replace the EXAMPLE cases with ones built from real output, then save
+      a baseline for each model you use.
+
 ## Tools
 
 | Command / page | What it does |
