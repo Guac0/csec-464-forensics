@@ -63,6 +63,7 @@ class RunOut(BaseModel):
     delete_reason: str | None = None
     chain_depth: int
     ai_message_id: int | None = None
+    ai_task_id: int | None = None
 
 
 class RunCreate(BaseModel):
@@ -107,6 +108,8 @@ def list_runs(session: SessionDep, evidence_id: int | None = None) -> list[Run]:
 def create_run(body: RunCreate, session: SessionDep) -> Run:
     if body.origin == RunOrigin.HOOK:
         raise HTTPException(422, "origin 'hook' is reserved for runs queued by post-run hooks")
+    if body.origin == RunOrigin.AI_AGENT:
+        raise HTTPException(422, "origin 'agent' is reserved for runs queued by AI agent tasks")
     try:
         return runs_service.create_run(
             session,

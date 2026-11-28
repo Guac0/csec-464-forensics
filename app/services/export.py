@@ -754,6 +754,13 @@ def _ai_section(session: Session, ev: Evidence) -> list[str]:
             out += [f"Request failed: {esc(m.error)}", ""]
         else:
             out += ["Answer:", "", fenced(m.content), ""]
+        if m.reasoning:
+            out += [
+                "Model reasoning (hidden from the answer; the model's own notes, not evidence):",
+                "",
+                fenced(m.reasoning),
+                "",
+            ]
         citations = m.citations or []
         details = [
             [

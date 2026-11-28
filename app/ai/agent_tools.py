@@ -7,7 +7,8 @@ with their citation key ``[R<run>:<row>]``.
 
 Adding a tool: write a function ``(session, evidence_id, args) -> ToolOutput``, add a
 ``ToolSpec`` to ``TOOLS`` (its JSON schema is shown to the model) and a test in
-tests/test_ai_agent.py. Keep tools read-only until run queuing with approvals exists.
+tests/test_ai_agent.py. Tools here stay read-only: the one acting tool, ``queue_run``, is
+handled by the agent loop itself because it needs the analyst's approval (app/ai/agent.py).
 """
 
 from __future__ import annotations
@@ -295,10 +296,10 @@ def run_tool(session: Session, evidence_id: int, name: str, args: Any) -> ToolOu
         return ToolOutput(f"ERROR: {exc}", f"error: {exc}")
 
 
-def describe_tools_for_text_protocol() -> str:
+def describe_tools_for_text_protocol(extra: tuple[ToolSpec, ...] = ()) -> str:
     """Tool list for models without native tool calling (see prompts.AGENT_TEXT_PROTOCOL)."""
     lines = []
-    for spec in TOOLS.values():
+    for spec in (*TOOLS.values(), *extra):
         params = spec.parameters.get("properties", {})
         required = set(spec.parameters.get("required", []))
         args = ", ".join(

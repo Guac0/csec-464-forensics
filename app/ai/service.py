@@ -162,6 +162,7 @@ def _run_pipeline(
             citations=validate_citations(session, content),
             suggestions=validate_suggestions(parse_suggestions(result.content)),
             usage=result.usage,
+            reasoning=result.reasoning or None,
         )
     session.add(reply)
     session.flush()

@@ -30,6 +30,14 @@ class TaskRequest(BaseModel):
     goal: str = Field(max_length=2000)
     max_steps: int | None = None
     max_seconds: int | None = None
+    max_runs: int | None = None
+    approve_all: bool = False  # "yes to all": the AI's run requests are approved automatically
+
+
+class DecisionRequest(BaseModel):
+    action: str = Field(pattern="^(approve|edit|deny)$")
+    args: dict[str, Any] | None = None  # for "edit"
+    note: str = Field(default="", max_length=500)  # for "deny"
 
 
 class RecommendRequest(BaseModel):
@@ -131,20 +139,26 @@ def start_task(body: TaskRequest, session: Session = Depends(get_session)) -> di
 
     try:
         task = agent.start_task(
-            session, body.evidence_id, body.goal, body.max_steps, body.max_seconds
+            session,
+            body.evidence_id,
+            body.goal,
+            body.max_steps,
+            body.max_seconds,
+            body.max_runs,
+            body.approve_all,
         )
     except agent.AgentError as exc:
         status = 404 if "not found" in str(exc) else 422
         raise HTTPException(status_code=status, detail=str(exc)) from exc
     session.refresh(task)
-    return agent.view(task).as_dict()
+    return agent.view(task, session).as_dict()
 
 
 @router.get("/tasks")
 def list_tasks(evidence_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:  # noqa: B008
     from app.ai import agent
 
-    return [agent.view(t).as_dict() for t in agent.list_tasks(session, evidence_id)]
+    return [agent.view(t, session).as_dict() for t in agent.list_tasks(session, evidence_id)]
 
 
 @router.get("/tasks/{task_id}")
@@ -152,7 +166,7 @@ def get_task(task_id: int, session: Session = Depends(get_session)) -> dict[str,
     from app.ai import agent
 
     try:
-        return agent.view(agent.get_task(session, task_id)).as_dict()
+        return agent.view(agent.get_task(session, task_id), session).as_dict()
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -162,6 +176,44 @@ def cancel_task(task_id: int, session: Session = Depends(get_session)) -> dict[s
     from app.ai import agent
 
     try:
-        return agent.view(agent.cancel_task(session, task_id)).as_dict()
+        return agent.view(agent.cancel_task(session, task_id), session).as_dict()
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/approve-all")
+def approve_all(task_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    """Switch the task to "yes to all" and approve its pending run requests."""
+    from app.ai import agent
+
+    try:
+        return agent.view(agent.approve_all_remaining(session, task_id), session).as_dict()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except agent.ApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/run-requests/{request_id}")
+def decide(
+    request_id: int,
+    body: DecisionRequest,
+    session: Session = Depends(get_session),  # noqa: B008
+) -> dict[str, Any]:
+    """Approve, edit (approve with other options) or deny an AI task's run request."""
+    from app.ai import agent
+
+    try:
+        req = agent.decide(session, request_id, body.action, body.args, body.note)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except agent.ApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "id": req.id,
+        "task_id": req.task_id,
+        "status": req.status,
+        "final_args": req.final_args,
+        "run_id": req.run_id,
+        "note": req.note,
+    }
