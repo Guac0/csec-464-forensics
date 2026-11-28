@@ -135,6 +135,12 @@ class Run(Base):
         index=True,
     )
     triggered_by_hook: Mapped[str | None] = mapped_column(String, default=None)
+    # Set when the run was started from a suggestion in this AI answer (origin "ai").
+    ai_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_messages.id", ondelete="SET NULL", name="fk_runs_ai_message_id"),
+        default=None,
+        index=True,
+    )
     # 0 for user/auto runs; parent's depth + 1 for hook follow-ups (loop guard).
     chain_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Set when the run was created with "Re-run" from another run.

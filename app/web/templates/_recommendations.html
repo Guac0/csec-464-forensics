@@ -16,6 +16,54 @@
   </div>
   {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
   {% if message %}<p class="flash">{{ message }}</p>{% endif %}
+  <div class="ai-recs">
+    <form class="ai-recommend" method="post" action="/ui/evidence/{{ evidence_id }}/recommendations/ai"
+          hx-post="/ui/evidence/{{ evidence_id }}/recommendations/ai" hx-target="#recommendations" hx-swap="outerHTML"
+          hx-indicator="#ai-rec-spinner" hx-disabled-elt="find button">
+      <input type="text" name="focus" maxlength="300" placeholder="Optional focus, e.g. suspect credential theft">
+      <button type="submit" class="small" title="The AI sees the runs so far, hook findings, flagged rows and these recommendations">Ask AI what to run next</button>
+      <span id="ai-rec-spinner" class="htmx-indicator spinner">Asking AI...</span>
+    </form>
+    {% if ai_rec %}
+    <div class="ai-rec-block">
+      <div class="small-label">AI suggestions — AI-generated lead, not evidence ·
+        <a href="#ai-msg-{{ ai_rec.id }}">answer {{ ai_rec.id }} in the AI chat</a> · <span class="muted">{{ ai_rec.created_at | dt }}</span></div>
+      {% if ai_rec_newer_runs %}<p class="small-text muted">{{ ai_rec_newer_runs }} other run(s) were queued since: ask again for up-to-date advice.</p>{% endif %}
+      {% if ai_rec.error %}
+      <p class="flash error small-text">AI error: {{ ai_rec.error }}</p>
+      {% else %}
+      {% set ai_valid = (ai_rec.suggestions or []) | selectattr("valid") | list %}
+      {% set sruns = suggestion_runs(evidence_id) %}
+      <ul class="recs">
+        {% for s in ai_valid %}
+        {% set s_args = s.get("normalized_args", s.args) %}
+        {% set srun = sruns.get(suggestion_key(s)) %}
+        <li class="rec">
+          <div><span class="badge">AI</span> <span class="mono">{{ s.plugin }}</span>{% if s_args %} <span class="mono small-text">{{ s_args | args }}</span>{% endif %}</div>
+          {% if s.reason %}<div class="small-text prewrap">{{ s.reason }}</div>{% endif %}
+          <div class="rec-actions">
+            {% if srun %}<span class="small-text muted">{{ srun.status }}: <a href="/runs/{{ srun.id }}">run {{ srun.id }}</a></span>{% endif %}
+            <form class="inline" method="post" action="/ui/evidence/{{ evidence_id }}/runs"
+                  hx-post="/ui/evidence/{{ evidence_id }}/runs" hx-target="#runs" hx-swap="outerHTML">
+              <input type="hidden" name="plugin" value="{{ s.plugin }}">
+              <input type="hidden" name="tool" value="{{ s.tool or 'volatility3' }}">
+              <input type="hidden" name="origin" value="ai">
+              <input type="hidden" name="ai_message_id" value="{{ ai_rec.id }}">
+              <input type="hidden" name="args_json" value='{{ s_args | tojson }}'>
+              <button type="submit" class="small{% if srun %} secondary{% endif %}">{% if srun %}Run again{% else %}Run{% endif %}</button>
+            </form>
+            <a class="button small" href="/evidence/{{ evidence_id }}?{{ case_amp }}plugin={{ s.plugin }}&amp;args={{ s_args | tojson | urlencode }}#query" title="Open in the query form to change options first">Edit</a>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% set ai_invalid = (ai_rec.suggestions or []) | length - ai_valid | length %}
+      {% if ai_invalid %}<p class="small-text muted">{{ ai_invalid }} invalid suggestion(s) not shown (see the chat for why).</p>{% endif %}
+      {% if not ai_rec.suggestions %}<p class="small-text muted">The answer had no suggestions (see the chat).</p>{% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
   {% if recs is none %}
   <p class="flash warn small-text">Recommendations are unavailable right now (see the <a href="/system">System</a> page).</p>
   {% else %}

@@ -21,6 +21,7 @@ METRICS: dict[str, str] = {
     "cited_sentence_ratio": "sentences with at least one citation / sentences",
     "mention_recall": "required terms present / required terms",
     "suggestion_validity": "valid suggestions / suggestions",
+    "expected_query_recall": "expected queries (plugin + args) suggested / expected queries",
     "judge_score": "AI judge score 1-5 (only with --judge; noisy)",
 }
 # Lower is better.
@@ -38,6 +39,7 @@ class ResolvedExpectations:
     must_mention: tuple[str, ...] = ()
     must_not_mention: tuple[str, ...] = ()
     suggest_plugins: tuple[str, ...] = ()
+    suggest_queries: tuple[tuple[str, dict[str, Any]], ...] = ()
     min_citations: int = 0
 
 
@@ -49,6 +51,11 @@ def sentences(text: str) -> list[str]:
         if len(part) >= 20 and not part.endswith(":") and not part.startswith("#"):
             out.append(part)
     return out
+
+
+def _query_matches(suggestion: dict[str, Any], plugin: str, args: dict[str, Any]) -> bool:
+    got = suggestion.get("normalized_args", suggestion.get("args")) or {}
+    return suggestion.get("plugin") == plugin and all(got.get(k) == v for k, v in args.items())
 
 
 def _ratio(num: int, den: int) -> float | None:
@@ -82,6 +89,11 @@ def score_answer(
     valid_suggestions = [s for s in suggestions if s.get("valid")]
     checked = {c["key"] for c in citations if c.get("support") in ("supported", "unsupported")}
     unsupported = sorted(c["key"] for c in citations if c.get("support") == "unsupported")
+    missing_queries = [
+        (plugin, args)
+        for plugin, args in expect.suggest_queries
+        if not any(_query_matches(s, plugin, args) for s in valid_suggestions)
+    ]
 
     metrics = {
         "citation_validity": _ratio(len(valid_cited), len(cited)),
@@ -92,6 +104,9 @@ def score_answer(
         "cited_sentence_ratio": _ratio(len(with_cite), len(sents)),
         "mention_recall": _ratio(len(mentioned), len(expect.must_mention)),
         "suggestion_validity": _ratio(len(valid_suggestions), len(suggestions)),
+        "expected_query_recall": _ratio(
+            len(expect.suggest_queries) - len(missing_queries), len(expect.suggest_queries)
+        ),
     }
     failed = []
     if cited - valid_cited:
@@ -115,6 +130,8 @@ def score_answer(
         s.get("plugin") in expect.suggest_plugins for s in valid_suggestions
     ):
         failed.append(f"no valid suggestion using {list(expect.suggest_plugins)}")
+    if missing_queries:
+        failed.append(f"did not suggest expected queries: {missing_queries}")
     if len(suggestions) > len(valid_suggestions):
         failed.append(f"{len(suggestions) - len(valid_suggestions)} invalid suggestion(s)")
     metrics["pass"] = 0.0 if failed else 1.0

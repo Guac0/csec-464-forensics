@@ -1,4 +1,4 @@
-<div id="ai-history" class="ai-history">
+<div id="ai-history" class="ai-history"{% if evidence_id %} hx-get="/ui/evidence/{{ evidence_id }}/ai" hx-trigger="ai-history-changed from:body" hx-swap="outerHTML"{% endif %}>
   {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
   {% for msg in messages %}
     {% include "_ai_message.html" %}

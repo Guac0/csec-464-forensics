@@ -29,7 +29,7 @@
     <dt>Tool</dt><dd class="mono">{{ run.tool }} {{ run.tool_version or "" }}</dd>
     <dt>Args</dt><dd class="mono">{{ run.args | args or "—" }}</dd>
     <dt>Exact argv</dt><dd><pre>{{ run.argv | argv }}</pre></dd>
-    <dt>Origin</dt><dd>{{ run.origin.value }}{% if run.parent_run_id %} — queued by hook <span class="mono">{{ run.triggered_by_hook }}</span> after <a href="/runs/{{ run.parent_run_id }}">run {{ run.parent_run_id }}</a> (chain depth {{ run.chain_depth }}){% endif %}{% if run.rerun_of_id %} — re-run of <a href="/runs/{{ run.rerun_of_id }}">run {{ run.rerun_of_id }}</a>{% endif %}</dd>
+    <dt>Origin</dt><dd>{{ run.origin.value }}{% if run.parent_run_id %} — queued by hook <span class="mono">{{ run.triggered_by_hook }}</span> after <a href="/runs/{{ run.parent_run_id }}">run {{ run.parent_run_id }}</a> (chain depth {{ run.chain_depth }}){% endif %}{% if run.rerun_of_id %} — re-run of <a href="/runs/{{ run.rerun_of_id }}">run {{ run.rerun_of_id }}</a>{% endif %}{% if run.ai_message_id %} — suggested by <a href="/evidence/{{ run.evidence_id }}#ai-msg-{{ run.ai_message_id }}">AI answer {{ run.ai_message_id }}</a>{% endif %}</dd>
     <dt>Evidence at run time</dt><dd class="mono small-text">{% if run.evidence_sha256 %}SHA-256 {{ run.evidence_sha256 }} · {{ run.evidence_size_bytes }} bytes{% if run.evidence_sha256 != run.evidence.sha256 %} <span class="badge status-failed" title="the image's current hash differs">differs from current hash</span>{% endif %}{% else %}—{% endif %}</dd>
     {% if run.integrity_warning %}<dt>Integrity warning</dt><dd><span class="flash warn">{{ run.integrity_warning }}</span></dd>{% endif %}
     <dt>Stdout SHA-256</dt><dd class="mono">{{ run.stdout_sha256 or "—" }}</dd>
