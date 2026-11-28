@@ -199,10 +199,23 @@
             hx-post="/ui/evidence/{{ ev.id }}/ai/ask" hx-target="#ai-history" hx-swap="outerHTML"
             hx-indicator="#ai-spinner" hx-disabled-elt="find button"
             hx-on::after-request="if(event.detail.successful) this.reset()">
-        <textarea name="question" rows="3" placeholder="Ask about this evidence…" required></textarea>
-        <label class="small-label">Restrict context to run ids (optional, e.g. 12, 13)
+        <div class="ask-mode small-text">
+          <label><input type="radio" name="mode" value="question" checked> Ask a question</label>
+          <label title="The AI searches this image's existing results step by step (read-only: it cannot run plugins)"><input type="radio" name="mode" value="goal"> Give the AI a goal</label>
+        </div>
+        <textarea name="question" rows="3" placeholder="Ask about this evidence… or give a goal, e.g. find processes named xyz" required></textarea>
+        <label class="small-label ask-question-only">Restrict context to run ids (optional, e.g. 12, 13)
           <input type="text" name="run_ids" inputmode="numeric" placeholder="all runs">
         </label>
+        <details class="small-text ask-goal-only">
+          <summary>Goal limits</summary>
+          <label class="small-label">Max steps (AI calls)
+            <input type="number" name="max_steps" min="1" max="50" placeholder="{{ agent_defaults.max_steps }}">
+          </label>
+          <label class="small-label">Time limit (minutes)
+            <input type="number" name="max_minutes" min="0.5" max="60" step="0.5" placeholder="{{ agent_defaults.max_minutes }}">
+          </label>
+        </details>
         <button type="submit">Ask</button>
         <span id="ai-spinner" class="htmx-indicator spinner">Asking AI...</span>
       </form>

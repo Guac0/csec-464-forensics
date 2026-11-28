@@ -25,6 +25,13 @@ class AskRequest(BaseModel):
     row_refs: list[str] | None = None
 
 
+class TaskRequest(BaseModel):
+    evidence_id: int
+    goal: str = Field(max_length=2000)
+    max_steps: int | None = None
+    max_seconds: int | None = None
+
+
 class RecommendRequest(BaseModel):
     evidence_id: int
     focus: str = Field(default="", max_length=300)
@@ -111,3 +118,50 @@ def messages(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> list[AIMessageOut]:
     return [message_out(m) for m in service.get_messages(session, evidence_id)]
+
+
+# --------------------------------------------------------------------------- AI agent tasks
+
+
+@router.post("/tasks", status_code=201)
+def start_task(body: TaskRequest, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    """Give the AI agent a goal for one image (read-only tools; runs in the background).
+    Poll GET /api/ai/tasks/{id} for status, steps and the answer message id."""
+    from app.ai import agent
+
+    try:
+        task = agent.start_task(
+            session, body.evidence_id, body.goal, body.max_steps, body.max_seconds
+        )
+    except agent.AgentError as exc:
+        status = 404 if "not found" in str(exc) else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    session.refresh(task)
+    return agent.view(task).as_dict()
+
+
+@router.get("/tasks")
+def list_tasks(evidence_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:  # noqa: B008
+    from app.ai import agent
+
+    return [agent.view(t).as_dict() for t in agent.list_tasks(session, evidence_id)]
+
+
+@router.get("/tasks/{task_id}")
+def get_task(task_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    from app.ai import agent
+
+    try:
+        return agent.view(agent.get_task(session, task_id)).as_dict()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/cancel")
+def cancel_task(task_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    from app.ai import agent
+
+    try:
+        return agent.view(agent.cancel_task(session, task_id)).as_dict()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

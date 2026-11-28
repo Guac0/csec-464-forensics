@@ -164,6 +164,16 @@ Team workflow, branch rules and guidance for AI coding assistants:
 - **Status:** infrastructure done, prompts TODO (forensics team)
 - Ask questions, summarise a run, cited claims with clickable row links, provenance dropdown,
   validated one-click query suggestions.
+- **Give the AI a goal** (switch in the AI chat form, e.g. "find processes named xyz"): the AI
+  agent works step by step with read-only tools on this image only (list runs, search rows
+  with text/column filters, read rows, read hook findings) and then answers with citations.
+  It cannot run plugins yet; when data is missing it says so and suggests runs (Run buttons).
+  The task shows live in the chat: current action, each step with the rows it looked at, step
+  count, elapsed time and the most time left, and a Cancel button. Limits per task (max steps,
+  time) default to `FT_AGENT_MAX_STEPS` / `FT_AGENT_MAX_SECONDS`. Tool calls use the
+  provider's native function calling, or a text protocol for models without it
+  (`FT_AI_TOOL_MODE=auto|native|text`). Reasoning models' `<think>` text is hidden from
+  all AI answers.
 - **Approach:** the AI never sees the memory image. It reads data the app already stored
   (parsed volatility rows, hook findings, notes) and answers as a *lead*, not evidence: every
   answer is labelled "AI-generated lead — not evidence" and must cite rows as `[R<run>:<row>]`,

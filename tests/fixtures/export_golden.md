@@ -10,7 +10,7 @@
 | Runs | 1 |
 | Application version | <VERSION> |
 | Tool versions | 2\.28\.2 |
-| AI prompt version (current) | `placeholder-2` |
+| AI prompt version (current) | `placeholder-3` |
 | Integrity mode | `strict` |
 | Audit log | verified, 16 events, head #16 `<HEAD>` |
 
@@ -108,7 +108,7 @@ PID 666 [R1:1] and [R1:99]. <script>alert(1)</script> | `tick` ``` *bold* [link]
 |  |  |
 |---|---|
 | Model (requested / returned) | `test-model` / `test-model` |
-| Prompt version | `placeholder-2` |
+| Prompt version | `placeholder-3` |
 | Parameters | `{"max_tokens": 2000, "model": "test-model", "temperature": 0.2}` |
 | Provider | `<PROVIDER>` |
 | Citations | 2 (1 invalid: R1:99) |

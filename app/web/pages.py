@@ -197,6 +197,8 @@ templates.env.filters.update(
     max_severity=max_severity,
     integrity_status=lambda ev: integrity_svc.status(ev),
     integrity_problem=lambda ev: integrity_svc.describe_problem(ev),
+    secs=lambda v: fmt_secs(v),
+    row_url=lambda k: row_url(k),
 )
 
 
@@ -339,6 +341,48 @@ def ai_history(session: Session, evidence_id: int) -> list[AIMessage]:
     return list(session.scalars(stmt))
 
 
+def ai_panel_context(session: Session, evidence_id: int) -> dict[str, Any]:
+    """Chat history plus AI agent tasks: a task's card replaces its goal message, and its
+    answer is shown inside the card (not again in the history)."""
+    from app.ai import agent
+
+    messages = ai_history(session, evidence_id)
+    try:
+        tasks = agent.list_tasks(session, evidence_id)
+    except Exception:  # e.g. a stubbed service in tests
+        tasks = []
+    by_id = {m.id: m for m in messages}
+    return {
+        "messages": messages,
+        "task_by_msg": {t.user_message_id: agent.view(t) for t in tasks if t.user_message_id},
+        "task_answers": {
+            t.answer_message_id: by_id.get(t.answer_message_id)
+            for t in tasks
+            if t.answer_message_id
+        },
+    }
+
+
+def fmt_secs(value: Any) -> str:
+    """Seconds -> '1:05' (or '1:02:03')."""
+    try:
+        total = max(0, int(value))
+    except (TypeError, ValueError):
+        return "—"
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def row_url(key: str) -> str:
+    """'R12:3' -> the row's link (see CONTRACTS.md)."""
+    m = _CITE_KEY_RE.fullmatch(key or "")
+    if not m:
+        return "#"
+    run_id, row_idx = m.group(1), m.group(2)
+    return f"/runs/{run_id}?row={row_idx}#row-{run_id}-{row_idx}"
+
+
 def stderr_tail(run: Run) -> str | None:
     if not run.stderr_path:
         return None
@@ -403,7 +447,7 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "notes": list_scoped_notes(session, ev.id),
         "runs": runs,
         "polling": any(r.status in ACTIVE_STATUSES for r in runs),
-        "messages": ai_history(session, ev.id),
+        **ai_panel_context(session, ev.id),
         "runs_panel": True,
         "values": {},
         "integrity_status": integrity_svc.status(ev),
@@ -411,6 +455,10 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "integrity_checks": integrity_svc.list_checks(session, ev.id)[:20],
         "integrity_mode": get_settings().integrity_mode,
         "verify_on_run": get_settings().verify_on_run,
+        "agent_defaults": {
+            "max_steps": get_settings().agent_max_steps,
+            "max_minutes": round(get_settings().agent_max_seconds / 60, 1),
+        },
         "hashing": evidence_svc.is_hashing(ev.id),
         "cleanup": _cleanup_summary(session, ev.id),
         **recommendations_context(session, ev.id),
@@ -1105,7 +1153,7 @@ def ui_ai_history(request: Request, evidence_id: int, session: SessionDep) -> Re
     return render(
         request,
         "_ai_history.html",
-        messages=ai_history(session, evidence_id),
+        **ai_panel_context(session, evidence_id),
         evidence_id=evidence_id,
         runs_panel=True,
     )
@@ -1123,10 +1171,26 @@ def ui_ai_ask(
     form: FormDep,
     session: SessionDep,
 ) -> Response:
+    """Ask a question, or (mode=goal) give the AI agent a goal (app/ai/agent.py)."""
+    from app.ai import agent
+
     get_evidence_or_404(session, evidence_id)
     question = (form.get("question") or "").strip()
     error = None
-    if question:
+    if form.get("mode") == "goal":
+        try:
+            minutes = (form.get("max_minutes") or "").strip()
+            agent.start_task(
+                session,
+                evidence_id,
+                question,
+                max_steps=form.get("max_steps") or None,
+                max_seconds=int(float(minutes) * 60) if minutes else None,
+            )
+        except (agent.AgentError, ValueError) as exc:
+            session.rollback()
+            error = str(exc)
+    elif question:
         ai_svc.ask(session, evidence_id, question, run_ids=_parse_int_list(form.get("run_ids")))
         session.commit()
     else:
@@ -1136,7 +1200,7 @@ def ui_ai_ask(
     return render(
         request,
         "_ai_history.html",
-        messages=ai_history(session, evidence_id),
+        **ai_panel_context(session, evidence_id),
         evidence_id=evidence_id,
         runs_panel=True,
         error=error,

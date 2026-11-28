@@ -263,7 +263,27 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `Run.ai_message_id` (migration `0013_run_ai_message`): the AI answer whose suggestion started the
   run; only with origin `ai`, same evidence, assistant message (`runs.create_run(...,
   ai_message_id=)`, UI form field `ai_message_id`, API `RunCreate.ai_message_id`).
-- `app/api/ai.py`: `/api/ai/...` (incl. `POST /api/ai/recommend {evidence_id, focus}`)
+- `app/api/ai.py`: `/api/ai/...` (incl. `POST /api/ai/recommend {evidence_id, focus}`,
+  `POST /api/ai/tasks {evidence_id, goal, max_steps?, max_seconds?}`, `GET /api/ai/tasks?evidence_id=`,
+  `GET /api/ai/tasks/{id}`, `POST /api/ai/tasks/{id}/cancel`)
+- `AIClient.chat(messages, tools=None)`: `AIResult.tool_calls` ([`ToolCall(id, name, arguments,
+  raw_arguments)`]), `AIResult.reasoning` (`<think>` / `reasoning_content`, stripped from
+  `content`), `AIError.status_code`.
+
+### AI agent (goal tasks, read-only)
+- `app/ai/agent.py`: `start_task(session, evidence_id, goal, max_steps=None, max_seconds=None)
+  -> AITask` (background daemon thread, `FT_AGENT_MAX_CONCURRENT` at once), `run_task(task_id,
+  client=None)`, `cancel_task`, `recover_tasks` (startup: queued/running -> interrupted),
+  `view(task) -> TaskView` (elapsed, at-most-left, `as_dict()`), `get_task`, `list_tasks`,
+  `describe_call`. Protocol `FT_AI_TOOL_MODE` auto|native|text (auto falls back to text on
+  HTTP 400/404/405/415/422/501 with tools, or when the model writes an ```action block).
+- `app/ai/agent_tools.py`: `TOOLS` (`list_runs`, `search_rows`, `get_rows`, `get_findings`;
+  scoped to the task's image, read-only, output capped at 8000 chars), `run_tool`.
+- Models `AITask` / `AITaskStep` (migration `0014_ai_tasks`); goal and answer are AIMessages
+  (`user_message_id`, `answer_message_id`; answer `context_refs["kind"] == "agent"`).
+- Audit: `ai.agent.start|tool (key_read)|answer|cancel|finish|interrupted`.
+- UI: chat form `mode=goal` (+ `max_steps`, `max_minutes`) on `/ui/evidence/{id}/ai/ask`; card
+  `/ui/ai/tasks/{id}` (polls every 2 s while active), `POST /ui/ai/tasks/{id}/cancel`.
 
 ### Web UI (temporary)
 - `app/web/pages.py`: `router` (HTML pages, HTMX fragments), templates in `app/web/templates`,

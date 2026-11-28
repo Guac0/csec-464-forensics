@@ -510,3 +510,72 @@ class DismissedRecommendation(Base):
     args: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_by: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AITaskStatus(enum.StrEnum):
+    QUEUED = "queued"  # waiting for a free agent slot
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"  # the app stopped while the task ran
+
+
+class AITask(Base):
+    """A goal the analyst gave the AI agent for one image (see app/ai/agent.py).
+
+    The agent works in steps: each step is one model call plus the tool calls it asked for
+    (read-only: list runs, search rows, read rows, read findings). The analyst's goal and the
+    final answer are AIMessages, so the task also appears in the AI chat history.
+    """
+
+    __tablename__ = "ai_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    evidence_id: Mapped[int] = mapped_column(ForeignKey("evidence.id"), index=True)
+    goal: Mapped[str] = mapped_column(Text)
+    status: Mapped[AITaskStatus] = mapped_column(Enum(AITaskStatus), default=AITaskStatus.QUEUED)
+    # {"max_steps": int, "max_seconds": int}
+    limits: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # "native" (function calling) or "text" (JSON action blocks): the protocol actually used.
+    tool_mode: Mapped[str | None] = mapped_column(String, default=None)
+    steps_used: Mapped[int] = mapped_column(Integer, default=0)
+    current_action: Mapped[str | None] = mapped_column(String, default=None)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    user_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_messages.id", ondelete="SET NULL"), default=None
+    )
+    answer_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_messages.id", ondelete="SET NULL"), default=None
+    )
+    created_by: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    steps: Mapped[list[AITaskStep]] = relationship(
+        back_populates="task", order_by="AITaskStep.idx", cascade="all, delete-orphan"
+    )
+
+
+class AITaskStep(Base):
+    """One thing an AI task did: a tool call (with a summary of its result), or a note."""
+
+    __tablename__ = "ai_task_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("ai_tasks.id", ondelete="CASCADE"), index=True)
+    idx: Mapped[int] = mapped_column(Integer)
+    turn: Mapped[int] = mapped_column(Integer)  # model call number (1-based)
+    kind: Mapped[str] = mapped_column(String)  # "tool" | "note" | "error"
+    tool: Mapped[str | None] = mapped_column(String, default=None)
+    args: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    summary: Mapped[str] = mapped_column(Text, default="")  # human-readable result summary
+    # Row keys the result contained (R<run>:<row>), for links.
+    row_keys: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    task: Mapped[AITask] = relationship(back_populates="steps")
