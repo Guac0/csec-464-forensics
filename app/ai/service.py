@@ -19,12 +19,11 @@ from app.ai.client import AIClient, AIError
 from app.ai.context import NotFoundError, build_context, build_state_context
 from app.ai.prompts import (
     MAX_FOCUS_CHARS,
-    PROMPT_VERSION,
     RECOMMEND_DISPLAY,
-    RECOMMEND_FOCUS,
-    RECOMMEND_QUESTION,
-    SUMMARIZE_RUN_QUESTION,
     build_system_prompt,
+    prompt_version,
+    recommend_question,
+    run_summary_question,
 )
 from app.ai.suggestions import parse_suggestions, strip_suggestions_block, validate_suggestions
 from app.config import get_settings
@@ -126,7 +125,7 @@ def _run_pipeline(
             "context_refs": context_refs,
             "model": params.get("model"),
             "provider_base_url": client.base_url,
-            "prompt_version": PROMPT_VERSION,
+            "prompt_version": prompt_version(),
             "request_sha256": _sha256_json(messages),
         },
     )
@@ -138,7 +137,7 @@ def _run_pipeline(
         "model_requested": str(params["model"]),
         "provider_base_url": client.base_url,
         # What was sent to the provider, plus the prompt version (not sent; for provenance).
-        "params": {**params, "prompt_version": PROMPT_VERSION},
+        "params": {**params, "prompt_version": prompt_version()},
         "request_messages": messages,
         "context_refs": context_refs,
     }
@@ -221,7 +220,7 @@ def summarize_run(session: Session, run_id: int, client: AIClient | None = None)
     run = session.get(Run, run_id)
     if run is None:
         raise NotFoundError(f"run {run_id} not found")
-    question = SUMMARIZE_RUN_QUESTION.format(run_id=run.id, plugin=run.plugin)
+    question = run_summary_question(run.id, run.plugin)
     return _run_pipeline(
         session,
         run.evidence_id,
@@ -246,7 +245,7 @@ def recommend_next(
     if session.get(Evidence, evidence_id) is None:
         raise NotFoundError(f"evidence {evidence_id} not found")
     context = build_state_context(session, evidence_id)
-    question = RECOMMEND_QUESTION.format(focus=RECOMMEND_FOCUS.format(focus=focus) if focus else "")
+    question = recommend_question(focus)
     display = RECOMMEND_DISPLAY + (f" Focus: {focus}" if focus else "")
     return _run_pipeline(
         session,

@@ -7,6 +7,7 @@ rows). Every row is prefixed with its citation key so the model can cite it as [
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable
 from typing import Any
 
@@ -16,6 +17,10 @@ from sqlalchemy.orm import Session
 from app.ai.citations import parse_key
 from app.models import Evidence, Note, ResultRow, Run, RunStatus
 from app.services import integrity
+from app.tools import content
+from app.tools.hooks import HookRow
+
+logger = logging.getLogger(__name__)
 
 TRUNCATED_MARKER = "[truncated]"
 
@@ -28,9 +33,14 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str, separators=(", ", ": "))
 
 
-def format_row(row: ResultRow) -> str:
+def format_row(row: ResultRow, columns: Iterable[str] = ()) -> str:
+    """``[R1:2] {...}`` (+ hook flags). ``columns``: show only these (per-plugin AI context)."""
     indent = "  " * max(row.depth, 0)
-    text = f"{indent}[{row.citation}] {_json(row.data)}"
+    data = row.data
+    wanted = tuple(columns)
+    if wanted and isinstance(data, dict):
+        data = {k: v for k, v in data.items() if k in wanted}
+    text = f"{indent}[{row.citation}] {_json(data)}"
     if row.annotations:
         flags = "; ".join(
             f"{a.get('tag')} ({a.get('severity')})" + (f": {a['note']}" if a.get("note") else "")
@@ -150,6 +160,40 @@ def _requested_rows(
     return rows, missing
 
 
+def _selected_rows(
+    session: Session, run: Run, rules: Any, limit: int
+) -> tuple[list[ResultRow] | None, str]:
+    """Rows picked by the plugin file's ``select_ai_rows`` (None = use the first ``limit``).
+    A failing selector falls back to the default and says so in the run header."""
+    if rules is None or rules.select is None:
+        return None, ""
+    stream = (
+        HookRow(r.row_idx, r.depth, r.parent_idx, dict(r.data or {}))
+        for r in session.execute(
+            select(ResultRow).where(ResultRow.run_id == run.id).order_by(ResultRow.row_idx)
+        )
+        .yield_per(1000)
+        .scalars()
+    )
+    try:
+        picked: list[int] = []
+        for idx in rules.select(stream):
+            if int(idx) not in picked:
+                picked.append(int(idx))
+            if len(picked) >= limit:
+                break
+    except Exception as exc:  # noqa: BLE001  (team code must not break AI answers)
+        logger.warning("select_ai_rows for %s failed: %s", run.plugin, exc)
+        return None, f"(custom row selection failed: {type(exc).__name__}; showing first rows)"
+    by_idx = {
+        r.row_idx: r
+        for r in session.execute(
+            select(ResultRow).where(ResultRow.run_id == run.id, ResultRow.row_idx.in_(picked))
+        ).scalars()
+    }
+    return [by_idx[i] for i in picked if i in by_idx], ""
+
+
 def build_context(
     session: Session,
     evidence_id: int,
@@ -217,45 +261,53 @@ def build_context(
         header.extend(_findings_block(run))
         if run.artifacts:
             header.append(_artifacts_line(run))
-        rows = list(
-            session.execute(
-                select(ResultRow)
-                .where(ResultRow.run_id == run.id)
-                .order_by(ResultRow.row_idx)
-                .limit(max_rows_per_run)
+        rules = content.current().ai.get(run.plugin)
+        limit = (rules.settings.max_rows if rules else None) or max_rows_per_run
+        columns = rules.settings.columns if rules else ()
+        rows, note = _selected_rows(session, run, rules, limit)
+        custom = rows is not None
+        if note:
+            header.append(note)
+        if rows is None:
+            rows = list(
+                session.execute(
+                    select(ResultRow)
+                    .where(ResultRow.run_id == run.id)
+                    .order_by(ResultRow.row_idx)
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
         shown_first = len(rows)
+        shown = {r.row_idx for r in rows}
         # Rows flagged by hooks beyond the first N are included too, so flags are never hidden
         # just because the row appears late in the output.
-        flagged = (
-            session.execute(
-                select(ResultRow)
-                .where(
-                    ResultRow.run_id == run.id,
-                    ResultRow.row_idx >= shown_first,
-                    ResultRow.annotations.is_not(None),
-                )
-                .order_by(ResultRow.row_idx)
-                .limit(max_rows_per_run)
+        flagged_q = select(ResultRow).where(
+            ResultRow.run_id == run.id, ResultRow.annotations.is_not(None)
+        )
+        if not custom:
+            flagged_q = flagged_q.where(ResultRow.row_idx >= shown_first)
+        flagged = [
+            r
+            for r in session.execute(
+                flagged_q.order_by(ResultRow.row_idx).limit(max_rows_per_run + len(shown))
             )
             .scalars()
             .all()
-        )
+            if r.row_idx not in shown
+        ][:max_rows_per_run]
         rows.extend(flagged)
         if rows and run.row_count > len(rows):
-            note = f"(showing first {shown_first} of {run.row_count} rows"
-            note += f" plus {len(flagged)} later flagged rows)" if flagged else ")"
+            what = "chosen by the plugin's row selection" if custom else "first"
+            note = f"(showing {what} {shown_first} of {run.row_count} rows"
+            note += f" plus {len(flagged)} other flagged rows)" if flagged else ")"
             header.append(note)
-        # TODO(forensics): per-plugin summarization / row selection (e.g. only suspicious
-        # malfind hits, collapsed pstree branches) instead of the first N rows.
         if not b.add("\n".join(header)):
             break
         included_runs.append(run.id)
         for row in rows:
-            if not b.add(format_row(row), row_key=row.citation):
+            if not b.add(format_row(row, columns), row_key=row.citation):
                 break
         if b.truncated:
             break

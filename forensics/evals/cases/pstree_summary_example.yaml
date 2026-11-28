@@ -1,0 +1,17 @@
+# EXAMPLE case - TODO(forensics): replace with cases built from REAL captured output.
+id: pstree-summary-example
+description: Use "summarize run" on a small process tree.
+tags: [example, summary]
+runs:
+  - plugin: windows.pslist.PsList
+    fixture: forensics/fixtures/windows/pstree.jsonl
+summarize_run: 0
+expect:
+  must_mention: ["System", "services.exe"]
+  must_not_mention: ["mimikatz"]
+  min_citations: 2
+judge:
+  rubric: >-
+    Describes the tree (System -> smss.exe -> csrss.exe / wininit.exe -> services.exe, plus
+    explorer.exe) accurately with citations, highlights explorer.exe's missing parent as a lead,
+    and invents nothing.

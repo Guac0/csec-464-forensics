@@ -57,24 +57,23 @@ the how-to is [forensics/README.md](forensics/README.md).
       guide").
 - [ ] **Auto-enumerate set** — set `auto_enumerate=True` on the plugins that should run first.
 - [ ] **Real output fixtures** — capture `vol -r jsonl` output for every catalog plugin into
-      `tests/fixtures/` and replace the synthetic `sample_pstree.jsonl`.
+      `forensics/fixtures/<os>/` and replace the synthetic `windows/pstree.jsonl` and
+      `windows/cmdline.jsonl` (how-to: forensics/fixtures/README.md).
 - [ ] **Output parsing** — check `VolatilityRunner.parse_output` (`app/tools/volatility/runner.py`)
       against those fixtures; add per-plugin post-processing where needed.
 - [ ] **Post-run hooks** — in the plugin files (how-to: forensics/README.md, "Hooks"). Review the
       EXAMPLE OS-detection hook in `forensics/plugins/windows/info.py` against real output, and
       add hooks that flag
       suspicious rows, summarise runs as findings, and queue sensible follow-up plugins.
-- [ ] **AI prompts** — `app/ai/prompts.py`: the analysis system prompt, the run-summary question
-      and the "what should I run next?" question (`RECOMMEND_QUESTION`), and the agent prompt
-      (`AGENT_SYSTEM_PROMPT`).
-      Bump `PROMPT_VERSION` with each change and compare with `python -m evals.run`.
-- [ ] **Evaluation cases** — replace the two `evals/cases/*_example.yaml` (synthetic fixture) with
-      cases built from real captured output, then save a baseline per model you use.
-- [ ] **AI context** — `app/ai/context.py`: choose which rows of each plugin are worth sending.
-- [ ] **Citation checking** — `app/ai/citations.py` now checks that typed values (IPs, paths,
-      file names, hex, labelled PIDs/ports, quoted text) next to a citation appear in the cited
-      row(s). Review it against real output: tune what is extracted and the volatility path
-      forms it treats as equal; meaning-level checks (is the claim *true*?) are still manual.
+- [ ] **AI prompts** — the four guidance files in `forensics/prompts/` (analysis, run summary,
+      "what should I run next?", agent). Compare before/after with `python -m evals.run`.
+- [ ] **Evaluation cases** — replace the `forensics/evals/cases/*_example.yaml` (synthetic
+      fixtures) with cases built from real captured output, then save a baseline per model.
+- [ ] **AI context** — `ai_context` / `select_ai_rows` in the plugin files: choose which rows of
+      each plugin are worth sending to the AI.
+- [ ] **Citation checking** — `forensics/citations.py`: which file extensions and number labels
+      are checked next to a citation. Review against real output and answers; meaning-level
+      checks (is the claim *true*?) are still manual.
 - [ ] **Dependencies** — decide whether to depend on `volatility3[full]` (some Windows plugins need
       its extra libraries); this changes `pyproject.toml`.
 - [ ] **README** — fill in the stubbed **Features** section.

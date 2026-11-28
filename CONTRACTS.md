@@ -138,11 +138,14 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `GET /api/system/biggest-runs`. Audit `backup.create|failed|prune|restore`.
 
 ### AI evaluation harness
-- `evals/` (dev tooling, not shipped in the image): `python -m evals.run` (CLI), `evals/cases/*.yaml`
-  (cases), `evals/scoring.py` (pure scoring/aggregation/baseline comparison), `evals/judge.py`
-  (optional AI judge), `evals/baselines/<model>.json` (committed), `evals/reports/` (ignored).
-- `app/ai/prompts.PROMPT_VERSION`: bump on any prompt/context change; stored in
-  `AIMessage.params["prompt_version"]`, the `ai.*.request` audit event and eval reports.
+- `evals/` (dev tooling, not shipped in the image): `python -m evals.run` (CLI; `--cases-dir`,
+  default `evals.cases.CASES_DIR` = `forensics/evals/cases/`), `evals/scoring.py` (pure
+  scoring/aggregation/baseline comparison), `evals/judge.py` (optional AI judge),
+  `forensics/evals/baselines/<model>.json` (committed), `evals/reports/` (ignored). Infra tests
+  use `tests/content/evals/cases/` (copies referencing `tests/fixtures/`).
+- `app/ai/prompts.prompt_version()`: `p-<sha256[:8]>` of the guidance files + fixed rules (no
+  manual bump); stored in `AIMessage.params["prompt_version"]`, the `ai.*.request` audit event,
+  exports and eval reports.
 - Manual GitHub workflow `.github/workflows/evals.yml` (provider from repo secrets).
 
 ### Large results
@@ -262,8 +265,19 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 
 ### AI layer
 - `app/ai/client.py`: `AIClient(settings, transport=None).chat(messages, **overrides) -> AIResult`
-- `app/ai/context.py`: `build_context(session, evidence_id, run_ids=None, row_refs=None) -> tuple[str, dict]`
-- `app/ai/prompts.py`: system prompt templates — **TODO(forensics)** refine
+- `app/ai/context.py`: `build_context(session, evidence_id, run_ids=None, row_refs=None) -> tuple[str, dict]`;
+  per plugin `content.current().ai[plugin]` (`AIRows(settings=AIContext(max_rows, columns),
+  select)`): `max_rows` replaces `max_rows_per_run`, `columns` filters `format_row(row,
+  columns)`, `select(rows: Iterator[HookRow]) -> Iterable[row_idx]` picks rows (capped; errors
+  fall back to first rows with a header note); hook-flagged rows always added.
+- `app/ai/prompts.py`: fixed rules (`ANALYSIS_RULES`, `RECOMMEND_RULES`, `AGENT_RULES`,
+  `AGENT_TEXT_PROTOCOL`) appended to team guidance `<root>/prompts/{analysis,run_summary,
+  recommend_next,agent}.md` (leading `<!-- -->` stripped; `{run_id}`/`{plugin}` replaced
+  literally; missing file = no guidance). API: `guidance(name)`, `build_system_prompt(tool)`,
+  `run_summary_question(run_id, plugin)`, `recommend_question(focus)`,
+  `agent_system_prompt(max_runs, max_steps)`, `prompt_version()`, `render_allowlist`.
+- `app/ai/citations.py` tunables from `<root>/citations.py` (`FILE_EXTENSIONS`, `NUMBER_LABELS`,
+  `TRUNCATED_NAME_LENGTH`; defaults `DEFAULT_*`), compiled + cached per value set.
 - `app/ai/citations.py`: `extract_citations(text) -> list[str]`, `validate_citations(session, text) -> list[dict]`
   - Each citation dict (stored in `AIMessage.citations`): `key`, `run_id`, `row_idx`, `url`,
     `valid` (row exists), `support` (`supported` | `unsupported` | `unchecked` | `not_found`),

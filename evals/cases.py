@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CASES_DIR = Path(__file__).resolve().parent / "cases"
+CASES_DIR = REPO_ROOT / "forensics" / "evals" / "cases"
 
 
 class CaseError(ValueError):

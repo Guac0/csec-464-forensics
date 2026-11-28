@@ -4,6 +4,8 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.ai.context import TRUNCATED_MARKER, NotFoundError, build_context
+from app.tools import content
+from app.tools.content import AIContext, AIRows
 from tests.test_ai_helpers import seed
 
 
@@ -69,3 +71,43 @@ def test_context_truncation_is_deterministic(session: Session) -> None:
 def test_context_unknown_evidence(session: Session) -> None:
     with pytest.raises(NotFoundError):
         build_context(session, 12345)
+
+
+# --- per-plugin AI rows (Plugin.ai_context / select_ai_rows in a content file) -------------
+
+
+def test_context_per_plugin_limit_and_columns(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ev, run = seed(session, n_rows=10)
+    rules = AIRows(AIContext(max_rows=3, columns=("PID",)))
+    monkeypatch.setitem(content.current().ai, run.plugin, rules)
+    text, refs = build_context(session, ev.id)
+    assert refs["row_refs_included"] == [f"R{run.id}:{i}" for i in range(3)]
+    assert f'[R{run.id}:0] {{"PID": 100}}' in text and "p0.exe" not in text
+
+
+def test_context_custom_row_selection(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    ev, run = seed(session, n_rows=10)
+
+    def odd(rows):
+        return (r.row_idx for r in rows if r.data["PID"] % 2)
+
+    monkeypatch.setitem(content.current().ai, run.plugin, AIRows(AIContext(max_rows=2), odd))
+    text, refs = build_context(session, ev.id)
+    assert refs["row_refs_included"] == [f"R{run.id}:1", f"R{run.id}:3"]
+    assert "chosen by the plugin's row selection 2 of 10 rows" in text
+
+
+def test_context_failing_row_selection_falls_back(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ev, run = seed(session, n_rows=5)
+
+    def broken(rows):
+        raise KeyError("nope")
+
+    monkeypatch.setitem(content.current().ai, run.plugin, AIRows(AIContext(max_rows=2), broken))
+    text, refs = build_context(session, ev.id)
+    assert refs["row_refs_included"] == [f"R{run.id}:0", f"R{run.id}:1"]
+    assert "custom row selection failed: KeyError" in text

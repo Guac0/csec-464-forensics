@@ -1,8 +1,8 @@
 # Forensics content: start here
 
 This folder holds everything the forensics team owns: which volatility3 plugins the tool may
-run, with which options, what it recommends running next, and the hooks that flag interesting
-rows. The rest of the repository (the web app, the job runner, the AI plumbing) is the
+run, with which options, what it recommends running next, the hooks that flag interesting rows,
+what the AI is told, and the material used to test the AI. The rest of the repository (the web app, the job runner, the AI plumbing) is the
 infrastructure. You shouldn't need to touch it to add or change forensic content.
 
 Each plugin lives in its own file, and the file holds everything about that plugin.
@@ -19,12 +19,14 @@ forensics/
       malware_malfind.py   windows.malware.malfind.Malfind
       ...
   hooks/               hooks that read several plugins' output (rare)
+  prompts/             what the AI is told (plain text)
+  citations.py         which values in AI answers are checked against the cited rows
+  fixtures/            real volatility output, one file per plugin
+  evals/cases/         test cases for the AI; evals/baselines/ holds saved scores
 ```
 
-Still outside this folder for now (they move here in a later change): the AI prompts
-(`app/ai/prompts.py`), which rows are sent to the AI (`app/ai/context.py`), citation checking
-(`app/ai/citations.py`), evaluation cases (`evals/cases/`) and captured output
-(`tests/fixtures/`). Search for `TODO(forensics)` to find everything left to review.
+Search for `TODO(forensics)` to find everything left to review. Output parsing is shared by all
+plugins (`app/tools/volatility/runner.py`); hooks are the place to interpret a plugin's rows.
 
 ## Add a plugin
 
@@ -93,6 +95,7 @@ PLUGIN = Plugin(
 | `compare_ignore` | Extra columns that shouldn't count as a change on the comparison page. |
 | `baseline` | Put the plugin in the standard first pass: `Baseline(10, "why")`. Lower numbers come first. |
 | `next` | Suggestions shown after this plugin ran: `Next("windows.pstree.PsTree", "why", ...)`. |
+| `ai_context` | Which rows the AI sees: `AIContext(max_rows=100, columns=["PID", "ImageFileName"])`. See "What the AI sees". |
 
 Each option in `args` is an `Arg`:
 
@@ -190,6 +193,76 @@ To test a hook without volatility, insert a run with rows from captured output a
 `hooks.run_hooks(session, run_id)`. `tests/test_hooks.py::test_example_windows_info_hook` shows
 the pattern.
 
+## What the AI sees
+
+When an analyst asks the AI a question, the app sends the image's details, its notes and rows from
+its runs. By default that is the first 50 rows of each run (200 for "Summarize this run"), plus
+every row a hook flagged. Per plugin you can change it:
+
+- `ai_context=AIContext(max_rows=100)`: send more or fewer rows.
+- `ai_context=AIContext(columns=["PID", "ImageFileName"])`: only send these columns. Shorter rows
+  mean more rows fit, but the AI can't mention what it doesn't see.
+- A function named `select_ai_rows` in the plugin file picks the rows itself. It gets every row
+  in order and returns the `row_idx` of the rows to send, most important first:
+
+  ```python
+  def select_ai_rows(rows):
+      for row in rows:
+          if row.data.get("Protection") == "PAGE_EXECUTE_READWRITE":
+              yield row.row_idx
+  ```
+
+  If it raises an error, the AI gets the first rows instead and the context says so.
+
+## Prompts
+
+The files in `prompts/` are the instructions the AI gets. Write them as plain text to the AI:
+
+| File | Used for |
+|---|---|
+| `analysis.md` | Every analysis answer (questions in the AI panel, run summaries). |
+| `run_summary.md` | The "Summarize this run" question. `{run_id}` and `{plugin}` are filled in. |
+| `recommend_next.md` | The "What should I run next?" question. |
+| `agent.md` | The goal-driven agent ("Give the AI a goal"). |
+
+A comment at the top (`<!-- ... -->`) is for people and isn't sent. The app adds its own fixed
+rules after your text: cite rows as `[R12:34]`, use only the given data, the suggestions block
+that becomes Run buttons, and the agent's tool rules. Don't repeat or change those in your text;
+if they get in the way, ask the infrastructure side.
+
+Every AI answer records a prompt version (like `p-3fa9c2d1`). It changes by itself whenever a
+prompt file changes, so you can tell which prompt produced which answer or score.
+
+To see whether a prompt change helps, run the evaluation before and after (next section).
+
+## Testing the AI (evaluation cases)
+
+`evals/cases/` holds test cases: a small investigation built from captured output, a question,
+and what a good answer must contain (rows to cite, words to mention or avoid). Run them with:
+
+```bash
+python -m evals.run                     # all cases, 3 tries each
+python -m evals.run --save-baseline     # save the scores in evals/baselines/ (commit the file)
+python -m evals.run --fail-on-regression
+```
+
+The `*_example.yaml` cases use synthetic output and only show the format. The full guide is
+[evals/README.md](../evals/README.md).
+
+## Captured output (fixtures)
+
+`fixtures/` holds real volatility output, one file per plugin, named like the plugin file
+(`fixtures/windows/pslist.jsonl` for `plugins/windows/pslist.py`). Evaluation cases load these
+files, and the checks make sure every column named in `compare_keys` or `ai_context` really
+appears in the output. How to capture one: `fixtures/README.md`.
+
+## Citation checks
+
+When the AI writes "explorer.exe (PID 2000) [R12:3]", the app checks that `explorer.exe` and
+`2000` really appear in row R12:3, and marks the citation "unsupported" if not. `citations.py`
+decides which values are checked: file extensions, the words that mark a number as a PID or
+port, and how long Windows process names can be before they are cut off.
+
 ## What the checks look for
 
 `pytest tests/test_forensics_content.py` (also run in CI) fails if:
@@ -200,7 +273,12 @@ the pattern.
 - a guide step points at a missing plugin or uses options the plugin doesn't have,
 - a hook file has an error,
 - a file isn't named after its plugin, or sits outside an OS folder,
-- `_template.py` stops being a working example.
+- `_template.py` stops being a working example,
+- a prompt file is missing or empty, or `run_summary.md` lost `{run_id}` / `{plugin}`,
+- `citations.py` has invalid settings,
+- a fixture doesn't parse, has no plugin file, or lacks a column named in `compare_keys`,
+  `compare_ignore` or `ai_context`,
+- the evaluation cases don't load.
 
 The infrastructure tests use their own copy of a few plugins (`tests/content/`), so changing
 your files never breaks them.

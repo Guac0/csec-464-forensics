@@ -34,7 +34,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.citations import NOT_CHECKED, NOT_FOUND, UNSUPPORTED, citation_status
-from app.ai.prompts import PROMPT_VERSION
+from app.ai.prompts import prompt_version
 from app.config import get_settings
 from app.models import (
     AIMessage,
@@ -237,7 +237,7 @@ def _summary(session: Session, scope: Scope, generated: str, chain: Any) -> list
         ["Runs", str(n_runs)],
         ["Application version", esc(_app_version())],
         ["Tool versions", esc(", ".join(tool_versions) or "—")],
-        ["AI prompt version (current)", code(PROMPT_VERSION)],
+        ["AI prompt version (current)", code(prompt_version())],
         ["Integrity mode", code(settings.integrity_mode)],
         ["Audit log", chain_text],
     ]
@@ -938,7 +938,7 @@ def build_bundle(
         "generated_at": _ts(generated_at),
         "scope": scope.label,
         "application_version": _app_version(),
-        "prompt_version": PROMPT_VERSION,
+        "prompt_version": prompt_version(),
         "audit_chain": {"ok": chain.ok, "head_seq": chain.head_seq, "head_hash": chain.head_hash},
         "includes_dumped_files": include_dumped,
         "files": [{"path": "report.md", "size": len(report_bytes), "sha256": report_sha}] + listing,
