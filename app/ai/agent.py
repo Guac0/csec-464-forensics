@@ -649,6 +649,12 @@ class _Loop:
             self.models_returned.add(result.model_returned)
         if result.reasoning:
             self.reasoning.append(f"[model call {len(self.reasoning) + 1}]\n{result.reasoning}")
+        if result.truncated:
+            self._add_step(
+                "error",
+                "The AI's reply was cut off by the token limit "
+                f"(FT_AI_MAX_TOKENS={self.settings.ai_max_tokens}); it may be incomplete.",
+            )
         self.last = result
         return result
 
@@ -1095,6 +1101,7 @@ class _Loop:
             suggestions=validate_suggestions(parse_suggestions(final)),
             usage=dict(self.usage) or None,
             reasoning="\n\n".join(self.reasoning) or None,
+            finish_reason=last.finish_reason if last else None,
         )
         self.s.add(reply)
         self.s.flush()

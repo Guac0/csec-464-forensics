@@ -237,7 +237,13 @@ class AIMessage(Base):
     # The model's reasoning (<think> text / reasoning_content): hidden from the answer, kept
     # for provenance (shown under "Provenance" and in exports). None if the model gave none.
     reasoning: Mapped[str | None] = mapped_column(Text, default=None)
+    # Why the model stopped ("stop", "length" = cut off by max_tokens, ...), if reported.
+    finish_reason: Mapped[str | None] = mapped_column(String, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def truncated(self) -> bool:
+        return self.finish_reason == "length"
 
 
 class NoteVersion(Base):

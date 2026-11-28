@@ -302,6 +302,9 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `POST /api/ai/tasks/{id}/approve-all`, `POST /api/ai/run-requests/{id} {action, args, note}`.
 - `AIMessage.reasoning`: the model's `<think>` / reasoning text, saved for every AI answer,
   shown under Provenance and in the case export.
+- `AIMessage.finish_reason` (migration `0017_ai_message_finish_reason`) / `AIResult.finish_reason`;
+  `.truncated` = "length" (cut off by `FT_AI_MAX_TOKENS`): warning on the answer, in the export,
+  as an agent step, and in `python -m app.ai.probe` reports.
 - Restart: `AITask.state` checkpoint (messages, counters, the step in progress with its run
   requests) saved at each step; `recover_tasks(session, resume=True)` at startup re-queues
   active tasks and relaunches them (`resumed_count`, audit `ai.agent.resumed`);

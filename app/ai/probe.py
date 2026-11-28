@@ -161,6 +161,16 @@ def probe_provider(client: AIClient | None = None) -> dict[str, Any]:
         "text_protocol_works": text_ok,
         "auto_mode_would_use": "native" if native_ok else ("text" if text_ok else "neither"),
         "reasoning_returned": bool(plain.get("reasoning_chars")),
+        "answers_cut_off_by_token_limit": [
+            name
+            for name in (
+                "plain_answer",
+                "native_tool_call",
+                "native_tool_round_trip",
+                "text_protocol",
+            )
+            if (report.get(name) or {}).get("finish_reason") == "length"
+        ],
     }
     return report
 
@@ -242,6 +252,7 @@ def task_report(task_id: int, with_reasoning: bool = False) -> dict[str, Any]:
                     for s in answer.suggestions or []
                 ],
                 "reasoning_chars": len(answer.reasoning or ""),
+                "finish_reason": answer.finish_reason,
                 "model_calls": sum(
                     1 for m in answer.request_messages or [] if m.get("role") == "assistant"
                 )

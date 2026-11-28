@@ -52,6 +52,12 @@ class AIResult:
     raw: dict[str, Any] = field(repr=False)
     tool_calls: list[ToolCall] = field(default_factory=list)
     reasoning: str = ""  # <think> text / reasoning_content, if the model returned any
+    finish_reason: str | None = None  # "stop", "tool_calls", "length" (cut off), ...
+
+    @property
+    def truncated(self) -> bool:
+        """The provider stopped because the output hit max_tokens (reasoning counts too)."""
+        return self.finish_reason == "length"
 
 
 class AIClient:
@@ -118,7 +124,8 @@ class AIClient:
             raise AIError("AI provider response is not a JSON object")
 
         try:
-            message = raw["choices"][0]["message"]
+            choice = raw["choices"][0]
+            message = choice["message"]
             content = message.get("content")
         except (KeyError, IndexError, TypeError, AttributeError) as exc:
             raise AIError("AI provider response missing choices[0].message.content") from exc
@@ -143,6 +150,9 @@ class AIClient:
             raw=raw,
             tool_calls=tool_calls,
             reasoning=reasoning,
+            finish_reason=choice.get("finish_reason")
+            if isinstance(choice.get("finish_reason"), str)
+            else None,
         )
 
 
