@@ -3,11 +3,12 @@
 - changing app/models.py without adding a migration (models and migrations drift apart),
 - two PRs each adding a migration on the same parent (multiple Alembic heads),
 - migrations that cannot be downgraded/re-applied,
-- breaking existing databases created before Alembic was introduced.
+- migrate() must refuse databases it cannot upgrade and keep foreign keys off while migrating.
 """
 
 from __future__ import annotations
 
+import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
@@ -83,60 +84,36 @@ def test_downgrade_to_base_and_upgrade_again(settings: Settings) -> None:
     assert _current_revision(engine) == _head()
 
 
-def test_pre_alembic_database_is_stamped_and_keeps_data(settings: Settings) -> None:
-    """A DB made by the old create_all() (no alembic_version table) must be adopted in place."""
+@pytest.mark.parametrize("version", [None, "0017_ai_message_finish_reason"])
+def test_database_from_before_the_squash_is_refused(settings: Settings, version) -> None:
+    """Old databases (no alembic_version, or a revision squashed away) get a clear error."""
     engine = _engine(settings)
-    # Recreate what the PoC built before Alembic: the baseline schema without alembic_version.
-    # (Base.metadata.create_all would build today's models, which are newer than the baseline.)
-    cfg = db.alembic_config()
     with engine.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.upgrade(cfg, db.BASELINE_REVISION)
-        conn.execute(text("DROP TABLE alembic_version"))
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO evidence (rel_path, size_bytes, mtime, description, created_at) "
-                "VALUES ('old.raw', 1, 0, '', '2026-01-01 00:00:00')"
-            )
-        )
-    db.migrate(engine)
-    assert _current_revision(engine) == _head()
-    with engine.connect() as conn:
-        assert conn.execute(text("SELECT rel_path FROM evidence")).scalar_one() == "old.raw"
+        conn.execute(text("CREATE TABLE evidence (id INTEGER PRIMARY KEY)"))
+        if version:
+            conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32))"))
+            conn.execute(text("INSERT INTO alembic_version VALUES (:v)"), {"v": version})
+    with pytest.raises(RuntimeError, match="before the migration squash"):
+        db.migrate(engine)
 
 
-def test_table_rebuilds_do_not_cascade_delete_rows(settings: Settings) -> None:
-    """Upgrading from the baseline rebuilds the runs table (SQLite batch mode). With foreign keys
-    on, dropping the old table would cascade-delete every result row; migrate() must prevent it."""
+def test_foreign_keys_are_off_while_migrating(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SQLite batch mode rebuilds tables (copy, DROP, rename); with foreign keys on, the DROP
+    would cascade-delete child rows. Future migrations rely on migrate() switching them off."""
+    from alembic import command
+
     engine = _engine(settings)
-    cfg = db.alembic_config()
-    with engine.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.upgrade(cfg, db.BASELINE_REVISION)
-        conn.execute(
-            text(
-                "INSERT INTO evidence (id, rel_path, size_bytes, mtime, description, created_at) "
-                "VALUES (1, 'a.raw', 1, 0, '', '2026-01-01 00:00:00')"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO runs (id, evidence_id, tool, plugin, args, origin, status, "
-                "created_at, row_count) VALUES (1, 1, 'volatility3', 'p', '{}', 'MANUAL', "
-                "'SUCCEEDED', '2026-01-01 00:00:00', 2)"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO result_rows (run_id, row_idx, depth, data) "
-                "VALUES (1, 0, 0, '{}'), (1, 1, 0, '{}')"
-            )
-        )
+    seen: list[int] = []
+    real_upgrade = command.upgrade
+
+    def spy(cfg, rev):
+        seen.append(cfg.attributes["connection"].exec_driver_sql("PRAGMA foreign_keys").scalar())
+        real_upgrade(cfg, rev)
+
+    monkeypatch.setattr(command, "upgrade", spy)
     db.migrate(engine)
-    with engine.connect() as conn:
-        assert conn.execute(text("SELECT count(*) FROM result_rows")).scalar_one() == 2
-        assert conn.execute(text("SELECT chain_depth FROM runs")).scalar_one() == 0
-        # Foreign keys are switched back on for normal operation.
+    assert seen == [0]
     with engine.connect() as conn:
         assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1

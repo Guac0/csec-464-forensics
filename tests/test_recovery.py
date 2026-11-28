@@ -272,36 +272,3 @@ def test_timeout_per_plugin(settings: Settings) -> None:
     assert _timeout_for(runner, "slow.Plugin", settings) == 7200
     assert _timeout_for(runner, "fast.Plugin", settings) == settings.run_timeout_seconds
     assert _timeout_for(runner, "gone.Plugin", settings) == settings.run_timeout_seconds
-
-
-def test_migration_converts_old_interrupted_runs(settings: Settings) -> None:
-    """Runs the old code marked failed with "interrupted by restart" become interrupted."""
-    from alembic import command
-    from sqlalchemy import text
-
-    from app import db
-
-    engine = db.init_engine()
-    cfg = db.alembic_config()
-    with engine.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.upgrade(cfg, "0006_results")
-        conn.execute(
-            text(
-                "INSERT INTO evidence (rel_path, size_bytes, mtime, description, created_at) "
-                "VALUES ('old.raw', 1, 0, '', '2026-01-01 00:00:00')"
-            )
-        )
-        for error in ("interrupted by restart", "tool exited with code 1"):
-            conn.execute(
-                text(
-                    "INSERT INTO runs (evidence_id, tool, plugin, args, origin, status, "
-                    "created_at, row_count, chain_depth, search_indexed, error) VALUES "
-                    "(1, 'volatility3', 'p', '{}', 'MANUAL', 'FAILED', '2026-01-01', 0, 0, 0, :e)"
-                ),
-                {"e": error},
-            )
-    db.migrate(engine)
-    with engine.connect() as conn:
-        rows = conn.execute(text("SELECT error, status FROM runs ORDER BY id")).all()
-    assert [r[1] for r in rows] == ["INTERRUPTED", "FAILED"]

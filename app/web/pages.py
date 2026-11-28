@@ -552,7 +552,7 @@ def rows_context(
         )
     except ValueError as exc:  # e.g. an unsupported column name in a filter
         rows, total, view_error = [], 0, str(exc)
-    # Stable columns recorded at ingest; fall back to this page's keys for older runs.
+    # Stable columns recorded at ingest; fall back to this page's keys for runs without them.
     columns = [c["name"] for c in run.columns or []]
     if not columns:
         seen: dict[str, None] = {}

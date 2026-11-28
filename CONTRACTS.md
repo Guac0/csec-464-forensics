@@ -16,7 +16,10 @@ auto-enumeration list, per-plugin parsing/summaries, OS detection and the analys
 - `app/db.py` — `Base`, `init_engine()`, `migrate()`, `alembic_config()`,
   `SessionLocal`, `get_session()`
 - `app/migrations/versions/` — applied migrations are never edited; every change to
-  `app/models.py` ships with a new migration in the same PR (see docs/DEVELOPMENT.md)
+  `app/models.py` ships with a new migration in the same PR (see docs/DEVELOPMENT.md).
+  Migrations 0001-0017 were squashed into `0001_initial` at the handoff (migration numbers
+  below are historical); `db.migrate()` refuses pre-squash databases (`RuntimeError`) and runs
+  with `PRAGMA foreign_keys=OFF`.
 - `app/models.py` — `Evidence`, `Run`, `RunStatus`, `RunOrigin`, `ResultRow`, `Note`, `AIMessage`
 - `app/tools/base.py` — `ToolRunner`, `PluginSpec`, `ArgSpec`, `ToolRequest`, `ParsedRow`,
   `ExecutionResult`, `ArgValidationError`
@@ -167,7 +170,7 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `export_rows(session, run, view, "csv"|"jsonl")`, `store_rows(...)` (worker ingest: columns +
   optional index), `index_run(session, run_id)`, `ColumnTracker`, `parse_filter`.
 - `Run.columns` ([{name, type}] recorded at ingest), `Run.search_indexed`. FTS5 table
-  `result_rows_fts` (rowid = result_rows.id) is created by migration 0006 and ignored by the ORM
+  `result_rows_fts` (rowid = result_rows.id) is created by `0001_initial` and ignored by the ORM
   (`app/migrations/env.py` UNMANAGED_TABLE_PREFIXES).
 - API: `GET /api/runs/{id}/rows` (+ `sort`, `desc`, `f.<column>`), `GET /api/runs/{id}/export?
   format=csv|jsonl|raw` (+ view params; audited key_read), `POST /api/runs/{id}/search-index`.
@@ -237,8 +240,7 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - Models `Case`, `CaseEvidence` (case_id, evidence_id, label; many-to-many), `SharedItem`
   (case_id, kind row|finding|note|ai_answer, source_evidence_id, source_key "R12:3"/"F12:hook/
   title"/"N7"/"A9", comment, source_sha256 at share time). `Note.case_id` (a note has exactly one
-  of evidence_id / case_id), `NoteVersion.case_id`. Migration `0009_cases` moves global notes
-  into a "General" case.
+  of evidence_id / case_id), `NoteVersion.case_id`.
 - `app/services/cases.py`: create/update/delete (empty only)/list, add_evidence, set_label,
   remove_evidence (un-shares its items), cases_for_evidence, member_evidence, labels.
 - `app/services/sharing.py`: `share(session, case_id, kind, ...)`, `unshare`, `list_items`,
@@ -294,8 +296,7 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   - Each citation dict (stored in `AIMessage.citations`): `key`, `run_id`, `row_idx`, `url`,
     `valid` (row exists), `support` (`supported` | `unsupported` | `unchecked` | `not_found`),
     `checked` and `unsupported_values` (typed values from the same sentence, see
-    `extract_values`). Answers stored before this field have no `support`:
-    `citation_status(c)` returns `not_checked` for them. Audit `ai.*.response` details include
+    `extract_values`); `citation_status(c)` (missing `support` = `unchecked`). Audit `ai.*.response` details include
     `unsupported_citations`; evals metric `citation_support`.
 - `app/ai/suggestions.py`: `parse_suggestions(text) -> list[dict]`, `validate_suggestions(list) -> list[dict]`
 - `app/ai/service.py`: `ask(session, evidence_id, question, run_ids=None, row_refs=None) -> AIMessage`,

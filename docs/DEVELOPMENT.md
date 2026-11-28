@@ -178,8 +178,11 @@ session.commit()
 
 The schema is managed with [Alembic](https://alembic.sqlalchemy.org/). The app runs
 `app.db.migrate()` at startup, which upgrades the database to the latest migration, so users
-never lose their data when they pull a new version. (Databases created before Alembic was added
-are detected and adopted automatically.)
+never lose their data when they pull a new version.
+
+All migrations up to the team handoff were combined into one, `0001_initial.py`. Databases
+created before that can't be upgraded: the app stops with a message saying so. Delete them
+(`docker compose down -v`) and start again. New migrations build on `0001_initial`.
 
 **Any change to `app/models.py` must ship with a migration in the same PR:**
 
@@ -199,6 +202,9 @@ the truth):
   for you. Keep them.
 - Renames are detected as drop + add (data loss). Edit them into `alter_column(new_column_name=...)`.
 - Fill in `downgrade()` and check it works: `alembic downgrade -1 && alembic upgrade head`.
+- Triggers and the search table are created with raw SQL at the end of `0001_initial.py`
+  (autogenerate can't see them). A migration that rebuilds `audit_events`, `note_versions`,
+  `integrity_checks` or `audit_head` must recreate their triggers.
 - Data migrations (backfilling values) go in the same file using `op.execute(...)`.
 
 Rules:

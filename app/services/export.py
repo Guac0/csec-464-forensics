@@ -33,7 +33,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.ai.citations import NOT_CHECKED, NOT_FOUND, UNSUPPORTED, citation_status
+from app.ai.citations import NOT_FOUND, UNSUPPORTED, citation_status
 from app.ai.prompts import prompt_version
 from app.config import get_settings
 from app.models import (
@@ -811,8 +811,6 @@ def _citations_summary(citations: list[dict[str, Any]]) -> str:
             f"{len(unsupported)} cited row(s) don't support the stated values: "
             + esc("; ".join(unsupported))
         )
-    if any(s == NOT_CHECKED for s in status.values()):
-        parts.append("value support not checked (older answer)")
     return f"{len(citations)} ({'; '.join(parts)})" if parts else str(len(citations))
 
 

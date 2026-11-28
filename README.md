@@ -267,8 +267,7 @@ separated by spaces or commas.
   rows. PIDs, offsets, times and thread/handle counts are ignored by default; tick other columns
   to change that. Download everything as CSV, or **Save to case** to list it on the case page
   and in the case report (re-opened with current data).
-- Each case has its own **case notes** (they replace the old investigation-wide notes; existing
-  ones were moved into a "General" case containing every image).
+- Each case has its own **case notes**.
 - Exports: **Export case…** gives a case report (images and labels, case notes, everything
   shared, then each image's section). A single image's report gets a separate, labelled
   "Leads from linked evidence" section listing what other images in its cases shared.
