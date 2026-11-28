@@ -221,3 +221,14 @@ a.button.small { font-size: 12px; }
 .ai-recommend { display: flex; gap: .4rem; align-items: center; }
 .ai-recommend input[type=text] { flex: 1; }
 .ai-rec-block { margin-top: .4rem; }
+
+/* AI agent tasks */
+.ai-task-body { background: var(--ai-bg); border: 1px dashed var(--ai-border); border-radius: 6px; padding: .5rem; margin: .5rem 0; }
+.ai-task-now { display: flex; gap: .6rem; align-items: center; margin: .3rem 0; }
+.ai-steps ol { margin: .3rem 0; padding-left: 1.4rem; }
+.ai-step-error { color: var(--danger); }
+.ask-mode { display: flex; gap: 1rem; margin-bottom: .3rem; }
+.ask:has(input[value=goal]:checked) .ask-question-only { display: none; }
+.ask:not(:has(input[value=goal]:checked)) .ask-goal-only { display: none; }
+.ask-mode label { display: inline-flex; gap: .3rem; align-items: center; }
+.ask-mode input[type=radio] { width: auto; margin: 0; }

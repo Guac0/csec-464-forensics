@@ -735,8 +735,17 @@ def _ai_section(session: Session, ev: Evidence) -> list[str]:
     if not answers:
         return [*out, "No AI questions asked.", ""]
     questions = {m.id: m for m in msgs if m.role == "user"}
+    # AI agent tasks: the goal message is not right before the answer (steps run in between).
+    from app.models import AITask
+
+    task_goal = {
+        t.answer_message_id: t.user_message_id
+        for t in session.scalars(
+            select(AITask).where(AITask.answer_message_id.in_([m.id for m in answers]))
+        )
+    }
     for m in answers:
-        q = questions.get(m.id - 1)
+        q = questions.get(task_goal.get(m.id, m.id - 1))
         params = dict(m.params or {})
         out += [f"#### AI answer {m.id} ({_ts(m.created_at)})", "", f"> **{esc(AI_LABEL)}**", ""]
         if q is not None:

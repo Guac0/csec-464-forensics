@@ -65,7 +65,8 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
       EXAMPLE `windows_info.py` OS-detection hook against real output, and add hooks that flag
       suspicious rows, summarise runs as findings, and queue sensible follow-up plugins.
 - [ ] **AI prompts** — `app/ai/prompts.py`: the analysis system prompt, the run-summary question
-      and the "what should I run next?" question (`RECOMMEND_QUESTION`).
+      and the "what should I run next?" question (`RECOMMEND_QUESTION`), and the agent prompt
+      (`AGENT_SYSTEM_PROMPT`).
       Bump `PROMPT_VERSION` with each change and compare with `python -m evals.run`.
 - [ ] **Evaluation cases** — replace the two `evals/cases/*_example.yaml` (synthetic fixture) with
       cases built from real captured output, then save a baseline per model you use.
@@ -124,3 +125,8 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [x] Failed AI requests show the error text twice in the AI panel.
 - [ ] The gitleaks pre-commit hook only protects local commits; in CI it checks nothing.
 - [ ] Linux/macOS memory images (custom symbol tables) are out of scope for the PoC.
+- [ ] AI agent (goal tasks) is read-only. Next stage: a `queue_run` tool with analyst approval
+      (Approve / Deny with a note / Edit options first / Approve all remaining, plus "yes to all"
+      when starting), pausing while runs execute and resuming when they finish, ETA from past
+      run durations, limits pop-up + settings page, agent eval cases. An interrupted task is
+      not resumed ("Start again" starts a new task with the same goal and limits).

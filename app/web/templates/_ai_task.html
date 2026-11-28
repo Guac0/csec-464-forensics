@@ -1,0 +1,53 @@
+{% set t = tv.task %}
+<div class="ai-task" id="ai-task-{{ t.id }}"{% if tv.active %} hx-get="/ui/ai/tasks/{{ t.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <div class="chat-user">
+    <div class="chat-label">Analyst goal for the AI <span class="muted">{{ t.created_at | dt }}</span></div>
+    <div class="prewrap">Goal: {{ t.goal }}</div>
+  </div>
+  <div class="ai-task-body">
+    <div class="ai-label">AI task {{ t.id }} — AI-generated lead, not evidence
+      <span class="badge status-{{ {'done': 'succeeded', 'queued': 'queued', 'running': 'running', 'cancelled': 'cancelled', 'interrupted': 'interrupted'}.get(t.status.value, 'failed') }}">{{ t.status.value }}</span>
+      <span class="muted small-text">read-only{% if t.tool_mode %} · {{ t.tool_mode }} tool calls{% endif %}</span>
+    </div>
+    <p class="small-text muted ai-task-progress">
+      Step {{ t.steps_used }} of max {{ tv.max_steps }} · {{ tv.elapsed_s | secs }} elapsed{% if tv.left_s is not none %} · at most ~{{ tv.left_s | secs }} left{% endif %} · time limit {{ tv.max_seconds | secs }}
+    </p>
+    {% if tv.active %}
+    <div class="ai-task-now">
+      <span class="spinner">{% if t.status.value == "queued" %}Waiting for a free AI slot...{% else %}{{ t.current_action or "Working..." }}{% endif %}</span>
+      {% if not t.cancel_requested %}
+      <form class="inline" method="post" action="/ui/ai/tasks/{{ t.id }}/cancel"
+            hx-post="/ui/ai/tasks/{{ t.id }}/cancel" hx-target="#ai-task-{{ t.id }}" hx-swap="outerHTML">
+        <button type="submit" class="small secondary">Cancel</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if t.steps %}
+    <details class="ai-steps"{% if tv.active %} open{% endif %}>
+      <summary class="small-text">What the AI looked at ({{ t.steps | length }} step{{ "s" if t.steps | length != 1 }})</summary>
+      <ol class="small-text">
+        {% for s in t.steps %}
+        <li class="ai-step ai-step-{{ s.kind }}">
+          {% if s.tool %}<span>{{ describe_call(s.tool, s.args) }}</span> → {% endif %}{{ s.summary }}
+          {% if s.row_keys %}<span class="muted">(rows {% for k in s.row_keys[:5] %}<a class="cite" href="{{ k | row_url }}">{{ k }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if s.row_keys | length > 5 %}, +{{ s.row_keys | length - 5 }} more{% endif %})</span>{% endif %}
+          {% if s.duration_ms is not none %}<span class="muted">{{ s.duration_ms }} ms</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </details>
+    {% endif %}
+    {% if t.error %}<p class="flash error small-text">{{ t.error }}</p>{% endif %}
+    {% if t.status.value in ("failed", "cancelled", "interrupted") %}
+    <form class="inline" method="post" action="/ui/evidence/{{ t.evidence_id }}/ai/ask"
+          hx-post="/ui/evidence/{{ t.evidence_id }}/ai/ask" hx-target="#ai-history" hx-swap="outerHTML">
+      <input type="hidden" name="mode" value="goal">
+      <input type="hidden" name="question" value="{{ t.goal }}">
+      <input type="hidden" name="max_steps" value="{{ tv.max_steps }}">
+      <input type="hidden" name="max_minutes" value="{{ tv.max_seconds / 60 }}">
+      <button type="submit" class="small">Start again</button>
+    </form>
+    {% endif %}
+    {% if answer %}{% set msg = answer %}{% include "_ai_message.html" %}{% endif %}
+  </div>
+</div>

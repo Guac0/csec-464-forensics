@@ -163,7 +163,7 @@ def test_evidence_report_content_and_scope(session: Session, case: dict) -> None
     assert "**high** Odd" in report and f"rows R{run.id}:1" in report
     assert "`pid.4.dmp`" in report and hashlib.sha256(case["dumped"]).hexdigest() in report
     assert export.AI_LABEL.split(" — ")[0].replace("-", "\\-") in report
-    assert "2 (1 invalid: R" in report and "`placeholder-2`" in report
+    assert "2 (1 invalid: R" in report and "`placeholder-3`" in report
     assert "Analyst note" in report
     # Scope: other images' data and case notes are not in a per-evidence export, except what
     # was explicitly shared to its case, in its own labelled section.
