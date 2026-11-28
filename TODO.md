@@ -125,8 +125,8 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [x] Failed AI requests show the error text twice in the AI panel.
 - [ ] The gitleaks pre-commit hook only protects local commits; in CI it checks nothing.
 - [ ] Linux/macOS memory images (custom symbol tables) are out of scope for the PoC.
-- [ ] AI agent: tasks waiting for approval or for their runs do not survive an app restart yet
-      (they become "interrupted" and their pending requests expire; "Start again" starts a new
-      task). Still to do: an in-app settings page for the agent defaults, agent eval cases.
-      Waiting for runs counts against the time limit (only approval time is paused); runs a
-      task queued keep going if the task ends by its time limit.
+- [ ] AI agent: test against the real provider (`python -m app.ai.probe`, then a real goal and
+      `python -m app.ai.probe task <id>`); replace the EXAMPLE agent eval case with real ones.
+      Design choices to revisit if needed: waiting for runs counts against the time limit (only
+      approval time is paused); runs a task queued keep going if the task ends by its time
+      limit; resumed tasks redo an AI call that was in progress when the app stopped.

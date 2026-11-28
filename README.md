@@ -183,6 +183,13 @@ Team workflow, branch rules and guidance for AI coding assistants:
   without it (`FT_AI_TOOL_MODE=auto|native|text`).
 - Reasoning models' `<think>` text is hidden from answers but saved: see "Model reasoning"
   under Provenance and in the case export.
+- **Restarts:** AI tasks continue after an app restart from their last checkpoint: a task
+  waiting for your approval keeps waiting (its requests stay valid), one waiting for runs waits
+  for them, one interrupted during an AI call redoes that step. The card notes "resumed".
+- **Checking a provider:** `python -m app.ai.probe` (in Docker: `docker compose exec app python
+  -m app.ai.probe`) tests plain answers, native tool calls, the text protocol and reasoning
+  output with tiny evidence-free requests and prints a JSON report; `python -m app.ai.probe task
+  <id>` summarises a finished task (status, timing, steps, run decisions, citation checks).
 - **Approach:** the AI never sees the memory image. It reads data the app already stored
   (parsed volatility rows, hook findings, notes) and answers as a *lead*, not evidence: every
   answer is labelled "AI-generated lead — not evidence" and must cite rows as `[R<run>:<row>]`,
@@ -328,6 +335,10 @@ Team workflow, branch rules and guidance for AI coding assistants:
   `vol -h` and checks every catalog plugin exists in the installed version; **Test AI** sends one
   tiny request to the provider. Start here when something does not work on a new machine.
   JSON: `GET /api/system/health` (`/health` stays a simple liveness check).
+- **Settings** in the top bar: AI agent defaults (max steps, time limit, max plugin runs, tasks
+  at once) and the AI tool-calling protocol can be changed in the app. A saved value overrides
+  the `FT_*` environment value until **Reset**; every change is in the activity log. JSON:
+  `GET/PUT /api/system/settings`, `DELETE /api/system/settings/{key}`.
 
 ## Limitations
 

@@ -236,3 +236,7 @@ a.button.small { font-size: 12px; }
 .approval { padding: .4rem 0; border-bottom: 1px solid #eaecf0; }
 .deny-form input[type=text] { width: 16rem; }
 .ai-badge { background: #ede9fe; color: #5b3aa6; text-decoration: none; }
+/* Settings page */
+table.settings-table { width: 100%; border-collapse: collapse; margin: .5rem 0; }
+table.settings-table th, table.settings-table td { text-align: left; vertical-align: top; padding: .5rem .4rem; border-bottom: 1px solid #eaecf0; }
+table.settings-table td.settings-value { white-space: nowrap; }

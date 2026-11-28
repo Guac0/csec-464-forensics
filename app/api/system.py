@@ -87,3 +87,46 @@ def biggest_runs(session: SessionDep, limit: int = 10) -> list[dict[str, Any]]:
         }
         for run, size in run_deletion.biggest_runs(session, limit=max(1, min(limit, 100)))
     ]
+
+
+@router.get("/settings")
+def get_app_settings(session: Session = Depends(get_session)) -> list[dict[str, Any]]:  # noqa: B008
+    """Settings changeable in the app: effective value, environment default, who changed it."""
+    from app.services import app_settings
+
+    return [
+        {
+            "key": v.spec.key,
+            "label": v.spec.label,
+            "value": v.value,
+            "default": v.default,
+            "overridden": v.overridden,
+            "updated_by": v.updated_by,
+            "updated_at": v.updated_at,
+        }
+        for v in app_settings.list_settings(session)
+    ]
+
+
+@router.put("/settings")
+def put_app_settings(
+    body: dict[str, Any],
+    session: Session = Depends(get_session),  # noqa: B008
+) -> dict[str, Any]:
+    """Change settings: ``{key: value}`` in UI units (agent_max_seconds in MINUTES)."""
+    from fastapi import HTTPException
+
+    from app.services import app_settings
+
+    try:
+        changed = app_settings.update(session, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"changed": {k: {"old": o, "new": n} for k, (o, n) in changed.items()}}
+
+
+@router.delete("/settings/{key}")
+def reset_app_setting(key: str, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    from app.services import app_settings
+
+    return {"reset": app_settings.reset(session, key)}

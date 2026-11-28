@@ -93,6 +93,7 @@ runs:                              # recorded tool output, in order (run index 0
     args: {}
 question: Which processes have a parent that is not in the list?   # or: summarize_run: 0
                                    # or: recommend: true / recommend: "<focus>" ("what next?")
+                                   # or: goal: "<goal>" (AI agent; see "Agent cases" below)
 expect:
   cite_rows: ["0:5"]               # "<run index>:<row index>" that must be cited
   must_mention: ["explorer.exe"]   # case-insensitive substrings
@@ -110,3 +111,26 @@ fixture: open the fixture in the app or count rows depth-first through `__childr
 
 Good cases are small and specific: one clear question, the rows that prove the answer, and terms
 that would only appear if the model invented something.
+
+## Agent cases (`goal:`)
+
+A `goal:` case runs the AI agent with "yes to all". When the agent queues a plugin run, the
+harness completes it at once from the case's recorded output in `available_runs` (matched by
+plugin, and by the fixture's `args` if it gives any); a plugin not listed there fails with
+"not available in this evaluation case". Extra keys:
+
+```yaml
+goal: Find out how explorer.exe (the process whose parent is missing) was started.
+agent: {max_steps: 8, max_runs: 2, max_seconds: 600}   # optional limits
+available_runs:                    # recorded output the agent may get by queuing a run
+  - plugin: windows.cmdline.CmdLine
+    fixture: tests/fixtures/real/win10_cmdline.jsonl
+expect:
+  queue_plugins: [windows.cmdline.CmdLine]   # must be queued
+  forbid_plugins: [windows.pslist.PsList]    # must not be queued (e.g. already ran)
+  max_queued: 2
+  must_mention: ["explorer.exe"]             # plus the usual answer checks
+```
+
+Agent metrics: `expected_run_recall` (quality) and `runs_queued`, `agent_steps` (cost). The
+JSON report also lists `queued_runs` per attempt. See `cases/agent_goal_example.yaml`.

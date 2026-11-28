@@ -298,7 +298,7 @@ def test_cancel_and_recover(session, settings, ev, pslist, monkeypatch) -> None:
 
     monkeypatch.setattr(agent, "_launch", lambda task_id: None)  # stays queued
     queued = agent.start_task(session, ev.id, "goal 2")
-    assert agent.recover_tasks(session) == 1
+    assert agent.recover_tasks(session, resume=False) == 1
     session.refresh(queued)
     assert queued.status == AITaskStatus.INTERRUPTED and "app stopped" in queued.error
     assert agent.cancel_task(session, queued.id).status == AITaskStatus.INTERRUPTED  # no-op
@@ -405,7 +405,7 @@ def test_export_pairs_agent_answer_with_goal(session, settings, ev, pslist, monk
 def test_start_again_button(client: TestClient, session, ev, monkeypatch) -> None:
     monkeypatch.setattr(agent, "_launch", lambda task_id: None)
     task = agent.start_task(session, ev.id, "retry me", max_steps=4, max_seconds=90)
-    agent.recover_tasks(session)
+    agent.recover_tasks(session, resume=False)
     card = client.get(f"/ui/ai/tasks/{task.id}", headers=HX).text
     assert "Start again" in card and 'name="question" value="retry me"' in card
     client.post(

@@ -4,6 +4,7 @@ end-to-end run against a mocked provider (no network)."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -216,14 +217,19 @@ def test_end_to_end_run_baseline_and_regression(
     assert code == 0
     report = json.loads(next(out.glob("*.json")).read_text())
     assert report["meta"]["prompt_version"] == PROMPT_VERSION
-    assert report["meta"]["model"] == "test-model" and len(report["attempts"]) == 6
+    assert report["meta"]["model"] == "test-model" and len(report["attempts"]) == 8
     parent = report["aggregate"]["pstree-parent-example"]
     assert parent["pass"]["mean"] == 1.0 and parent["judge_score"]["mean"] == 5.0
     assert parent["total_tokens"]["mean"] == 123
     summary = report["aggregate"]["pstree-summary-example"]
     assert summary["pass"]["mean"] == 1.0, report["attempts"][2]["failed_checks"]
     # The real pipeline ran: allowlist in the system prompt, context rows with citation keys.
-    asks = [b for b in seen if "You are grading" not in b["messages"][0]["content"]]
+    asks = [
+        b
+        for b in seen
+        if "You are grading" not in b["messages"][0]["content"]
+        and "investigation assistant" not in b["messages"][0]["content"]  # agent case
+    ]
     assert "windows.pslist.PsList" in asks[0]["messages"][0]["content"]
     assert "[R1:5]" in asks[0]["messages"][1]["content"]
     assert json.loads(baseline.read_text())["prompt_version"] == PROMPT_VERSION
@@ -275,3 +281,87 @@ def test_recommend_case_and_query_expectations(tmp_path: Path) -> None:
     out = scoring.score_answer("Run cmdline next.", [], [suggestion], expect)
     assert out["metrics"]["expected_query_recall"] == 0.5
     assert any("did not suggest expected queries" in c for c in out["failed_checks"])
+
+
+def test_agent_goal_case(settings: Settings, tmp_path: Path) -> None:
+    """The agent queues cmdline; the harness completes it from the case's fixture."""
+    case = {c.id: c for c in load_cases()}["agent-goal-example"]
+    assert case.goal and case.available_runs[0].plugin == "windows.cmdline.CmdLine"
+    assert case.expect.queue_plugins == ("windows.cmdline.CmdLine",)
+    replies = [
+        {
+            "tool_calls": [
+                {
+                    "id": "a",
+                    "type": "function",
+                    "function": {
+                        "name": "queue_run",
+                        "arguments": json.dumps(
+                            {"plugin": "windows.pslist.PsList", "reason": "again"}
+                        ),
+                    },
+                }
+            ]
+        },
+        {
+            "tool_calls": [
+                {
+                    "id": "b",
+                    "type": "function",
+                    "function": {
+                        "name": "queue_run",
+                        "arguments": json.dumps(
+                            {"plugin": "windows.cmdline.CmdLine", "reason": "args"}
+                        ),
+                    },
+                }
+            ]
+        },
+        None,  # final answer, filled below with the queued run's id
+    ]
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append(body)
+        reply = replies.pop(0)
+        if reply is None:
+            result = body["messages"][-1]["content"]
+            run_id = re.search(r"R(\d+) windows.cmdline", result).group(1)
+            reply = {
+                "content": f"explorer.exe was started from C:\\Users\\Public\\explorer.exe "
+                f"[R{run_id}:3]."
+            }
+        message = {
+            "role": "assistant",
+            "content": reply.get("content"),
+            **{k: v for k, v in reply.items() if k == "tool_calls"},
+        }
+        return httpx.Response(200, json={"model": "m", "choices": [{"message": message}]})
+
+    factory = lambda s: AIClient(s, transport=httpx.MockTransport(handler))  # noqa: E731
+    result = run.run_attempt(case, 1, factory)
+    assert result["failed_checks"] == [], result
+    assert result["queued_runs"] == ["windows.cmdline.CmdLine"]  # pslist refused (already ran)
+    assert result["metrics"]["expected_run_recall"] == 1.0 and result["metrics"]["agent_steps"] == 3
+    assert "already exists" in seen[1]["messages"][-1]["content"]
+
+
+def test_agent_case_validation(tmp_path: Path) -> None:
+    run_spec = [{"plugin": "p.P", "fixture": FIXTURE}]
+    with pytest.raises(CaseError, match="only apply to 'goal' cases"):
+        parse_case(
+            {"runs": run_spec, "question": "q", "agent": {"max_runs": 1}}, tmp_path / "a.yaml"
+        )
+    with pytest.raises(CaseError, match="'agent' may only contain"):
+        parse_case({"runs": run_spec, "goal": "g", "agent": {"nope": 1}}, tmp_path / "b.yaml")
+    queued = scoring.score_answer(
+        "x",
+        [],
+        [],
+        scoring.ResolvedExpectations(queue_plugins=("a.A",), forbid_plugins=("b.B",), max_queued=1),
+        queued=["b.B", "c.C"],
+    )
+    checks = " | ".join(queued["failed_checks"])
+    assert "did not queue expected runs" in checks and "queued forbidden runs" in checks
+    assert "queued 2 runs (max 1)" in checks and queued["metrics"]["runs_queued"] == 2.0

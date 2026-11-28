@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import json
 import os
 import re
@@ -113,6 +114,85 @@ def _load_case_into_db(session: Any, case: Case, evidence_dir: Path) -> tuple[An
     return ev, run_ids
 
 
+@dataclasses.dataclass
+class _AgentAnswer:
+    """The agent's answer message, or a stand-in when the task ended without one."""
+
+    content: str = ""
+    citations: list[dict[str, Any]] | None = None
+    suggestions: list[dict[str, Any]] | None = None
+    error: str | None = None
+    usage: dict[str, Any] | None = None
+    model_returned: str | None = None
+
+
+def _fill_run_from_fixture(session: Any, run: Any, case: Case) -> None:
+    """Act as the worker for a run the agent queued: load the case's recorded output for that
+    plugin (args must match the fixture's, if it gives any), or fail it."""
+    from app.models import RunStatus, utcnow
+    from app.services import results
+    from app.tools import registry
+
+    spec = next(
+        (
+            r
+            for r in case.available_runs
+            if r.plugin == run.plugin
+            and all((run.args or {}).get(k) == v for k, v in r.args.items())
+        ),
+        None,
+    )
+    run.started_at = utcnow()
+    if spec is None:
+        run.status = RunStatus.FAILED
+        run.error = "not available in this evaluation case (no recorded output)"
+    else:
+        parsed = registry.get_runner("volatility3").parse_output(spec.fixture)
+        run.row_count = results.store_rows(session, run.id, parsed, search_index=False)
+        run.status = RunStatus.SUCCEEDED
+        run.tool_version = "eval-fixture"
+    run.finished_at = utcnow()
+    session.commit()
+
+
+def _run_agent_case(session: Any, case: Case, ev: Any, client: Any) -> tuple[Any, list[str], int]:
+    """Run an AI agent task with "yes to all"; queued runs complete from the case's fixtures."""
+    import threading
+
+    from app.ai import agent
+    from app.models import AIMessage, AITask, Run, RunStatus
+
+    opts = case.agent
+    saved = agent._launch, agent.POLL_SECONDS
+    agent._launch, agent.POLL_SECONDS = (lambda task_id: None), 0.05
+    try:
+        task = agent.start_task(
+            session,
+            ev.id,
+            case.goal or "",
+            max_steps=opts.get("max_steps", 8),
+            max_seconds=opts.get("max_seconds", 600),
+            max_runs=opts.get("max_runs", 3),
+            approve_all=True,
+        )
+        worker = threading.Thread(target=agent.run_task, args=(task.id,), kwargs={"client": client})
+        worker.start()
+        while worker.is_alive():
+            session.expire_all()
+            for run in session.query(Run).filter_by(ai_task_id=task.id, status=RunStatus.QUEUED):
+                _fill_run_from_fixture(session, run, case)
+            worker.join(timeout=0.05)
+    finally:
+        agent._launch, agent.POLL_SECONDS = saved
+    session.expire_all()
+    task = session.get(AITask, task.id)
+    queued = [r.plugin for r in task.run_requests if r.status in ("approved", "edited", "auto")]
+    msg = session.get(AIMessage, task.answer_message_id) if task.answer_message_id else None
+    if msg is None:
+        msg = _AgentAnswer(error=task.error or f"the task ended {task.status.value}")
+    return msg, queued, task.steps_used
+
+
 def _resolve(case: Case, run_ids: list[int], session: Any) -> scoring.ResolvedExpectations:
     from app.models import ResultRow
 
@@ -132,6 +212,9 @@ def _resolve(case: Case, run_ids: list[int], session: Any) -> scoring.ResolvedEx
         must_not_mention=case.expect.must_not_mention,
         suggest_plugins=case.expect.suggest_plugins,
         suggest_queries=case.expect.suggest_queries,
+        queue_plugins=case.expect.queue_plugins,
+        forbid_plugins=case.expect.forbid_plugins,
+        max_queued=case.expect.max_queued,
         min_citations=case.expect.min_citations,
     )
 
@@ -167,13 +250,24 @@ def run_attempt(
 
             question = RECOMMEND_DISPLAY + (f" Focus: {case.recommend}" if case.recommend else "")
             msg = ai_service.recommend_next(session, ev.id, case.recommend, client=client)
+        elif case.goal is not None:
+            question = f"Goal: {case.goal}"
+            msg, queued, steps = _run_agent_case(session, case, ev, client)
         else:
             question = case.question or ""
             msg = ai_service.ask(session, ev.id, question, client=client)
         latency = time.perf_counter() - started
+        agent_case = case.goal is not None
         scored = scoring.score_answer(
-            msg.content, msg.citations, msg.suggestions, expect, msg.error
+            msg.content,
+            msg.citations,
+            msg.suggestions,
+            expect,
+            msg.error,
+            queued=queued if agent_case else None,
         )
+        if agent_case:
+            scored["metrics"]["agent_steps"] = float(steps)
         usage = msg.usage or {}
         result: dict[str, Any] = {
             "case": case.id,
@@ -187,6 +281,8 @@ def run_attempt(
             "answer": msg.content,
             "expected_rows": list(expect.cite_keys),
         }
+        if agent_case:
+            result["queued_runs"] = queued
         result["metrics"]["latency_s"] = result["latency_s"]
         if result["total_tokens"] is not None:
             result["metrics"]["total_tokens"] = result["total_tokens"]
