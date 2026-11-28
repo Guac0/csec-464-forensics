@@ -165,15 +165,24 @@ Team workflow, branch rules and guidance for AI coding assistants:
 - Ask questions, summarise a run, cited claims with clickable row links, provenance dropdown,
   validated one-click query suggestions.
 - **Give the AI a goal** (switch in the AI chat form, e.g. "find processes named xyz"): the AI
-  agent works step by step with read-only tools on this image only (list runs, search rows
-  with text/column filters, read rows, read hook findings) and then answers with citations.
-  It cannot run plugins yet; when data is missing it says so and suggests runs (Run buttons).
-  The task shows live in the chat: current action, each step with the rows it looked at, step
-  count, elapsed time and the most time left, and a Cancel button. Limits per task (max steps,
-  time) default to `FT_AGENT_MAX_STEPS` / `FT_AGENT_MAX_SECONDS`. Tool calls use the
-  provider's native function calling, or a text protocol for models without it
-  (`FT_AI_TOOL_MODE=auto|native|text`). Reasoning models' `<think>` text is hidden from
-  all AI answers.
+  agent works step by step on this image only. It searches existing results (list runs, search
+  rows with text/column filters, read rows, read hook findings) and can ask to **run plugins**
+  (`queue_run`, at most `FT_AGENT_MAX_RUNS`=5 per task). Each run request waits for your
+  decision in the task card: **Approve**, **Deny** (optional note to the AI), **Edit options
+  first**, or **Approve all remaining**; or tick **Yes to all** when giving the goal (nothing is
+  excluded). The time limit is paused while waiting for you. Approved runs are queued as origin
+  `agent` with an "AI task N" badge on the run list and run page (who approved it); the task
+  waits for them, then reads their results. A run that already exists with the same options is
+  refused and the AI is pointed to it. Cancelling a task also cancels its queued/running runs;
+  pending requests expire when the task ends.
+- The task card shows live status: current action, steps with the rows the AI looked at, step
+  and run counts, elapsed time (and time paused for approval), the most time left, and per run
+  its status and an estimate from earlier runs of the same plugin scaled by image size. Limits
+  per task (steps, time, runs) default to `FT_AGENT_MAX_STEPS` / `FT_AGENT_MAX_SECONDS` /
+  `FT_AGENT_MAX_RUNS`. Tool calls use native function calling or a text protocol for models
+  without it (`FT_AI_TOOL_MODE=auto|native|text`).
+- Reasoning models' `<think>` text is hidden from answers but saved: see "Model reasoning"
+  under Provenance and in the case export.
 - **Approach:** the AI never sees the memory image. It reads data the app already stored
   (parsed volatility rows, hook findings, notes) and answers as a *lead*, not evidence: every
   answer is labelled "AI-generated lead — not evidence" and must cite rows as `[R<run>:<row>]`,

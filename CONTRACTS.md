@@ -270,20 +270,38 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   raw_arguments)`]), `AIResult.reasoning` (`<think>` / `reasoning_content`, stripped from
   `content`), `AIError.status_code`.
 
-### AI agent (goal tasks, read-only)
-- `app/ai/agent.py`: `start_task(session, evidence_id, goal, max_steps=None, max_seconds=None)
-  -> AITask` (background daemon thread, `FT_AGENT_MAX_CONCURRENT` at once), `run_task(task_id,
-  client=None)`, `cancel_task`, `recover_tasks` (startup: queued/running -> interrupted),
-  `view(task) -> TaskView` (elapsed, at-most-left, `as_dict()`), `get_task`, `list_tasks`,
-  `describe_call`. Protocol `FT_AI_TOOL_MODE` auto|native|text (auto falls back to text on
-  HTTP 400/404/405/415/422/501 with tools, or when the model writes an ```action block).
-- `app/ai/agent_tools.py`: `TOOLS` (`list_runs`, `search_rows`, `get_rows`, `get_findings`;
-  scoped to the task's image, read-only, output capped at 8000 chars), `run_tool`.
-- Models `AITask` / `AITaskStep` (migration `0014_ai_tasks`); goal and answer are AIMessages
-  (`user_message_id`, `answer_message_id`; answer `context_refs["kind"] == "agent"`).
-- Audit: `ai.agent.start|tool (key_read)|answer|cancel|finish|interrupted`.
-- UI: chat form `mode=goal` (+ `max_steps`, `max_minutes`) on `/ui/evidence/{id}/ai/ask`; card
-  `/ui/ai/tasks/{id}` (polls every 2 s while active), `POST /ui/ai/tasks/{id}/cancel`.
+### AI agent (goal tasks)
+- `app/ai/agent.py`: `start_task(session, evidence_id, goal, max_steps=None, max_seconds=None,
+  max_runs=None, approve_all=False) -> AITask` (background daemon thread,
+  `FT_AGENT_MAX_CONCURRENT` at once; the slot is released while waiting), `run_task(task_id,
+  client=None, slot=None)`, `cancel_task` (also cancels the task's queued/running runs and
+  expires pending requests), `recover_tasks` (startup: active -> interrupted), `decide(session,
+  request_id, "approve"|"edit"|"deny", args=None, note="")`, `approve_all_remaining`,
+  `expire_requests`, `estimate_run_seconds(session, run) -> (seconds | None, samples)`,
+  `run_requests_view`, `view(task, session=None) -> TaskView` (elapsed, paused, at-most-left,
+  runs, `pending`, `polling`, `as_dict()`), `get_task`, `list_tasks`, `describe_call`,
+  `QUEUE_RUN` tool spec. Protocol `FT_AI_TOOL_MODE` auto|native|text.
+- Statuses: queued, running, awaiting_approval (clock paused), waiting_for_runs, done, failed,
+  cancelled, interrupted. Limits `{"max_steps", "max_seconds", "max_runs"}`
+  (`FT_AGENT_MAX_RUNS`=5; 0 = no queue_run tool).
+- `queue_run` -> `AIRunRequest` (status pending | approved | edited | auto | denied | expired |
+  failed; `final_args`, `note`, `decided_by`, `run_id`). Redundant runs (same plugin +
+  normalised args queued/running/succeeded on the image) and over-limit requests are refused
+  (not stored). Runs: `RunOrigin.AI_AGENT` ("agent", reserved: `POST /api/runs` refuses it) +
+  `Run.ai_task_id` (`runs.create_run(..., ai_task_id=)`).
+- `app/ai/agent_tools.py`: read-only `TOOLS` (`list_runs`, `search_rows`, `get_rows`,
+  `get_findings`), `run_tool`, `describe_tools_for_text_protocol(extra)`.
+- Models `AITask` / `AITaskStep` (0014), `AIRunRequest` + `AITask.approve_all` /
+  `paused_seconds` + `Run.ai_task_id` + `AIMessage.reasoning` (0015).
+- Audit: `ai.agent.start|tool (key_read)|approval|approve_all|answer|cancel|finish|interrupted`,
+  plus `run.create` with `ai_task_id`.
+- UI: chat form `mode=goal` (+ `max_steps`, `max_minutes`, `max_runs`, `approve_all`); card
+  `/ui/ai/tasks/{id}` (polls every 2 s while active, not while showing approval forms),
+  `POST /ui/ai/tasks/{id}/cancel`, `POST /ui/ai/tasks/{id}/approve-all`,
+  `POST /ui/ai/run-requests/{id}/decide` (`action`, `note`, `arg_<name>` for edit). API:
+  `POST /api/ai/tasks/{id}/approve-all`, `POST /api/ai/run-requests/{id} {action, args, note}`.
+- `AIMessage.reasoning`: the model's `<think>` / reasoning text, saved for every AI answer,
+  shown under Provenance and in the case export.
 
 ### Web UI (temporary)
 - `app/web/pages.py`: `router` (HTML pages, HTMX fragments), templates in `app/web/templates`,

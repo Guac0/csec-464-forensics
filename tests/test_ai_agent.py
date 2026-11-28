@@ -311,9 +311,9 @@ def test_start_validation_and_limits(session: Session, ev: Evidence, monkeypatch
     with pytest.raises(agent.AgentError, match="not found"):
         agent.start_task(session, 999, "x")
     task = agent.start_task(session, ev.id, "x", max_steps=500, max_seconds=1)
-    assert task.limits == {"max_steps": 50, "max_seconds": 30}
+    assert task.limits == {"max_steps": 50, "max_seconds": 30, "max_runs": 5}
     default = agent.start_task(session, ev.id, "x", max_steps="", max_seconds=None)
-    assert default.limits == {"max_steps": 12, "max_seconds": 600}
+    assert default.limits == {"max_steps": 12, "max_seconds": 600, "max_runs": 5}
     v = agent.view(default)
     assert v.active and v.left_s is None and v.elapsed_s == 0
 
@@ -342,7 +342,7 @@ def test_goal_from_chat_panel(
         headers=HX,
     )
     task = session.scalars(select(AITask)).one()
-    assert task.limits == {"max_steps": 5, "max_seconds": 120}
+    assert task.limits == {"max_steps": 5, "max_seconds": 120, "max_runs": 5}
     html = resp.text
     assert f'id="ai-task-{task.id}"' in html and "Goal: find xyz" in html
     assert "done" in html and "Found [" in html and f'href="/runs/{r}?row=1' in html
@@ -414,4 +414,8 @@ def test_start_again_button(client: TestClient, session, ev, monkeypatch) -> Non
         headers=HX,
     )
     again = session.scalars(select(AITask).order_by(AITask.id.desc())).first()
-    assert again.id != task.id and again.limits == {"max_steps": 4, "max_seconds": 90}
+    assert again.id != task.id and again.limits == {
+        "max_steps": 4,
+        "max_seconds": 90,
+        "max_runs": 5,
+    }

@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     agent_max_steps: int = 12  # model calls per task
     agent_max_seconds: int = 600  # wall-clock time per task
     agent_max_concurrent: int = 2  # tasks running at once (others wait)
+    agent_max_runs: int = 5  # plugin runs one task may queue
 
     @property
     def excluded_evidence_suffixes(self) -> frozenset[str]:

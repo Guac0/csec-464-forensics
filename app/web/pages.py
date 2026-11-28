@@ -354,7 +354,9 @@ def ai_panel_context(session: Session, evidence_id: int) -> dict[str, Any]:
     by_id = {m.id: m for m in messages}
     return {
         "messages": messages,
-        "task_by_msg": {t.user_message_id: agent.view(t) for t in tasks if t.user_message_id},
+        "task_by_msg": {
+            t.user_message_id: agent.view(t, session) for t in tasks if t.user_message_id
+        },
         "task_answers": {
             t.answer_message_id: by_id.get(t.answer_message_id)
             for t in tasks
@@ -458,6 +460,7 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "agent_defaults": {
             "max_steps": get_settings().agent_max_steps,
             "max_minutes": round(get_settings().agent_max_seconds / 60, 1),
+            "max_runs": get_settings().agent_max_runs,
         },
         "hashing": evidence_svc.is_hashing(ev.id),
         "cleanup": _cleanup_summary(session, ev.id),
@@ -1186,6 +1189,8 @@ def ui_ai_ask(
                 question,
                 max_steps=form.get("max_steps") or None,
                 max_seconds=int(float(minutes) * 60) if minutes else None,
+                max_runs=form.get("max_runs") or None,
+                approve_all=form.get("approve_all") in ("on", "true", "1"),
             )
         except (agent.AgentError, ValueError) as exc:
             session.rollback()

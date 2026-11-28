@@ -57,6 +57,7 @@
       <dt>Usage</dt><dd><pre>{{ msg.usage | pretty }}</pre></dd>
       <dt>Context refs</dt><dd><pre>{{ msg.context_refs | pretty }}</pre></dd>
       <dt>Citations</dt><dd><pre>{{ msg.citations | pretty }}</pre></dd>
+      {% if msg.reasoning %}<dt>Model reasoning</dt><dd><small class="muted">The model's own reasoning (e.g. &lt;think&gt; text), hidden from the answer. Not evidence.</small><pre>{{ msg.reasoning }}</pre></dd>{% endif %}
     </dl>
     <div class="small-label">Exact request messages</div>
     <pre class="request-messages">{{ msg.request_messages | pretty }}</pre>

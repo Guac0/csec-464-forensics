@@ -81,6 +81,7 @@ def create_run(
     chain_depth: int = 0,
     rerun_of_id: int | None = None,
     ai_message_id: int | None = None,
+    ai_task_id: int | None = None,
 ) -> Run:
     """Validate the request against the tool's allowlist and queue a run.
 
@@ -98,6 +99,8 @@ def create_run(
     args = runner.validate(request)
     if ai_message_id is not None:
         _check_ai_message(session, evidence_id, origin, ai_message_id)
+    if (ai_task_id is not None) != (origin == RunOrigin.AI_AGENT):
+        raise ArgValidationError("origin 'agent' requires an AI task (and only it)")
     run = Run(
         evidence_id=evidence_id,
         tool=tool,
@@ -110,6 +113,7 @@ def create_run(
         chain_depth=chain_depth,
         rerun_of_id=rerun_of_id,
         ai_message_id=ai_message_id,
+        ai_task_id=ai_task_id,
     )
     session.add(run)
     session.flush()  # assign run.id for the audit event
@@ -130,6 +134,7 @@ def create_run(
             "chain_depth": chain_depth,
             "rerun_of_id": rerun_of_id,
             "ai_message_id": ai_message_id,
+            "ai_task_id": ai_task_id,
         },
     )
     session.commit()

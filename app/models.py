@@ -77,6 +77,7 @@ class RunOrigin(enum.StrEnum):
     AI_SUGGESTED = "ai"  # user clicked a validated AI suggestion
     HOOK = "hook"  # queued by a post-run hook as a follow-up (see app/tools/hooks.py)
     RECOMMENDED = "recommended"  # user clicked a recommendation from the investigation guide
+    AI_AGENT = "agent"  # queued by an AI agent task (approved by the analyst or "yes to all")
 
 
 class Run(Base):
@@ -135,6 +136,12 @@ class Run(Base):
         index=True,
     )
     triggered_by_hook: Mapped[str | None] = mapped_column(String, default=None)
+    # Set when an AI agent task queued the run (origin "agent"); see AIRunRequest.
+    ai_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_tasks.id", ondelete="SET NULL", name="fk_runs_ai_task_id"),
+        default=None,
+        index=True,
+    )
     # Set when the run was started from a suggestion in this AI answer (origin "ai").
     ai_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("ai_messages.id", ondelete="SET NULL", name="fk_runs_ai_message_id"),
@@ -227,6 +234,9 @@ class AIMessage(Base):
     suggestions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
     usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # The model's reasoning (<think> text / reasoning_content): hidden from the answer, kept
+    # for provenance (shown under "Provenance" and in exports). None if the model gave none.
+    reasoning: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -515,6 +525,8 @@ class DismissedRecommendation(Base):
 class AITaskStatus(enum.StrEnum):
     QUEUED = "queued"  # waiting for a free agent slot
     RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"  # the AI asked to run plugins; the analyst decides
+    WAITING_FOR_RUNS = "waiting_for_runs"  # approved runs are queued/running
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -535,8 +547,13 @@ class AITask(Base):
     evidence_id: Mapped[int] = mapped_column(ForeignKey("evidence.id"), index=True)
     goal: Mapped[str] = mapped_column(Text)
     status: Mapped[AITaskStatus] = mapped_column(Enum(AITaskStatus), default=AITaskStatus.QUEUED)
-    # {"max_steps": int, "max_seconds": int}
+    # {"max_steps": int, "max_seconds": int, "max_runs": int}
     limits: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # "Yes to all": the AI's run requests are approved automatically (set at start, or later
+    # with "Approve all remaining").
+    approve_all: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Seconds spent waiting for the analyst's approval (not counted against max_seconds).
+    paused_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # "native" (function calling) or "text" (JSON action blocks): the protocol actually used.
     tool_mode: Mapped[str | None] = mapped_column(String, default=None)
     steps_used: Mapped[int] = mapped_column(Integer, default=0)
@@ -557,6 +574,9 @@ class AITask(Base):
 
     steps: Mapped[list[AITaskStep]] = relationship(
         back_populates="task", order_by="AITaskStep.idx", cascade="all, delete-orphan"
+    )
+    run_requests: Mapped[list[AIRunRequest]] = relationship(
+        back_populates="task", order_by="AIRunRequest.id", cascade="all, delete-orphan"
     )
 
 
@@ -579,3 +599,33 @@ class AITaskStep(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     task: Mapped[AITask] = relationship(back_populates="steps")
+
+
+class AIRunRequest(Base):
+    """A plugin run an AI agent task asked for, and the analyst's decision on it.
+
+    status: "pending" (waiting for the analyst), "approved" (as asked), "edited" (approved with
+    changed options), "auto" (approved by "yes to all"), "denied", "expired" (the task ended
+    before a decision; requests never carry over to another task), "refused" (not allowed:
+    redundant run, runs limit, invalid options - never shown for approval).
+    """
+
+    __tablename__ = "ai_run_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("ai_tasks.id", ondelete="CASCADE"), index=True)
+    tool: Mapped[str] = mapped_column(String, default="volatility3")
+    plugin: Mapped[str] = mapped_column(String)
+    args: Mapped[dict[str, Any]] = mapped_column(JSON)  # as requested (normalised)
+    final_args: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)  # as run
+    reason: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String, default="pending")
+    note: Mapped[str | None] = mapped_column(Text, default=None)  # analyst's note / refusal
+    decided_by: Mapped[str | None] = mapped_column(String, default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), default=None, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    task: Mapped[AITask] = relationship(back_populates="run_requests")

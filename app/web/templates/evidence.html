@@ -201,7 +201,7 @@
             hx-on::after-request="if(event.detail.successful) this.reset()">
         <div class="ask-mode small-text">
           <label><input type="radio" name="mode" value="question" checked> Ask a question</label>
-          <label title="The AI searches this image's existing results step by step (read-only: it cannot run plugins)"><input type="radio" name="mode" value="goal"> Give the AI a goal</label>
+          <label title="The AI searches this image's results step by step and can ask to run plugins (you approve each run)"><input type="radio" name="mode" value="goal"> Give the AI a goal</label>
         </div>
         <textarea name="question" rows="3" placeholder="Ask about this evidence… or give a goal, e.g. find processes named xyz" required></textarea>
         <label class="small-label ask-question-only">Restrict context to run ids (optional, e.g. 12, 13)
@@ -212,10 +212,14 @@
           <label class="small-label">Max steps (AI calls)
             <input type="number" name="max_steps" min="1" max="50" placeholder="{{ agent_defaults.max_steps }}">
           </label>
-          <label class="small-label">Time limit (minutes)
+          <label class="small-label">Time limit (minutes; waiting for your approval does not count)
             <input type="number" name="max_minutes" min="0.5" max="60" step="0.5" placeholder="{{ agent_defaults.max_minutes }}">
           </label>
+          <label class="small-label">Max plugin runs the AI may queue (0 = search existing results only)
+            <input type="number" name="max_runs" min="0" max="20" placeholder="{{ agent_defaults.max_runs }}">
+          </label>
         </details>
+        <label class="small-text ask-goal-only" title="Every plugin run the AI asks for is queued without asking you (including plugins that write files). You can still cancel the task."><input type="checkbox" name="approve_all"> Yes to all: approve the AI's plugin runs automatically</label>
         <button type="submit">Ask</button>
         <span id="ai-spinner" class="htmx-indicator spinner">Asking AI...</span>
       </form>
