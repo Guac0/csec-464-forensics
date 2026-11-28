@@ -619,6 +619,38 @@ def test_ai_message_escapes_and_links(web: TestClient, session: Session, ev: Evi
     assert "plugin not allowed: &#39;evil.Plugin&#39;" in html
 
 
+def test_ai_message_unsupported_citation_and_single_error(
+    web: TestClient, session: Session, ev: Evidence
+) -> None:
+    common = {"evidence_id": ev.id, "role": "assistant", "model_requested": "m"}
+    session.add_all(
+        [
+            AIMessage(
+                **common,
+                content="evil.exe is PID 666 [R1:2]. Fine [R1:3].",
+                citations=[
+                    {
+                        "key": "R1:2",
+                        "valid": True,
+                        "support": "unsupported",
+                        "unsupported_values": ["evil.exe", '<b>"x"</b>'],
+                    },
+                    {"key": "R1:3", "valid": True, "support": "supported"},
+                ],
+            ),
+            AIMessage(**common, content="AI request failed: boom-123", error="boom-123"),
+        ]
+    )
+    session.commit()
+    html = web.get(f"/ui/evidence/{ev.id}/ai", headers=HX).text
+    assert 'class="cite cite-unsupported" href="/runs/1?row=2#row-1-2"' in html
+    assert "cited row doesn&#39;t support this: evil.exe" in html
+    assert '<b>"x"</b>' not in html  # model text escaped in the title and the note
+    assert '<a class="cite" href="/runs/1?row=3#row-1-3">R1:3</a>' in html
+    assert "cite-support-note" in html
+    assert html.count("boom-123") == 1  # the error is shown once, not also as the answer
+
+
 def test_render_ai_content_unit() -> None:
     out = pages.render_ai_content('<b>"x"</b> [R12:34]', [])
     assert str(out) == (

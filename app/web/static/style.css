@@ -184,6 +184,7 @@ table.kv td { padding: .1rem 0; word-break: break-all; }
 #test-volatility, #test-ai { margin-bottom: .8rem; }
 .badge.status-deleted { background: #e4e7ec; color: #475467; text-decoration: line-through; }
 a.cite-deleted { text-decoration: line-through; color: #667085; }
+a.cite-unsupported { color: #b54708; text-decoration: underline wavy #f79009; }
 
 /* Cases and sharing */
 .badge.case-chip { background: #e0eaff; color: #2d31a6; font-weight: 500; text-decoration: none; }

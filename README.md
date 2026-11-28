@@ -155,10 +155,35 @@ Team workflow, branch rules and guidance for AI coding assistants:
 - _TODO: list the hooks and what each one flags._
 
 ### AI analysis
-- **Status:** infrastructure done, prompts TODO
+- **Status:** infrastructure done, prompts TODO (forensics team)
 - Ask questions, summarise a run, cited claims with clickable row links, provenance dropdown,
   validated one-click query suggestions.
-- _TODO: describe the analysis approach, what context is sent, and known limitations._
+- **Approach:** the AI never sees the memory image. It reads data the app already stored
+  (parsed volatility rows, hook findings, notes) and answers as a *lead*, not evidence: every
+  answer is labelled "AI-generated lead — not evidence" and must cite rows as `[R<run>:<row>]`,
+  which become links to the row.
+- **What is sent** (built in `app/ai/context.py`, for one image only, never across images or
+  cases): image metadata (file name, size, SHA-256, integrity status, detected OS), that image's
+  own notes (not case notes), rows the analyst selected, then each run with its hook findings and
+  up to 50 rows (200 for "Summarise run"), capped at about 60,000 characters (`[truncated]`
+  marks a cut; rows are never cut in half). The last 6 successful question/answer turns are
+  included as chat history. The exact messages are stored with each answer (Provenance).
+- **Citation checks:** a citation is checked at answer time in two steps: (1) the row exists;
+  (2) typed values stated in the same sentence (IPs, paths, file names, hex addresses,
+  quoted/backticked text and labelled numbers such as `PID 1234`) appear in the cited row(s),
+  or in their direct parent/child for tree plugins. A cited row that doesn't contain such a
+  value is flagged "cited row doesn't support this" in the answer, the case export and the
+  evals. Answers saved before this check show as "not checked".
+- **Suggestions:** suggested follow-up queries are validated against the plugin allowlist
+  before they get a Run button.
+- **Provider:** any OpenAI-compatible API (`FT_AI_BASE_URL`, `FT_AI_MODEL`, `FT_AI_API_KEY`).
+  Context is sent to that provider: use a local model (e.g. Ollama) when evidence must not
+  leave the machine. Each answer records the model, parameters and `PROMPT_VERSION`.
+- **Known limitations:** the prompts are placeholders until the forensics team writes them;
+  row selection is "first N rows per run" (no per-plugin selection yet), so large runs are only
+  partly seen; the support check matches values, not meaning (it can't tell whether a claim
+  about a row is *true*, bare numbers like counts are not checked, and a value mentioned only
+  for contrast can be flagged); one image per conversation (no multi-image AI by design).
 
 ### AI evaluation (developers)
 - `python -m evals.run` replays fixed questions against recorded tool output and scores the AI's

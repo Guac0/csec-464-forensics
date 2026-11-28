@@ -71,6 +71,26 @@ def test_bad_answer_fails_each_check() -> None:
     assert out["metrics"]["pass"] == 0.0 and out["metrics"]["citation_validity"] == 0.0
 
 
+def test_unsupported_citation_fails_and_scores_support() -> None:
+    cites = [
+        {**cite("R1:5"), "support": "supported"},
+        {**cite("R1:6"), "support": "unsupported", "unsupported_values": ["PID/port 2001"]},
+        {**cite("R1:7"), "support": "unchecked"},
+    ]
+    out = scoring.score_answer(
+        "explorer.exe [R1:5]. PID 2001 [R1:6]. Fine [R1:7].",
+        cites,
+        [{"plugin": "windows.pslist.PsList", "valid": True}],
+        EXPECT,
+    )
+    assert out["metrics"]["citation_support"] == 0.5  # unchecked citations are not counted
+    assert any("don't support the stated values" in c and "R1:6" in c for c in out["failed_checks"])
+    assert out["metrics"]["pass"] == 0.0
+    # Citations stored before support checking existed: metric not applicable.
+    old = scoring.score_answer("x [R1:5].", [cite("R1:5")], [], EXPECT)
+    assert old["metrics"]["citation_support"] is None
+
+
 def test_provider_error_scores_zero() -> None:
     out = scoring.score_answer("", None, None, EXPECT, error="timeout")
     assert out["metrics"] == {"pass": 0.0} and "provider error" in out["failed_checks"][0]

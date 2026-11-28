@@ -133,10 +133,12 @@ def render_ai_content(content: str | None, citations: list[dict[str, Any]] | Non
 
     Never renders markdown/HTML: evidence strings quoted by the model may contain markup.
     """
-    invalid = {
-        str(c.get("key"))
-        for c in (citations or [])
-        if isinstance(c, dict) and c.get("valid") is False
+    cits = [c for c in (citations or []) if isinstance(c, dict)]
+    invalid = {str(c.get("key")) for c in cits if c.get("valid") is False}
+    unsupported = {
+        str(c.get("key")): ", ".join(str(v) for v in c.get("unsupported_values") or [])
+        for c in cits
+        if c.get("valid") and c.get("support") == "unsupported"
     }
     escaped = str(escape(content or ""))
     deleted = _deleted_run_ids({int(m.group(1)) for m in _CITE_KEY_RE.finditer(escaped)})
@@ -152,6 +154,10 @@ def render_ai_content(content: str | None, citations: list[dict[str, Any]] | Non
                 f'title="run {run_id} was deleted; this row no longer exists">{key}</a>'
             )
         href = f"/runs/{run_id}?row={row_idx}#row-{run_id}-{row_idx}"
+        if key in unsupported:
+            # Values come from the model's text: escape them for the attribute.
+            title = escape(f"cited row doesn't support this: {unsupported[key]} not found in row")
+            return f'<a class="cite cite-unsupported" href="{href}" title="{title}">{key}</a>'
         return f'<a class="cite" href="{href}">{key}</a>'
 
     def _bracket(m: re.Match[str]) -> str:

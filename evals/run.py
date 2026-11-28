@@ -234,9 +234,10 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"{meta['judge_model'] or ('on' if meta['judge'] else 'off')} · {meta['created_at']}",
         f"- Baseline: {meta['baseline'] or 'none'}",
         "",
-        "| Case | Pass | Citations valid | Expected rows cited | Sentences cited "
-        "| Terms | Suggestions valid | Judge (1-5) | Latency s | Tokens | Δ pass vs baseline |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Case | Pass | Citations valid | Citations supported | Expected rows cited "
+        "| Sentences cited | Terms | Suggestions valid | Judge (1-5) | Latency s | Tokens "
+        "| Δ pass vs baseline |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for case_id, agg in report["aggregate"].items():
 
@@ -246,6 +247,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         delta = report["comparison"]["cases"].get(case_id, {}).get("pass", {}).get("delta")
         lines.append(
             f"| {case_id} | {_fmt(m('pass'))} | {_fmt(m('citation_validity'))} "
+            f"| {_fmt(m('citation_support'))} "
             f"| {_fmt(m('expected_row_recall'))} | {_fmt(m('cited_sentence_ratio'))} "
             f"| {_fmt(m('mention_recall'))} | {_fmt(m('suggestion_validity'))} "
             f"| {_fmt(m('judge_score'), pct=False)} | {_fmt(m('latency_s'), pct=False)} "

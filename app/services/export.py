@@ -33,6 +33,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.ai.citations import NOT_CHECKED, NOT_FOUND, UNSUPPORTED, citation_status
 from app.ai.prompts import PROMPT_VERSION
 from app.config import get_settings
 from app.models import (
@@ -745,7 +746,6 @@ def _ai_section(session: Session, ev: Evidence) -> list[str]:
         else:
             out += ["Answer:", "", fenced(m.content), ""]
         citations = m.citations or []
-        invalid = [c["key"] for c in citations if not c.get("valid")]
         details = [
             [
                 "Model (requested / returned)",
@@ -754,12 +754,7 @@ def _ai_section(session: Session, ev: Evidence) -> list[str]:
             ["Prompt version", code(params.pop("prompt_version", None))],
             ["Parameters", code(json.dumps(params, sort_keys=True))],
             ["Provider", code(m.provider_base_url)],
-            [
-                "Citations",
-                f"{len(citations)} ({len(invalid)} invalid: {esc(', '.join(invalid))})"
-                if invalid
-                else str(len(citations)),
-            ],
+            ["Citations", _citations_summary(citations)],
             ["Prompt SHA-256", code(_sha256_json(m.request_messages))],
         ]
         if m.usage:
@@ -776,6 +771,28 @@ def _ai_section(session: Session, ev: Evidence) -> list[str]:
                 )
         out.append("")
     return out
+
+
+def _citations_summary(citations: list[dict[str, Any]]) -> str:
+    """'N' plus invalid rows and value-level support problems (see app.ai.citations)."""
+    status = {c["key"]: citation_status(c) for c in citations}
+    invalid = [k for k, s in status.items() if s == NOT_FOUND]
+    parts = []
+    if invalid:
+        parts.append(f"{len(invalid)} invalid: {esc(', '.join(invalid))}")
+    unsupported = [
+        f"{c['key']} ({', '.join(str(v) for v in c.get('unsupported_values') or [])})"
+        for c in citations
+        if status[c["key"]] == UNSUPPORTED
+    ]
+    if unsupported:
+        parts.append(
+            f"{len(unsupported)} cited row(s) don't support the stated values: "
+            + esc("; ".join(unsupported))
+        )
+    if any(s == NOT_CHECKED for s in status.values()):
+        parts.append("value support not checked (older answer)")
+    return f"{len(citations)} ({'; '.join(parts)})" if parts else str(len(citations))
 
 
 def _sha256_json(value: Any) -> str | None:

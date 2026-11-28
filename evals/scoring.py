@@ -16,6 +16,7 @@ from app.ai.citations import extract_citations
 METRICS: dict[str, str] = {
     "pass": "all checks passed (share of repeats)",
     "citation_validity": "cited row keys that exist / all citations",
+    "citation_support": "cited rows containing the values stated next to them / checked citations",
     "expected_row_recall": "expected rows that were cited / expected rows",
     "cited_sentence_ratio": "sentences with at least one citation / sentences",
     "mention_recall": "required terms present / required terms",
@@ -79,9 +80,12 @@ def score_answer(
     mentioned = [t for t in expect.must_mention if t.lower() in lower]
     forbidden = [t for t in expect.must_not_mention if t.lower() in lower]
     valid_suggestions = [s for s in suggestions if s.get("valid")]
+    checked = {c["key"] for c in citations if c.get("support") in ("supported", "unsupported")}
+    unsupported = sorted(c["key"] for c in citations if c.get("support") == "unsupported")
 
     metrics = {
         "citation_validity": _ratio(len(valid_cited), len(cited)),
+        "citation_support": _ratio(len(checked) - len(unsupported), len(checked)),
         "expected_row_recall": _ratio(
             len(set(expect.cite_keys) & valid_cited), len(expect.cite_keys)
         ),
@@ -92,6 +96,11 @@ def score_answer(
     failed = []
     if cited - valid_cited:
         failed.append(f"cites rows that do not exist: {sorted(cited - valid_cited)}")
+    if unsupported:
+        detail = {
+            c["key"]: c.get("unsupported_values") for c in citations if c["key"] in unsupported
+        }
+        failed.append(f"cited rows don't support the stated values: {detail}")
     missing_rows = sorted(set(expect.cite_keys) - valid_cited)
     if missing_rows:
         failed.append(f"did not cite expected rows: {missing_rows}")
