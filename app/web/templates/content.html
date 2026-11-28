@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Forensics content{% endblock %}
+{% block crumbs %}<a href="/system">System</a> / Forensics content{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2>Forensics content <span class="muted small-text mono">{{ report.root }}/</span></h2>
+  <p class="small-text muted">What the forensics team has set up in the <span class="mono">forensics/</span>
+    folder, and what is still to do. Read-only: edit the files, then reload this page after restarting the app
+    (or run <span class="mono">python -m forensics check</span>). How-to: <span class="mono">forensics/README.md</span>.
+    See also the <a href="/guide">investigation guide</a>.</p>
+  <p>
+    <span class="badge {{ 'health-ok' if report.ok else 'health-fail' }}">{{ report.errors | length }} error(s)</span>
+    <span class="badge health-info">{{ report.todo | length }} still to do</span>
+    <span class="badge">{{ report.plugins | length }} plugin(s)</span>
+  </p>
+</section>
+
+{% if report.errors %}
+<section class="panel">
+  <h2>Errors ({{ report.errors | length }})</h2>
+  <p class="flash error small-text">Broken content is skipped by the app until it is fixed; CI fails on these.</p>
+  <ul>{% for e in report.errors %}<li class="mono small-text">{{ e }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Plugins</h2>
+  <table class="results">
+    <thead><tr><th>Plugin</th><th>Status</th><th>Options</th><th>Presets</th><th>Auto</th><th>Baseline</th>
+      <th>Next steps</th><th>Compare keys</th><th>Hooks</th><th>AI rows</th><th>Fixture</th><th>Eval cases</th></tr></thead>
+    <tbody>
+    {% for p in report.plugins %}
+    <tr>
+      <td class="mono">{{ p.name }}<div class="muted small-text">{{ p.file }}</div></td>
+      <td>{% if p.errors %}<span class="badge health-fail" title="{{ p.errors | join('; ') }}">error</span>
+          {% elif p.example %}<span class="badge health-warn">example</span>
+          {% else %}<span class="badge health-ok">reviewed</span>{% endif %}</td>
+      <td class="mono small-text">{{ p.args | join(", ") or "—" }}{% if p.writes_files %} <span class="badge sev-medium">writes files</span>{% endif %}</td>
+      <td>{{ p.presets or "—" }}</td>
+      <td>{{ "yes" if p.auto_enumerate else "—" }}</td>
+      <td>{{ p.baseline | join(", ") or "—" }}</td>
+      <td>{{ p.next_steps or "—" }}</td>
+      <td class="mono small-text">{{ p.compare_keys | join(", ") or "—" }}</td>
+      <td class="mono small-text">{{ p.hooks | join(", ") or "—" }}</td>
+      <td>{{ p.ai_rows or "default" }}</td>
+      <td>{{ "yes" if p.fixture else "—" }}</td>
+      <td>{{ p.eval_cases | length or "—" }}</td>
+    </tr>
+    {% else %}<tr><td colspan="12" class="muted">No plugins loaded.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>AI prompts and checks</h2>
+  <table class="results">
+    <thead><tr><th>File</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for f in report.prompts + ([report.citations] if report.citations else []) %}
+    <tr><td class="mono">{{ f.path }}</td>
+      <td>{% if not f.present %}<span class="badge health-fail">missing</span>
+          {% elif f.example %}<span class="badge health-warn">example</span>
+          {% else %}<span class="badge health-ok">reviewed</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="small-text">Evaluation cases: {{ report.eval_cases | length }}.
+    Saved baselines: {{ report.baselines | join(", ") or "none" }}.</p>
+</section>
+
+<section class="panel">
+  <h2>Still to do ({{ report.todo | length }})</h2>
+  <ul>{% for t in report.todo %}<li class="small-text">{{ t }}</li>{% else %}<li class="muted">Nothing.</li>{% endfor %}</ul>
+</section>
+{% endblock %}

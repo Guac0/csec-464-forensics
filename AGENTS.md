@@ -18,7 +18,9 @@ operations). Open work: `TODO.md`.
   (infrastructure); output parsing stays shared in `runner.parse_output`.
 - `forensics/sdk.py` and the loader `app/tools/content.py` are infrastructure (keep the names
   the team imports stable). Infrastructure tests must not depend on `forensics/`: use
-  `tests/content/` (see CONTRACTS.md "Tool runner").
+  `tests/content/` (see CONTRACTS.md "Tool runner"). Content checks live in one place,
+  `app/tools/content_report.py` (CLI `python -m forensics check`, page `/content`): add new
+  content checks there.
 - **Infrastructure (AI-maintained, human-reviewed):** everything else in `app/`, `evals/*.py`,
   `scripts/`, `tests/`.
 - Don't fill in forensics content on your own initiative. Never invent volatility3 plugin names,

@@ -40,6 +40,7 @@ ROUTER_MODULES = (
     "app.web.pages",
     "app.web.cases_pages",
     "app.web.recommendations_pages",
+    "app.web.content_pages",
     "app.web.agent_pages",
     "app.web.settings_pages",
 )

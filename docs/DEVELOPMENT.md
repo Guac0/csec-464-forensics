@@ -114,6 +114,10 @@ file is invalid (wrong plugin name, clashing or duplicate flags, an undeclared f
 option, a broken preset or guide step). At runtime a broken file is skipped and shown on the
 System page instead of stopping the app.
 
+`python -m forensics check` runs the same checks and prints a to-do list; the Content page
+(`/content`) shows the same report in the app. In CI the content checks run as their own job
+(`forensics-content`), separate from the infrastructure tests.
+
 The other tests never load `forensics/`. They use a small frozen copy in `tests/content/`, so the
 forensics team can change their files without breaking infrastructure tests. Change that copy
 only when an infrastructure test needs different content.

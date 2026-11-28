@@ -137,7 +137,8 @@ separated by spaces or commas.
   started from any AI suggestion link back to the answer ("suggested by AI answer N"), and
   suggestions show when they already ran.
 - The guide is the `baseline` and `next` fields in the plugin files under `forensics/plugins/`;
-  `/guide` shows it, and `python -m app.tools.guide` prints it with any problems. How to extend
+  `/guide` shows it, and `python -m forensics guide` prints it (`python -m forensics check`
+  checks all forensics content; the Content page shows its status). How to extend
   it: [forensics/README.md](forensics/README.md#investigation-guide-recommended-next).
 
 ### Auto-enumeration

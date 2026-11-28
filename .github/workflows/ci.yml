@@ -60,8 +60,32 @@ jobs:
       # no real memory images and no volatility3 install are needed here.
       # `-n auto`: one pytest worker per CPU (pytest-xdist); every test uses its own temp
       # dirs and database, so they are safe to run in parallel.
+      # Infrastructure tests only: they use the frozen copy in tests/content/, never forensics/.
       - name: Run tests
-        run: pytest -q -n auto
+        run: pytest -q -n auto --ignore=tests/test_forensics_content.py
+
+  forensics-content:
+    # The forensics team's content (forensics/). Separate job so a content problem and an
+    # infrastructure problem show up as different checks on the PR.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package with dev extras
+        run: python -m pip install -e ".[dev]"
+
+      - name: Content report
+        run: python -m forensics check
+
+      - name: Content tests
+        run: pytest -q tests/test_forensics_content.py
 
   docker:
     # Runs in parallel with lint/test (no `needs:`): total CI time is the slowest job, not the
