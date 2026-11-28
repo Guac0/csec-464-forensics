@@ -115,8 +115,6 @@ the how-to is [forensics/README.md](forensics/README.md).
 - [ ] Indicators: no regex mode, no import/export of watchlists (e.g. STIX/CSV), and "Check all
       images" re-reads every row (no incremental index). Indicator types are generic; columns
       per plugin (e.g. which column holds a remote IP) are not used yet.
-- [ ] Moving global notes into the "General" case during migration 0009 is not itself an audit
-      event (the notes' own history is unchanged).
 - [ ] Case export: the report has no row data inline (it is in the ZIP's CSVs), skips page/API
       request events, note edit history and full AI prompts. Revisit if reviewers need them.
 - [ ] Case export ZIPs are built in a temp file; very large runs or dumped files make big

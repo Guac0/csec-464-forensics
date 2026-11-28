@@ -26,8 +26,8 @@ context or report unless explicitly and visibly labelled.
   label per image ("before", "after", "laptop-2").
 - Active case = how the image was opened: `?case=<id>` on image/run pages; HTMX fragments read it
   from HX-Current-URL.
-- Global notes REPLACED by case notes (migration moved existing global notes into a "General"
-  case containing every image, only if global notes existed).
+- Global notes REPLACED by case notes. (Migration numbers in this file are historical: all
+  migrations were squashed into `0001_initial` at the handoff.)
 - Cases can only be deleted when empty. AI context uses only the image's own notes.
 
 ## Sharing (C)

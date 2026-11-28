@@ -3,7 +3,6 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.ai.citations import (
-    NOT_CHECKED,
     NOT_FOUND,
     SUPPORTED,
     UNCHECKED,
@@ -112,8 +111,8 @@ def test_support_normalises_volatility_forms(session: Session) -> None:
     assert c["support"] == SUPPORTED, c["unsupported_values"]
 
 
-def test_citation_status_old_answers() -> None:
-    assert citation_status({"key": "R1:2", "valid": True}) == NOT_CHECKED
+def test_citation_status() -> None:
+    assert citation_status({"key": "R1:2", "valid": True}) == UNCHECKED
     assert citation_status({"key": "R1:2", "valid": False}) == NOT_FOUND
     assert citation_status({"valid": True, "support": UNSUPPORTED}) == UNSUPPORTED
 

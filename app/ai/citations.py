@@ -57,7 +57,6 @@ SUPPORTED = "supported"
 UNSUPPORTED = "unsupported"
 UNCHECKED = "unchecked"  # the sentence(s) state no checkable value
 NOT_FOUND = "not_found"  # the cited row does not exist
-NOT_CHECKED = "not_checked"  # answer saved before support checking existed (no ``support`` key)
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _IPV4 = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w.]*\d)")
@@ -243,10 +242,10 @@ class _RowIndex:
 
 
 def citation_status(citation: dict[str, Any]) -> str:
-    """One of SUPPORTED, UNSUPPORTED, UNCHECKED, NOT_FOUND or NOT_CHECKED (older answers)."""
+    """One of SUPPORTED, UNSUPPORTED, UNCHECKED or NOT_FOUND."""
     if not citation.get("valid"):
         return NOT_FOUND
-    return str(citation.get("support") or NOT_CHECKED)
+    return str(citation.get("support") or UNCHECKED)
 
 
 def _describe(kind: str, value: str) -> str:

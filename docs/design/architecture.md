@@ -38,6 +38,9 @@ docker compose
 
 ## Data model (current tables, `app/models.py`)
 
+Schema: one Alembic migration `0001_initial` (0001-0017 squashed at the handoff; migration
+numbers elsewhere in docs/design are historical). Pre-squash databases are refused, not upgraded.
+
 - Evidence, IntegrityCheck: path, size, mtime, sha256 (cached by path+size+mtime), `os_info`
   filled by the `windows.info` hook.
 - Run, ResultRow, DerivedArtifact: plugin, args, status, origin (`RunOrigin`: manual,

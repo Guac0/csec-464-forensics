@@ -351,9 +351,7 @@ def test_citations_summary_support_states() -> None:
                 "support": "unsupported",
                 "unsupported_values": ["PID/port 9"],
             },
-            {"key": "R1:4", "valid": True},  # stored before support checking existed
         ]
     )
-    assert out.startswith("4 (1 invalid: R1:2; 1 cited row(s) don't support the stated values: ")
+    assert out.startswith("3 (1 invalid: R1:2; 1 cited row(s) don't support the stated values: ")
     assert "R1:3" in out and "PID/port 9" in out
-    assert "value support not checked (older answer)" in out

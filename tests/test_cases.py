@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import db
 from app.config import Settings
-from app.models import AIMessage, AuditEvent, Evidence, Note, ResultRow, Run, RunStatus
+from app.models import AIMessage, AuditEvent, Evidence, ResultRow, Run, RunStatus
 from app.services import cases, notes, results, run_deletion, sharing
 from app.services import evidence as evidence_service
 from app.tools.base import ParsedRow
@@ -204,43 +203,6 @@ def test_shared_items_never_reach_ai_context(session: Session, images) -> None:
 
 
 # ------------------------------------------------------------------------------ migration
-
-
-def test_migration_moves_global_notes_into_general_case(settings: Settings) -> None:
-    from alembic import command
-
-    engine = db.init_engine()
-    cfg = db.alembic_config()
-    with engine.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.upgrade(cfg, "0008_run_deletion")
-        for i, path in enumerate(("a.raw", "b.raw")):
-            conn.execute(
-                text(
-                    "INSERT INTO evidence (id, rel_path, size_bytes, mtime, description, "
-                    "created_at) VALUES (:i, :p, 1, 0, '', '2026-01-01')"
-                ),
-                {"i": i + 1, "p": path},
-            )
-        conn.execute(
-            text(
-                "INSERT INTO notes (body, created_at, updated_at) "
-                "VALUES ('g', '2026-01-01', '2026-01-01')"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO notes (body, evidence_id, created_at, updated_at) "
-                "VALUES ('e', 1, '2026-01-01', '2026-01-01')"
-            )
-        )
-    db.migrate(engine)
-    with db.SessionLocal() as s:
-        (general,) = cases.list_cases(s)
-        assert general.name == "General"
-        assert {e.rel_path for e, _ in cases.member_evidence(s, general.id)} == {"a.raw", "b.raw"}
-        by_body = {n.body: n for n in s.scalars(select(Note))}
-        assert by_body["g"].case_id == general.id and by_body["e"].case_id is None
 
 
 def test_migration_without_global_notes_creates_no_case(session: Session) -> None:

@@ -9,9 +9,8 @@ import time
 from typing import Any
 
 import pytest
-from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import select, text
 from sqlalchemy.exc import DatabaseError
 from sqlalchemy.orm import Session
 
@@ -350,28 +349,6 @@ def test_note_versions_and_history(client: TestClient, session: Session) -> None
     page = client.get(f"/notes/{note_id}/history").text
     assert "Version 3" in page and "v2 &lt;b&gt;bold&lt;/b&gt;" in page
     assert client.get("/api/notes/999/versions").status_code == 404
-
-
-def test_existing_notes_get_a_first_version_on_upgrade(settings: Settings) -> None:
-    engine = create_engine(f"sqlite:///{settings.data_dir / 'upgrade.db'}")
-    cfg = db.alembic_config()
-    with engine.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.upgrade(cfg, "0002_hooks")
-        conn.execute(
-            text(
-                "INSERT INTO notes (id, body, created_at, updated_at) "
-                "VALUES (7, 'old note', '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
-            )
-        )
-    db.migrate(engine)
-    with engine.connect() as conn:
-        rows = conn.execute(text("SELECT note_id, version, action, body FROM note_versions"))
-        assert rows.all() == [(7, 1, "create", "old note")]
-        assert conn.execute(text("SELECT seq, last_hash FROM audit_head")).one() == (
-            0,
-            audit.GENESIS_HASH,
-        )
 
 
 # ------------------------------------------------------------------------------- API / UI
