@@ -753,6 +753,11 @@ def _ai_section(session: Session, ev: Evidence) -> list[str]:
         if m.error:
             out += [f"Request failed: {esc(m.error)}", ""]
         else:
+            if m.truncated:
+                out += [
+                    "**Answer cut off by the token limit (FT_AI_MAX_TOKENS); may be incomplete.**",
+                    "",
+                ]
             out += ["Answer:", "", fenced(m.content), ""]
         if m.reasoning:
             out += [

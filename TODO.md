@@ -84,8 +84,11 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [ ] **Audit level:** `FT_AUDIT_LEVEL` defaults to `all` (every page/API request) for the PoC.
       Switch the default in `app/config.py` to `key_reads` when evaluation is over.
 - [ ] Audit log has no retention/archiving; at level `all` it grows with every request.
-- [ ] Add `.github/workflows/evals.yml` (provided separately) and the repo secrets
-      `FT_AI_BASE_URL`, `FT_AI_API_KEY` + variable `FT_AI_MODEL` for manual evaluation runs.
+- [ ] Replace `.github/workflows/evals.yml` with the updated version (provided separately: provider
+      check, agent tool mode, step summary, save-baseline artifact, optional self-hosted runner)
+      and add the repo secrets `FT_AI_BASE_URL`, `FT_AI_API_KEY` + variables `FT_AI_MODEL`
+      (optional `FT_AI_MAX_TOKENS`, `EVAL_RUNNER`). Check whether the RIT endpoint is reachable
+      from GitHub-hosted runners; if not, use a self-hosted runner. Then save a first baseline.
 - [ ] Large results: decide whether to enable `FT_SEARCH_INDEX` after measuring real runs on the
       team's machines (`python -m scripts.bench_rows --rows 1000000`); existing runs can be
       indexed later with `POST /api/runs/{id}/search-index`.
@@ -125,8 +128,8 @@ the background is in [app/tools/volatility/README.md](app/tools/volatility/READM
 - [x] Failed AI requests show the error text twice in the AI panel.
 - [ ] The gitleaks pre-commit hook only protects local commits; in CI it checks nothing.
 - [ ] Linux/macOS memory images (custom symbol tables) are out of scope for the PoC.
-- [ ] AI agent: tasks waiting for approval or for their runs do not survive an app restart yet
-      (they become "interrupted" and their pending requests expire; "Start again" starts a new
-      task). Still to do: an in-app settings page for the agent defaults, agent eval cases.
-      Waiting for runs counts against the time limit (only approval time is paused); runs a
-      task queued keep going if the task ends by its time limit.
+- [ ] AI agent: test against the real provider (`python -m app.ai.probe`, then a real goal and
+      `python -m app.ai.probe task <id>`); replace the EXAMPLE agent eval case with real ones.
+      Design choices to revisit if needed: waiting for runs counts against the time limit (only
+      approval time is paused); runs a task queued keep going if the task ends by its time
+      limit; resumed tasks redo an AI call that was in progress when the app stopped.

@@ -143,7 +143,7 @@ _ACTION_RE = re.compile(r"```[ \t]*action[ \t]*\r?\n(.*?)(?:```|\Z)", re.DOTALL 
 
 # Protocol learned per provider + model in "auto" mode ("text" after a fallback).
 _mode_cache: dict[str, str] = {}
-_slots: threading.BoundedSemaphore | None = None
+_slots: dict[int, threading.BoundedSemaphore] = {}
 _slots_lock = threading.Lock()
 
 
@@ -189,11 +189,12 @@ def start_task(
         raise AgentError(f"the goal is too long (max {MAX_GOAL_CHARS} characters)")
     if session.get(Evidence, evidence_id) is None:
         raise AgentError(f"evidence {evidence_id} not found")
-    settings = get_settings()
+    from app.services.app_settings import get_value
+
     limits = {
-        "max_steps": _clamp(max_steps, settings.agent_max_steps, STEP_LIMITS),
-        "max_seconds": _clamp(max_seconds, settings.agent_max_seconds, SECONDS_LIMITS),
-        "max_runs": _clamp(max_runs, settings.agent_max_runs, RUNS_LIMITS),
+        "max_steps": _clamp(max_steps, get_value("agent_max_steps", session), STEP_LIMITS),
+        "max_seconds": _clamp(max_seconds, get_value("agent_max_seconds", session), SECONDS_LIMITS),
+        "max_runs": _clamp(max_runs, get_value("agent_max_runs", session), RUNS_LIMITS),
     }
     user_msg = AIMessage(evidence_id=evidence_id, role="user", content=AGENT_GOAL.format(goal=goal))
     session.add(user_msg)
@@ -234,16 +235,25 @@ def _launch(task_id: int) -> None:
     ).start()
 
 
-def _run_with_slot(task_id: int) -> None:
-    global _slots
+def _slot() -> threading.Semaphore:
+    """The semaphore for the current "tasks at once" setting (a new one when it changes;
+    running tasks keep releasing the one they took)."""
+    from app.services.app_settings import get_value
+
+    size = max(1, int(get_value("agent_max_concurrent")))
     with _slots_lock:
-        if _slots is None:
-            _slots = threading.BoundedSemaphore(max(1, get_settings().agent_max_concurrent))
-    _slots.acquire()
+        if size not in _slots:
+            _slots[size] = threading.BoundedSemaphore(size)
+        return _slots[size]
+
+
+def _run_with_slot(task_id: int) -> None:
+    slot = _slot()
+    slot.acquire()
     try:
-        run_task(task_id, slot=_slots)
+        run_task(task_id, slot=slot)
     finally:
-        _slots.release()
+        slot.release()
 
 
 def cancel_task(session: Session, task_id: int) -> AITask:
@@ -305,25 +315,53 @@ def expire_requests(session: Session, task: AITask, why: str) -> int:
     return len(pending)
 
 
-def recover_tasks(session: Session) -> int:
-    """At startup: tasks a previous process left queued/running become INTERRUPTED."""
+def recover_tasks(session: Session, resume: bool = True) -> int:
+    """At startup: AI tasks a previous process left active. With ``resume`` (the normal app)
+    they continue from their last checkpoint: a task waiting for approval keeps waiting (its
+    requests stay valid), one waiting for runs waits for them (runs that were running are
+    interrupted by the worker's own recovery), one in the middle of an AI call redoes that
+    step. Without ``resume`` they become INTERRUPTED and pending requests expire."""
     stale = session.scalars(select(AITask).where(AITask.status.in_(ACTIVE))).all()
+    to_launch = []
     for task in stale:
         was = task.status.value
-        task.status = AITaskStatus.INTERRUPTED
-        task.error = f"interrupted: the app stopped while this task was {was.replace('_', ' ')}"
-        expire_requests(session, task, "the app stopped")
-        task.current_action = None
-        task.finished_at = _now()
+        if resume:
+            task.status = AITaskStatus.QUEUED
+            task.resumed_count = (task.resumed_count or 0) + 1
+            task.current_action = "Resuming after an app restart"
+            idx = max((s.idx for s in task.steps), default=0) + 1
+            session.add(
+                AITaskStep(
+                    task_id=task.id,
+                    idx=idx,
+                    turn=task.steps_used,
+                    kind="note",
+                    summary=f"The app restarted while this task was {was.replace('_', ' ')}: "
+                    "resumed",
+                )
+            )
+            to_launch.append(task.id)
+            action, summary = "ai.agent.resumed", f"AI task {task.id} resumed after a restart"
+        else:
+            task.status = AITaskStatus.INTERRUPTED
+            task.error = f"interrupted: the app stopped while this task was {was.replace('_', ' ')}"
+            task.current_action = None
+            task.finished_at = _now()
+            expire_requests(session, task, "the app stopped")
+            action = "ai.agent.interrupted"
+            summary = f"AI task {task.id} was interrupted (found at startup)"
         audit.record(
             session,
-            "ai.agent.interrupted",
+            action,
             object_type="ai_task",
             object_id=task.id,
             evidence_id=task.evidence_id,
-            summary=f"AI task {task.id} was interrupted (found at startup)",
+            summary=summary,
+            details={"status_before": was},
         )
     session.commit()
+    for task_id in to_launch:
+        _launch(task_id)
     return len(stale)
 
 
@@ -529,7 +567,9 @@ class _Loop:
         self.reasoning: list[str] = []
         self.settings = get_settings()
         self.cache_key = f"{client.base_url}|{self.settings.ai_model}"
-        configured = self.settings.ai_tool_mode
+        from app.services.app_settings import get_value
+
+        configured = get_value("ai_tool_mode", session)
         self.auto = configured == "auto"
         self.mode = _mode_cache.get(self.cache_key, "native") if self.auto else configured
         self.messages: list[dict[str, Any]] = []
@@ -609,6 +649,12 @@ class _Loop:
             self.models_returned.add(result.model_returned)
         if result.reasoning:
             self.reasoning.append(f"[model call {len(self.reasoning) + 1}]\n{result.reasoning}")
+        if result.truncated:
+            self._add_step(
+                "error",
+                "The AI's reply was cut off by the token limit "
+                f"(FT_AI_MAX_TOKENS={self.settings.ai_max_tokens}); it may be incomplete.",
+            )
         self.last = result
         return result
 
@@ -635,17 +681,60 @@ class _Loop:
 
     # ---- main
 
+    # ---- checkpoints (resume after an app restart)
+
+    def _checkpoint(self, turn: dict[str, Any] | None = None) -> None:
+        """Save everything needed to continue this task after a restart. ``turn``: the step
+        in progress (its tool calls, results so far and run requests) while waiting."""
+        used = time.monotonic() - self.started - self.paused
+        self.task.state = {
+            "v": 1,
+            "messages": self.messages,
+            "mode": self.mode,
+            "usage": self.usage,
+            "models_returned": sorted(self.models_returned),
+            "rows_seen": self.rows_seen,
+            "reasoning": self.reasoning,
+            "steps_used": self.task.steps_used,
+            "work_seconds": round(max(0.0, used), 3),
+            "paused": round(self.paused, 3),
+            "turn": turn,
+        }
+        self.s.commit()
+
+    def _restore(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        self.messages = list(state.get("messages") or [])
+        self.mode = state.get("mode") or self.mode
+        self.usage = dict(state.get("usage") or {})
+        self.models_returned = set(state.get("models_returned") or [])
+        self.rows_seen = list(state.get("rows_seen") or [])
+        self.reasoning = list(state.get("reasoning") or [])
+        self.task.steps_used = int(state.get("steps_used") or 0)
+        self.paused = float(state.get("paused") or 0.0)
+        self._paused_before = self.paused
+        self.started = time.monotonic() - float(state.get("work_seconds") or 0.0) - self.paused
+        return state.get("turn")
+
     def run(self) -> None:
         task = self.task
         task.tool_mode = self.mode
-        self._set_action("Reading the investigation state")
-        context, _ = build_state_context(self.s, task.evidence_id, max_flagged_rows=10)
-        self.messages = [
-            {"role": "system", "content": self._system()},
-            {"role": "user", "content": CONTEXT_PREAMBLE.format(context=context)},
-            {"role": "user", "content": AGENT_GOAL.format(goal=task.goal)},
-        ]
+        self.step_idx = max((s.idx for s in task.steps), default=0)
+        turn = None
+        if task.state and task.state.get("messages"):
+            turn = self._restore(task.state)
+            task.tool_mode = self.mode
+            self._set_action("Resuming after an app restart")
+        else:
+            self._set_action("Reading the investigation state")
+            context, _ = build_state_context(self.s, task.evidence_id, max_flagged_rows=10)
+            self.messages = [
+                {"role": "system", "content": self._system()},
+                {"role": "user", "content": CONTEXT_PREAMBLE.format(context=context)},
+                {"role": "user", "content": AGENT_GOAL.format(goal=task.goal)},
+            ]
         try:
+            if turn:
+                self._resume_turn(turn)
             final = self._work()
         except _Cancelled:
             task.status = AITaskStatus.CANCELLED
@@ -663,6 +752,7 @@ class _Loop:
     def _work(self) -> str:
         task = self.task
         while True:
+            self._checkpoint()
             self._check_cancel()
             limit = None
             if task.steps_used >= task.limits["max_steps"]:
@@ -694,12 +784,69 @@ class _Loop:
                     outs.append(out)
                 else:
                     outs.append(self._execute(call))
-            if requests:
-                for n, out in self._wait_for(requests).items():
-                    outs[n] = out
-            for call, out in zip(calls, outs, strict=True):
-                self._reply_tool(call, out or ToolOutput("ERROR: no result", "no result"))
-            self.s.commit()
+            self._finish_turn(calls, outs, requests)
+
+    def _finish_turn(
+        self,
+        calls: list[ToolCall],
+        outs: list[ToolOutput | None],
+        requests: dict[int, AIRunRequest],
+    ) -> None:
+        """Wait for the step's run requests (if any), then give the model every result."""
+        if requests:
+            self._checkpoint(
+                {
+                    "calls": [
+                        {
+                            "id": c.id,
+                            "name": c.name,
+                            "arguments": c.arguments,
+                            "raw_arguments": c.raw_arguments,
+                        }
+                        for c in calls
+                    ],
+                    "outs": [
+                        None
+                        if o is None
+                        else {
+                            "text": o.text,
+                            "summary": o.summary,
+                            "row_keys": o.row_keys,
+                        }  # fmt: skip
+                        for o in outs
+                    ],
+                    "requests": {str(n): r.id for n, r in requests.items()},
+                }
+            )
+            for n, out in self._wait_for(requests).items():
+                outs[n] = out
+        for call, out in zip(calls, outs, strict=True):
+            self._reply_tool(call, out or ToolOutput("ERROR: no result", "no result"))
+        self.s.commit()
+
+    def _resume_turn(self, turn: dict[str, Any]) -> None:
+        """Continue the step that was waiting for approvals / runs when the app stopped."""
+        calls = [
+            ToolCall(
+                id=c["id"],
+                name=c["name"],
+                arguments=c.get("arguments"),
+                raw_arguments=c.get("raw_arguments") or "",
+            )
+            for c in turn.get("calls") or []
+        ]
+        outs = [
+            None
+            if o is None
+            else ToolOutput(o["text"], o["summary"], list(o.get("row_keys") or []))
+            for o in turn.get("outs") or []
+        ]
+        requests = {}
+        for n, req_id in (turn.get("requests") or {}).items():
+            req = self.s.get(AIRunRequest, req_id)
+            if req is not None:
+                requests[int(n)] = req
+        self._finish_turn(calls, outs, requests)
 
     def _record_assistant(self, result: AIResult, calls: list[ToolCall]) -> None:
         if self.mode == "native" and result.tool_calls:
@@ -954,6 +1101,7 @@ class _Loop:
             suggestions=validate_suggestions(parse_suggestions(final)),
             usage=dict(self.usage) or None,
             reasoning="\n\n".join(self.reasoning) or None,
+            finish_reason=last.finish_reason if last else None,
         )
         self.s.add(reply)
         self.s.flush()

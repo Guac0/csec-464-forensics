@@ -237,7 +237,13 @@ class AIMessage(Base):
     # The model's reasoning (<think> text / reasoning_content): hidden from the answer, kept
     # for provenance (shown under "Provenance" and in exports). None if the model gave none.
     reasoning: Mapped[str | None] = mapped_column(Text, default=None)
+    # Why the model stopped ("stop", "length" = cut off by max_tokens, ...), if reported.
+    finish_reason: Mapped[str | None] = mapped_column(String, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def truncated(self) -> bool:
+        return self.finish_reason == "length"
 
 
 class NoteVersion(Base):
@@ -554,6 +560,10 @@ class AITask(Base):
     approve_all: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # Seconds spent waiting for the analyst's approval (not counted against max_seconds).
     paused_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Checkpoint of the agent's conversation so the task can resume after an app restart
+    # (messages, counters, the step in progress). None before the first checkpoint.
+    state: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    resumed_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # "native" (function calling) or "text" (JSON action blocks): the protocol actually used.
     tool_mode: Mapped[str | None] = mapped_column(String, default=None)
     steps_used: Mapped[int] = mapped_column(Integer, default=0)
@@ -629,3 +639,15 @@ class AIRunRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     task: Mapped[AITask] = relationship(back_populates="run_requests")
+
+
+class AppSetting(Base):
+    """A setting changed in the app (Settings page). Overrides the FT_* environment value;
+    deleting the row ("Reset") returns to it. See app/services/app_settings.py."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[Any] = mapped_column(JSON)
+    updated_by: Mapped[str] = mapped_column(String, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

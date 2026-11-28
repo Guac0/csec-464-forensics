@@ -163,6 +163,7 @@ def _run_pipeline(
             suggestions=validate_suggestions(parse_suggestions(result.content)),
             usage=result.usage,
             reasoning=result.reasoning or None,
+            finish_reason=result.finish_reason,
         )
     session.add(reply)
     session.flush()
@@ -181,6 +182,7 @@ def _run_pipeline(
             "error": reply.error,
             "citations": len(reply.citations or []),
             "invalid_citations": sum(1 for c in reply.citations or [] if not c.get("valid")),
+            "finish_reason": reply.finish_reason,
             "unsupported_citations": sum(
                 1 for c in reply.citations or [] if c.get("support") == "unsupported"
             ),

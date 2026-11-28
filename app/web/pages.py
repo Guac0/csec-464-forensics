@@ -341,6 +341,16 @@ def ai_history(session: Session, evidence_id: int) -> list[AIMessage]:
     return list(session.scalars(stmt))
 
 
+def _agent_defaults(session: Session) -> dict[str, Any]:
+    from app.services.app_settings import get_value
+
+    return {
+        "max_steps": get_value("agent_max_steps", session),
+        "max_minutes": round(get_value("agent_max_seconds", session) / 60, 1),
+        "max_runs": get_value("agent_max_runs", session),
+    }
+
+
 def ai_panel_context(session: Session, evidence_id: int) -> dict[str, Any]:
     """Chat history plus AI agent tasks: a task's card replaces its goal message, and its
     answer is shown inside the card (not again in the history)."""
@@ -457,11 +467,7 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "integrity_checks": integrity_svc.list_checks(session, ev.id)[:20],
         "integrity_mode": get_settings().integrity_mode,
         "verify_on_run": get_settings().verify_on_run,
-        "agent_defaults": {
-            "max_steps": get_settings().agent_max_steps,
-            "max_minutes": round(get_settings().agent_max_seconds / 60, 1),
-            "max_runs": get_settings().agent_max_runs,
-        },
+        "agent_defaults": _agent_defaults(session),
         "hashing": evidence_svc.is_hashing(ev.id),
         "cleanup": _cleanup_summary(session, ev.id),
         **recommendations_context(session, ev.id),

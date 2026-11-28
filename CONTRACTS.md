@@ -302,6 +302,27 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `POST /api/ai/tasks/{id}/approve-all`, `POST /api/ai/run-requests/{id} {action, args, note}`.
 - `AIMessage.reasoning`: the model's `<think>` / reasoning text, saved for every AI answer,
   shown under Provenance and in the case export.
+- `AIMessage.finish_reason` (migration `0017_ai_message_finish_reason`) / `AIResult.finish_reason`;
+  `.truncated` = "length" (cut off by `FT_AI_MAX_TOKENS`): warning on the answer, in the export,
+  as an agent step, and in `python -m app.ai.probe` reports.
+- Restart: `AITask.state` checkpoint (messages, counters, the step in progress with its run
+  requests) saved at each step; `recover_tasks(session, resume=True)` at startup re-queues
+  active tasks and relaunches them (`resumed_count`, audit `ai.agent.resumed`);
+  `create_app(start_worker=False)` uses `resume=False` (interrupted, requests expire).
+- `app/ai/probe.py`: `python -m app.ai.probe` (provider check: plain answer, native tool call +
+  round trip, text protocol, reasoning; JSON report, API key never printed), `python -m
+  app.ai.probe task <id> [--with-reasoning]` (task summary).
+
+### App settings
+- `app/services/app_settings.py`: `EDITABLE` (`agent_max_steps`, `agent_max_seconds` (UI in
+  minutes), `agent_max_runs`, `agent_max_concurrent`, `ai_tool_mode`), `get_value(key,
+  session=None)` (database override else `get_settings()`), `list_settings`, `update(session,
+  {key: ui_value})` (validates all first; audit `settings.update`), `reset` (audit
+  `settings.reset`). Table `app_settings` (migration `0016_app_settings_task_state`).
+- UI `/settings` (+ `POST /settings`, `POST /settings/{key}/reset`); API
+  `GET/PUT /api/system/settings`, `DELETE /api/system/settings/{key}`.
+- Evals: `goal:` cases (`agent`, `available_runs`; expectations `queue_plugins`,
+  `forbid_plugins`, `max_queued`; metrics `expected_run_recall`, `runs_queued`, `agent_steps`).
 
 ### Web UI (temporary)
 - `app/web/pages.py`: `router` (HTML pages, HTMX fragments), templates in `app/web/templates`,

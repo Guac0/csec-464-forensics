@@ -75,3 +75,6 @@ desktop.ini
 
 # AI evaluation reports (baselines in evals/baselines/ ARE committed)
 evals/reports/
+
+# Reports from `python -m app.ai.probe` (may contain evidence values)
+ai_probe_report*.json

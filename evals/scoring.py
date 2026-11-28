@@ -22,10 +22,11 @@ METRICS: dict[str, str] = {
     "mention_recall": "required terms present / required terms",
     "suggestion_validity": "valid suggestions / suggestions",
     "expected_query_recall": "expected queries (plugin + args) suggested / expected queries",
+    "expected_run_recall": "plugins the agent had to queue that it queued / those plugins",
     "judge_score": "AI judge score 1-5 (only with --judge; noisy)",
 }
 # Lower is better.
-COST_METRICS = ("latency_s", "total_tokens")
+COST_METRICS = ("latency_s", "total_tokens", "agent_steps", "runs_queued")
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s*")
@@ -40,6 +41,9 @@ class ResolvedExpectations:
     must_not_mention: tuple[str, ...] = ()
     suggest_plugins: tuple[str, ...] = ()
     suggest_queries: tuple[tuple[str, dict[str, Any]], ...] = ()
+    queue_plugins: tuple[str, ...] = ()
+    forbid_plugins: tuple[str, ...] = ()
+    max_queued: int | None = None
     min_citations: int = 0
 
 
@@ -68,6 +72,7 @@ def score_answer(
     suggestions: list[dict[str, Any]] | None,
     expect: ResolvedExpectations,
     error: str | None = None,
+    queued: list[str] | None = None,
 ) -> dict[str, Any]:
     """Score one answer. ``citations``/``suggestions`` are the validated lists stored on the
     AIMessage. Returns metrics (None = not applicable) and the list of failed checks."""
@@ -132,6 +137,19 @@ def score_answer(
         failed.append(f"no valid suggestion using {list(expect.suggest_plugins)}")
     if missing_queries:
         failed.append(f"did not suggest expected queries: {missing_queries}")
+    if queued is not None:  # AI agent case: the plugins it queued
+        missing_runs = [p for p in expect.queue_plugins if p not in queued]
+        metrics["expected_run_recall"] = _ratio(
+            len(expect.queue_plugins) - len(missing_runs), len(expect.queue_plugins)
+        )
+        metrics["runs_queued"] = float(len(queued))
+        if missing_runs:
+            failed.append(f"did not queue expected runs: {missing_runs}")
+        forbidden_runs = sorted({p for p in queued if p in expect.forbid_plugins})
+        if forbidden_runs:
+            failed.append(f"queued forbidden runs: {forbidden_runs}")
+        if expect.max_queued is not None and len(queued) > expect.max_queued:
+            failed.append(f"queued {len(queued)} runs (max {expect.max_queued})")
     if len(suggestions) > len(valid_suggestions):
         failed.append(f"{len(suggestions) - len(valid_suggestions)} invalid suggestion(s)")
     metrics["pass"] = 0.0 if failed else 1.0
