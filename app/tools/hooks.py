@@ -1,8 +1,9 @@
 """Post-run hooks: plugin-specific post-processing that runs after a run succeeds.
 
-A hook is a plain function decorated with :func:`post_run`. Hooks live in modules under
-``app/tools/volatility/hooks/`` and are discovered automatically (one file per hook or per plugin;
-files starting with ``_`` are skipped). A hook receives a :class:`HookContext` and *stages*
+A hook is a plain function decorated with :func:`post_run` (or ``@PLUGIN.post_run`` in a plugin
+file, see app/tools/content.py). Hook modules are found recursively under ``HOOK_PACKAGES``
+(``forensics/plugins/`` and ``forensics/hooks/``; parts starting with ``_`` are skipped).
+A hook receives a :class:`HookContext` and *stages*
 changes through it:
 
 - ``ctx.annotate(row_idx, tag, severity, note)``  flag/tag individual result rows
@@ -54,8 +55,10 @@ logger = logging.getLogger(__name__)
 
 SEVERITIES: tuple[str, ...] = ("info", "low", "medium", "high")
 WILDCARD = "*"
-# Packages scanned for hook modules. Add a package here when a new tool gets hooks.
-HOOK_PACKAGES: tuple[str, ...] = ("app.tools.volatility.hooks",)
+# Packages scanned (recursively) for hook modules: per-plugin files define hooks with
+# ``@PLUGIN.post_run`` and cross-plugin hooks live in forensics/hooks/. Tests switch these with
+# app.tools.content.use_root().
+HOOK_PACKAGES: tuple[str, ...] = ("forensics.plugins", "forensics.hooks")
 # Follow-ups are skipped if an identical run (same evidence, plugin, args) is in one of these.
 _DEDUPE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.SUCCEEDED)
 _MAX_TAG_LEN = 64
@@ -140,6 +143,31 @@ def post_run(
     return decorator
 
 
+def _module_names(package_name: str, package: Any) -> list[str]:
+    """Module names below ``package`` (recursive), skipping any part starting with ``_``."""
+    out = []
+    for mod in pkgutil.walk_packages(package.__path__, prefix=f"{package_name}."):
+        rel = mod.name[len(package_name) + 1 :]
+        if not mod.ispkg and not any(part.startswith("_") for part in rel.split(".")):
+            out.append(mod.name)
+    return sorted(out)
+
+
+def registry_lock() -> threading.RLock:
+    """The registry lock (app.tools.content takes it before its own lock)."""
+    return _lock
+
+
+def set_packages(packages: tuple[str, ...]) -> None:
+    """Scan ``packages`` from now on; registered hooks are cleared (call load_hooks after)."""
+    global HOOK_PACKAGES, _loaded
+    with _lock:
+        HOOK_PACKAGES = tuple(packages)
+        _registry.clear()
+        _load_errors.clear()
+        _loaded = False
+
+
 def load_hooks(force: bool = False) -> dict[str, str]:
     """Import every hook module (once). Returns {module: error} for modules that failed to
     import; those are logged and skipped so one broken hook cannot stop the app."""
@@ -155,10 +183,7 @@ def load_hooks(force: bool = False) -> dict[str, str]:
                 _load_errors[package_name] = f"{type(exc).__name__}: {exc}"
                 logger.exception("cannot import hook package %s", package_name)
                 continue
-            for mod in sorted(pkgutil.iter_modules(package.__path__), key=lambda m: m.name):
-                if mod.name.startswith("_"):
-                    continue
-                module_name = f"{package_name}.{mod.name}"
+            for module_name in _module_names(package_name, package):
                 try:
                     module = importlib.import_module(module_name)
                     if force:

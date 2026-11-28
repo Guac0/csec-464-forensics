@@ -62,16 +62,30 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   (no shell; stdout/stderr streamed to files in run_dir; kills process group on timeout/cancel)
 - `app/tools/registry.py`: `get_runner(name: str = "volatility3") -> ToolRunner`, `available_tools() -> list[str]`
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
-- `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
-- `app/tools/volatility/guide.py`: `BASELINE: list[Step]`, `NEXT: dict[plugin, list[Step]]` —
-  **TODO(forensics)**; EXAMPLE content. `Step` = `app.tools.base.GuideStep(plugin, reason,
+- `app/tools/content.py` (forensics content loader): `Plugin(name, description, args, presets,
+  auto_enumerate, timeout_seconds, writes_files, compare_keys, compare_ignore, baseline, next)`
+  (`.spec -> PluginSpec`, `.post_run(version, name, description)` decorator, hook name
+  `<os>.<module>.<func>`), `Baseline(order, reason, args={})`, `Preset(label, **args)`,
+  `expected_module(plugin_name)`, `load(root) -> Content(root, plugins, baseline, next,
+  problems, modules)`, `current()`, `reload()`, `use_root(root)` (tests; also resets hook
+  packages/registry), `iter_modules`, `module_file`. Plugins sorted by name; baseline by
+  `(order, name)`; bad files skipped, problems keyed by file path. Lock order: hook registry
+  lock, then content lock (import deadlock otherwise).
+- `forensics/` (**TODO(forensics)**, team-owned): `sdk.py` (re-exports `Arg`=ArgSpec,
+  `Next`=GuideStep, `Plugin`, `Baseline`, `Preset`, `HookContext`, `post_run`), `common.py`
+  (`PID_FILTER`), `plugins/<os>/<module>.py` each defining `PLUGIN`, `plugins/_template.py`
+  (not loaded; checked by tests), `hooks/` (cross-plugin hooks). `GuideStep(plugin, reason,
   args={}, when="succeeded"|"has_rows"|"has_flags"|"tag:<tag>", priority=0)`.
+- Tests: infrastructure tests use the frozen copy `tests/content/` (session fixture in
+  conftest: `content.use_root("tests.content")`; change catalog/guide via
+  `monkeypatch.setattr(content.current(), "plugins"|"baseline"|"next", ...)`). Only
+  `tests/test_forensics_content.py` loads `forensics/`.
 
 ### Investigation guide and recommendations
 - `ToolRunner.guide() -> InvestigationGuide(baseline, next)` (default empty).
 - `app/tools/guide.py`: `check_guide(runner) -> (valid guide with normalised args, [GuideProblem])`
   (invalid steps skipped), `to_markdown(runner)`, `main()` (CLI `python -m
-  app.tools.volatility.guide`, exit 1 on problems), `describe_when`, `args_key`.
+  app.tools.guide`, exit 1 on problems; problem `where` names the content file), `describe_when`, `args_key`.
 - `app/services/recommendations.py`: `recommend(session, evidence_id) -> Recommendations`
   (`items` best first, `dismissed`, `baseline_total/done`, `identified`, `guide_problems`;
   `as_dict()`), `dismiss` / `restore` (table `dismissed_recommendations`, migration 0012),
@@ -239,7 +253,9 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `HookContext` (`rows`, `latest_run`, `annotate`, `add_finding`, `update_evidence_metadata`,
   `queue_follow_up`), `run_hooks(session, run_id) -> list[dict]`, `load_hooks()`,
   `registered_hooks()`, `hooks_for(tool, plugin)`, `load_errors()`, `SEVERITIES`.
-- `app/tools/volatility/hooks/*.py`: hook modules, auto-discovered — **TODO(forensics)**.
+- Hook modules: discovered recursively in `HOOK_PACKAGES` (default `forensics.plugins`,
+  `forensics.hooks`; `set_packages()` clears the registry), `_*` parts skipped — **TODO(forensics)**.
+  `registry_lock()` exposes the registry RLock (taken by app.tools.content first).
 - Stored on `Run`: `hook_results`, `findings`, `parent_run_id`, `triggered_by_hook`, `chain_depth`;
   on `ResultRow`: `annotations`. `RunOrigin.HOOK` marks follow-up runs (not accepted from the API).
 - API: `GET /api/hooks`, `POST /api/runs/{id}/hooks/rerun`, rows filter `?annotated=true&tag=`.

@@ -3,6 +3,7 @@
 *
 !pyproject.toml
 !app/
+!forensics/
 
 # Re-exclude junk inside the allowlisted tree.
 **/__pycache__

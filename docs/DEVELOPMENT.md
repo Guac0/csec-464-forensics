@@ -70,7 +70,7 @@ AI coding assistants are allowed and encouraged, with these rules:
    frozen file, that is a team discussion.
 2. **Never let it invent volatility3 plugins, flags or output columns.** Assistants confidently
    produce plugin names and options from volatility 2 or from nowhere. Every plugin/flag in
-   `app/tools/volatility/plugins.py` must be checked against the installed version:
+   `forensics/plugins/` must be checked against the installed version:
 
    ```bash
    docker compose run --rm app vol -h                       # global options, plugin list
@@ -107,10 +107,15 @@ diff in your PR. Any evidence-sourced text must go through `esc()`, `code()` or 
 
 ## Plugin catalog
 
-`tests/test_catalog.py::test_shipped_catalog_is_valid` fails if an entry in
-`app/tools/volatility/plugins.py` is invalid (wrong plugin name, clashing or duplicate flags,
-an undeclared file-writing option, a broken preset). At runtime such entries are skipped and
-shown on the System page instead of stopping the app.
+The forensics content (plugins, guide, hooks) lives in `forensics/`; how to edit it is in
+[forensics/README.md](../forensics/README.md). `tests/test_forensics_content.py` fails if a plugin
+file is invalid (wrong plugin name, clashing or duplicate flags, an undeclared file-writing
+option, a broken preset or guide step). At runtime a broken file is skipped and shown on the
+System page instead of stopping the app.
+
+The other tests never load `forensics/`. They use a small frozen copy in `tests/content/`, so the
+forensics team can change their files without breaking infrastructure tests. Change that copy
+only when an infrastructure test needs different content.
 
 ## Developing on Windows
 

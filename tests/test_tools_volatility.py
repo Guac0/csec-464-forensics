@@ -7,9 +7,8 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.tools import registry
+from app.tools import content, registry
 from app.tools.base import ArgSpec, ArgValidationError, ParsedRow, PluginSpec, ToolRequest
-from app.tools.volatility import plugins as plugin_catalog
 from app.tools.volatility.runner import VolatilityRunner, check_argspec, vol_command
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -32,7 +31,7 @@ REQUIRED_PLUGIN = PluginSpec(
 @pytest.fixture
 def runner(monkeypatch: pytest.MonkeyPatch) -> VolatilityRunner:
     monkeypatch.setattr(
-        plugin_catalog, "PLUGINS", [*plugin_catalog.PLUGINS, TEST_PLUGIN, REQUIRED_PLUGIN]
+        content.current(), "plugins", [*content.current().plugins, TEST_PLUGIN, REQUIRED_PLUGIN]
     )
     return VolatilityRunner()
 
@@ -45,10 +44,10 @@ def req(args: dict, plugin: str = TEST_PLUGIN.name) -> ToolRequest:
 
 
 def test_catalog_is_well_formed() -> None:
-    names = [p.name for p in plugin_catalog.PLUGINS]
+    names = [p.name for p in content.current().plugins]
     assert len(names) == len(set(names))
     runner = VolatilityRunner()
-    for p in plugin_catalog.PLUGINS:
+    for p in content.current().plugins:
         for a in p.args:
             check_argspec(a)
         for _label, args in p.presets:
@@ -122,7 +121,7 @@ def test_required_arg(runner: VolatilityRunner) -> None:
 @pytest.mark.parametrize("flag", ["--plugin-dirs", "-p", "--symbol-dirs", "--pid x", "pid"])
 def test_catalog_flag_guard(monkeypatch: pytest.MonkeyPatch, flag: str) -> None:
     bad = PluginSpec(name="bad.Bad", args=(ArgSpec(name="x", flag=flag, type="str"),))
-    monkeypatch.setattr(plugin_catalog, "PLUGINS", [bad])
+    monkeypatch.setattr(content.current(), "plugins", [bad])
     with pytest.raises(ArgValidationError):
         VolatilityRunner().validate(ToolRequest(plugin="bad.Bad", args={"x": "v"}))
 

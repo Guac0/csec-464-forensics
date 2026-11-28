@@ -9,11 +9,15 @@ operations). Open work: `TODO.md`.
 
 ## Ownership (who changes what)
 
-- **Forensics content (human team):** plugin catalog `app/tools/volatility/plugins.py`,
-  investigation guide `app/tools/volatility/guide.py`, hooks `app/tools/volatility/hooks/`,
-  prompts `app/ai/prompts.py`, AI row selection in `app/ai/context.py`, citation tuning in
+- **Forensics content (human team):** `forensics/` (one file per plugin in
+  `forensics/plugins/<os>/`: catalog entry, presets, compare keys, guide `baseline`/`next`,
+  hooks; shared bits in `forensics/common.py`). Still outside it (moving there later): prompts
+  `app/ai/prompts.py`, AI row selection in `app/ai/context.py`, citation tuning in
   `app/ai/citations.py`, eval cases `evals/cases/`, real fixtures in `tests/fixtures/`. Marked
-  `TODO(forensics)` / `EXAMPLE`. (Planned: all of this moves under `forensics/`.)
+  `TODO(forensics)` / `EXAMPLE`.
+- `forensics/sdk.py` and the loader `app/tools/content.py` are infrastructure (keep the names
+  the team imports stable). Infrastructure tests must not depend on `forensics/`: use
+  `tests/content/` (see CONTRACTS.md "Tool runner").
 - **Infrastructure (AI-maintained, human-reviewed):** everything else in `app/`, `evals/*.py`,
   `scripts/`, `tests/`.
 - Don't fill in forensics content on your own initiative. Never invent volatility3 plugin names,
@@ -64,7 +68,7 @@ operations). Open work: `TODO.md`.
 ## Documentation
 
 - Human docs, plain language, no AI phrasing: README.md, docs/DEVELOPMENT.md, TODO.md,
-  evidence/README.md, evals/README.md (and later forensics/README.md).
+  evidence/README.md, evals/README.md, forensics/README.md.
 - AI docs, dense, start with the one-line "Written mainly for AI coding assistants" note:
   this file, CONTRACTS.md, docs/design/*, READMEs under app/, tests/fixtures/README.md.
 - Code comments in forensics content are written for humans; elsewhere they can be terse.

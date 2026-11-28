@@ -17,9 +17,9 @@ from app.models import AIMessage, AuditEvent, Evidence, ResultRow, Run, RunOrigi
 from app.services import evidence as evidence_service
 from app.services import recommendations as recs
 from app.services import runs as runs_service
+from app.tools import content
 from app.tools.base import ArgValidationError, ToolRequest
 from app.tools.base import GuideStep as Step
-from app.tools.volatility import guide as guide_module
 from tests.test_ai_helpers import mock_transport, respond_with
 
 PSLIST = "windows.pslist.PsList"
@@ -46,8 +46,10 @@ def ev(session: Session) -> Evidence:
 
 @pytest.fixture
 def guide(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(guide_module, "BASELINE", [Step(PSLIST, "procs"), Step(NETSCAN, "net")])
-    monkeypatch.setattr(guide_module, "NEXT", {PSLIST: [Step(PSTREE, "tree")]})
+    monkeypatch.setattr(
+        content.current(), "baseline", [Step(PSLIST, "procs"), Step(NETSCAN, "net")]
+    )
+    monkeypatch.setattr(content.current(), "next", {PSLIST: [Step(PSTREE, "tree")]})
 
 
 @pytest.fixture

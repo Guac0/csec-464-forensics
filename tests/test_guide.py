@@ -1,4 +1,4 @@
-"""Investigation guide (app/tools/volatility/guide.py) and recommendations for an image."""
+"""Investigation guide (baseline/next in plugin files) and recommendations for an image."""
 
 from __future__ import annotations
 
@@ -10,10 +10,9 @@ from sqlalchemy.orm import Session
 from app.models import AuditEvent, Evidence, ResultRow, Run, RunOrigin, RunStatus
 from app.services import evidence as evidence_service
 from app.services import recommendations as recs
+from app.tools import content, registry
 from app.tools import guide as guide_tools
-from app.tools import registry
 from app.tools.base import GuideStep as Step
-from app.tools.volatility import guide as guide_module
 
 HX = {"HX-Request": "true"}
 
@@ -32,7 +31,7 @@ def runner():
 
 
 def test_shipped_guide_is_valid() -> None:
-    """Fails CI when someone adds an invalid step to app/tools/volatility/guide.py."""
+    """Fails CI when someone adds an invalid step to the test content (tests/content/)."""
     _, problems = guide_tools.check_guide(runner())
     assert [str(p) for p in problems] == []
 
@@ -56,8 +55,8 @@ def test_shipped_guide_is_valid() -> None:
 def test_guide_problems_detected(
     monkeypatch: pytest.MonkeyPatch, baseline: list, next_steps: dict, fragment: str
 ) -> None:
-    monkeypatch.setattr(guide_module, "BASELINE", baseline)
-    monkeypatch.setattr(guide_module, "NEXT", next_steps)
+    monkeypatch.setattr(content.current(), "baseline", baseline)
+    monkeypatch.setattr(content.current(), "next", next_steps)
     guide, problems = guide_tools.check_guide(runner())
     assert fragment in " | ".join(str(p) for p in problems)
     # Invalid steps are skipped, never recommended.
@@ -65,7 +64,7 @@ def test_guide_problems_detected(
 
 
 def test_guide_normalises_args(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(guide_module, "BASELINE", [Step(PSLIST, "x", args={"pid": ["4"]})])
+    monkeypatch.setattr(content.current(), "baseline", [Step(PSLIST, "x", args={"pid": ["4"]})])
     guide, problems = guide_tools.check_guide(runner())
     assert problems == [] and guide.baseline[0].args == {"pid": [4]}
 
@@ -77,7 +76,7 @@ def test_markdown_and_cli(
     out = capsys.readouterr().out
     assert "## Baseline (in order)" in out and f"`{PSTREE}`" in out
     assert "has rows tagged 'suspicious-parent'" in out and "## Problems (0)" in out
-    monkeypatch.setattr(guide_module, "BASELINE", [Step("windows.nope.Nope", "x")])
+    monkeypatch.setattr(content.current(), "baseline", [Step("windows.nope.Nope", "x")])
     assert guide_tools.main() == 1
     assert "unknown plugin" in capsys.readouterr().out
 
@@ -94,11 +93,11 @@ def ev(session: Session) -> Evidence:
 @pytest.fixture
 def small_guide(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        guide_module, "BASELINE", [Step(PSLIST, "processes"), Step(NETSCAN, "network")]
+        content.current(), "baseline", [Step(PSLIST, "processes"), Step(NETSCAN, "network")]
     )
     monkeypatch.setattr(
-        guide_module,
-        "NEXT",
+        content.current(),
+        "next",
         {
             INFO: [Step(PSLIST, "identified")],
             PSLIST: [
@@ -176,7 +175,7 @@ def test_next_conditions_and_ranking(session: Session, ev: Evidence, small_guide
 def test_tag_condition(
     session: Session, ev: Evidence, small_guide: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(guide_module, "NEXT", {PSLIST: [Step(PSTREE, "t", when="tag:odd")]})
+    monkeypatch.setattr(content.current(), "next", {PSLIST: [Step(PSTREE, "t", when="tag:odd")]})
     run = _run(session, ev, PSLIST, row_count=1)
     session.add(ResultRow(run_id=run.id, row_idx=0, data={}, annotations=[{"tag": "other"}]))
     session.commit()

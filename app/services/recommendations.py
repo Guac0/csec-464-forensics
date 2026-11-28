@@ -1,6 +1,6 @@
 """Recommended next plugins for one image, from the tool's investigation guide.
 
-Deterministic and offline: no AI. The guide content lives in app/tools/volatility/guide.py;
+Deterministic and offline: no AI. The guide content lives in forensics/plugins/ (baseline/next);
 this module applies it to an image's runs:
 
 - BASELINE steps not yet queued/running/succeeded, in guide order;
