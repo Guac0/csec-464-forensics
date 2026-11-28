@@ -158,14 +158,16 @@ def _make_fakes(session: Session) -> dict[str, SimpleNamespace]:
                 counts[t] = counts.get(t, 0) + 1
         return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
-    def list_notes(sess, evidence_id=None):
+    def list_notes(sess, evidence_id=None, case_id=None):
         stmt = select(Note).order_by(Note.id)
         if evidence_id is not None:
             stmt = stmt.where(Note.evidence_id == evidence_id)
+        if case_id is not None:
+            stmt = stmt.where(Note.case_id == case_id)
         return list(sess.scalars(stmt))
 
-    def create_note(sess, body, evidence_id=None):
-        note = Note(body=body, evidence_id=evidence_id)
+    def create_note(sess, body, evidence_id=None, case_id=None):
+        note = Note(body=body, evidence_id=evidence_id, case_id=case_id)
         sess.add(note)
         sess.commit()
         return note
@@ -289,7 +291,12 @@ def test_static_assets_served(web: TestClient) -> None:
 
 
 def test_index_renders(web: TestClient, session: Session, ev: Evidence) -> None:
-    session.add(Note(body="global <i>note</i>"))
+    from app.models import Case, CaseEvidence
+
+    case = Case(name="APT <i>X</i>")
+    session.add(case)
+    session.flush()
+    session.add(CaseEvidence(case_id=case.id, evidence_id=ev.id, label="before"))
     session.add(Note(body="evidence note", evidence_id=ev.id))
     session.commit()
     _run(session, ev)
@@ -302,8 +309,9 @@ def test_index_renders(web: TestClient, session: Session, ev: Evidence) -> None:
     assert "not hashed" in html and 'action="/ui/evidence/1/hash"' in html
     assert "os=windows" in html
     assert 'hx-post="/ui/scan"' in html
-    assert "global &lt;i&gt;note&lt;/i&gt;" in html
-    assert "evidence note" not in html  # only global notes on the index
+    assert "APT &lt;i&gt;X&lt;/i&gt;" in html and f'href="/cases/{case.id}"' in html
+    assert f'href="/evidence/{ev.id}?case={case.id}"' in html  # case chip on the image
+    assert "evidence note" not in html and "Investigation notes" not in html
     assert '<script src="/static/htmx.min.js"' in html
 
 
@@ -435,16 +443,17 @@ def test_runs_fragment_polls_only_when_active(
 ) -> None:
     run = _run(session, ev, status=RunStatus.SUCCEEDED, row_count=7)
     r = web.get(f"/ui/evidence/{ev.id}/runs", headers=HX)
-    assert 'hx-trigger="every 3s"' not in r.text
+    assert "every 3s" not in r.text
+    assert 'hx-trigger="runs-changed from:body"' in r.text  # reloads when the panel queues runs
     assert "status-succeeded" in r.text and "Cancel" not in r.text
 
     active = _run(session, ev, status=RunStatus.RUNNING)
     r = web.get(f"/ui/evidence/{ev.id}/runs", headers=HX)
-    assert 'hx-trigger="every 3s"' in r.text
+    assert 'hx-trigger="runs-changed from:body, every 3s"' in r.text
     assert f'hx-post="/ui/runs/{active.id}/cancel"' in r.text
     assert f'hx-post="/ui/runs/{run.id}/cancel"' not in r.text
     # Evidence page itself also carries the polling attribute while active.
-    assert 'hx-trigger="every 3s"' in web.get(f"/evidence/{ev.id}").text
+    assert "runs-changed from:body, every 3s" in web.get(f"/evidence/{ev.id}").text
 
     r = web.post(f"/ui/runs/{active.id}/cancel", headers=HX)
     assert "status-cancelled" in r.text and 'hx-trigger="every 3s"' not in r.text
@@ -608,6 +617,38 @@ def test_ai_message_escapes_and_links(web: TestClient, session: Session, ev: Evi
     assert 'name="origin" value="ai"' in html and "value='{\"pid\": [4]}'" in html
     assert '<button type="button" class="small" disabled>Run</button>' in html
     assert "plugin not allowed: &#39;evil.Plugin&#39;" in html
+
+
+def test_ai_message_unsupported_citation_and_single_error(
+    web: TestClient, session: Session, ev: Evidence
+) -> None:
+    common = {"evidence_id": ev.id, "role": "assistant", "model_requested": "m"}
+    session.add_all(
+        [
+            AIMessage(
+                **common,
+                content="evil.exe is PID 666 [R1:2]. Fine [R1:3].",
+                citations=[
+                    {
+                        "key": "R1:2",
+                        "valid": True,
+                        "support": "unsupported",
+                        "unsupported_values": ["evil.exe", '<b>"x"</b>'],
+                    },
+                    {"key": "R1:3", "valid": True, "support": "supported"},
+                ],
+            ),
+            AIMessage(**common, content="AI request failed: boom-123", error="boom-123"),
+        ]
+    )
+    session.commit()
+    html = web.get(f"/ui/evidence/{ev.id}/ai", headers=HX).text
+    assert 'class="cite cite-unsupported" href="/runs/1?row=2#row-1-2"' in html
+    assert "cited row doesn&#39;t support this: evil.exe" in html
+    assert '<b>"x"</b>' not in html  # model text escaped in the title and the note
+    assert '<a class="cite" href="/runs/1?row=3#row-1-3">R1:3</a>' in html
+    assert "cite-support-note" in html
+    assert html.count("boom-123") == 1  # the error is shown once, not also as the answer
 
 
 def test_render_ai_content_unit() -> None:

@@ -32,6 +32,10 @@ How to add a plugin
 3. ``auto_enumerate=True`` puts the plugin in the "auto-enumerate" batch that is queued for
    each evidence item on request (one Run per plugin, no args). Choose cheap, high-value
    plugins; ``max_concurrent_runs`` defaults to 1 so the batch runs sequentially.
+4b. ``compare_keys`` / ``compare_ignore``: for the before/after comparison view. Keys are the
+   result columns that identify "the same" row in two images (PIDs and offsets change between
+   captures, so never use those); ignore lists extra columns that should not count as a change.
+   Analysts can override both on the comparison page.
 4. ``timeout_seconds``: set this for slow plugins (e.g. filescan/dumpfiles on big images);
    otherwise FT_RUN_TIMEOUT_SECONDS (1 h) applies.
 5. ``presets``: (label, args) pairs shown as one-click suggested queries in the UI. The args
@@ -41,6 +45,8 @@ How to add a plugin
    post-processing hook (see README.md in this directory).
 7. Add a test in tests/test_tools_volatility.py for any non-trivial ArgSpec, and a fixture
    with real captured output under tests/fixtures/ (see README.md).
+8. Recommendations: to have the app *suggest* the plugin (baseline step or "after X, run Y"),
+   add it to the investigation guide in ``guide.py`` (see the docs at the top of that file).
 """
 
 from __future__ import annotations
@@ -48,6 +54,8 @@ from __future__ import annotations
 from app.tools.base import ArgSpec, PluginSpec
 
 # Verified against volatility3 2.28.2 (installed package source + `vol <plugin> --help`):
+#   - windows.pstree.PsTree / windows.cmdline.CmdLine: `--pid [PID ...]` ListRequirement(int).
+#   - windows.netscan.NetScan: no plugin options.
 #   - windows.info.Info: no plugin options.
 #   - windows.pslist.PsList: `--pid [PID ...]` is ListRequirement(name="pid", element_type=int,
 #     optional=True); `--dump` is BooleanRequirement(name="dump", default=False) ("Extract listed
@@ -64,6 +72,8 @@ PLUGINS: list[PluginSpec] = [
         name="windows.info.Info",
         description="Show Windows version and kernel details from the memory image.",
         auto_enumerate=True,
+        # EXAMPLE comparison keys: a row is one variable; "changed" = its value differs.
+        compare_keys=("Variable",),
     ),
     PluginSpec(
         name="windows.pslist.PsList",
@@ -78,8 +88,33 @@ PLUGINS: list[PluginSpec] = [
                 writes_files=True,
             ),
         ),
-        presets=(("PID 4 (System)", {"pid": [4]}),),
+        presets=(("EXAMPLE: PID 4 (System)", {"pid": [4]}),),
+        # EXAMPLE comparison keys - TODO(forensics): a better identity is name + path + parent
+        # name, which needs pstree/cmdline data joined in.
+        compare_keys=("ImageFileName",),
     ),
+    # EXAMPLE entries below exist so the EXAMPLE investigation guide (guide.py) has something to
+    # recommend. TODO(forensics): review descriptions, options, timeouts and compare keys.
+    # PluginSpec(
+    #    name="windows.pstree.PsTree",
+    #    description="EXAMPLE: processes as a parent/child tree.",
+    #    args=(ArgSpec(name="pid", flag="--pid", type="int_list", help="Only these process IDs"),),
+    #    compare_keys=("ImageFileName",),
+    # ),
+    # PluginSpec(
+    #    name="windows.cmdline.CmdLine",
+    #    description="EXAMPLE: command line of each process.",
+    #    args=(ArgSpec(name="pid", flag="--pid", type="int_list", help="Only these process IDs"),),
+    #    compare_keys=("Process", "Args"),
+    # ),
+    # TODO these were manually created before Andrew's refactor and may need to
+    # be updated to the new standard/functionality
+    # PluginSpec( # bad! incompatible!
+    #    name="windows.netscan.NetScan",
+    #    description="EXAMPLE: network connections and listening sockets (pool scan; slow).",
+    #    compare_keys=("Proto", "LocalAddr", "LocalPort", "ForeignAddr", "ForeignPort", "Owner"),
+    #    presets=(("PID 4 (System)", {"pid": [4]}),),
+    # ),
     PluginSpec(
         name="windows.pstree.PsTree",
         description="Show processes in a tree grouped by parent process.",
@@ -111,6 +146,7 @@ PLUGINS: list[PluginSpec] = [
     PluginSpec(
         name="windows.netscan.NetScan",
         description="Scan for TCP connections, TCP listeners, and UDP endpoints.",
+        compare_keys=("Proto", "LocalAddr", "LocalPort", "ForeignAddr", "ForeignPort", "Owner"),
     ),
     PluginSpec(
         name="windows.svcscan.SvcScan",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,6 +18,29 @@ _ALLOWED_OVERRIDES = frozenset({"model", "temperature", "max_tokens", "top_p", "
 class AIError(Exception):
     """Provider call failed (HTTP error, timeout, network error or malformed response)."""
 
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+# Reasoning models (e.g. Qwen3, DeepSeek-R1) may put their chain of thought in <think> tags in
+# the content. It is kept in AIResult.reasoning (provenance) but never shown as the answer.
+_THINK_RE = re.compile(r"<think>(.*?)(?:</think>|\Z)", re.DOTALL | re.IGNORECASE)
+
+
+def split_reasoning(content: str) -> tuple[str, str]:
+    """(answer without <think> blocks, the reasoning text)."""
+    reasoning = "\n".join(m.strip() for m in _THINK_RE.findall(content or ""))
+    return _THINK_RE.sub("", content or "").strip(), reasoning
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any] | None  # None if the model sent invalid JSON
+    raw_arguments: str = ""
+
 
 @dataclass
 class AIResult:
@@ -25,6 +50,14 @@ class AIResult:
     params: dict[str, Any]  # everything sent in the request body except "messages"
     usage: dict[str, Any] | None
     raw: dict[str, Any] = field(repr=False)
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    reasoning: str = ""  # <think> text / reasoning_content, if the model returned any
+    finish_reason: str | None = None  # "stop", "tool_calls", "length" (cut off), ...
+
+    @property
+    def truncated(self) -> bool:
+        """The provider stopped because the output hit max_tokens (reasoning counts too)."""
+        return self.finish_reason == "length"
 
 
 class AIClient:
@@ -48,9 +81,17 @@ class AIClient:
         params.update({k: v for k, v in overrides.items() if v is not None})
         return params
 
-    def chat(self, messages: list[dict[str, Any]], **overrides: Any) -> AIResult:
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **overrides: Any,
+    ) -> AIResult:
+        """One chat completion. ``tools``: OpenAI function-calling tool specs (optional)."""
         params = self.build_params(**overrides)
-        body = {**params, "messages": messages}
+        body: dict[str, Any] = {**params, "messages": messages}
+        if tools:
+            body["tools"] = tools
         headers = {"Content-Type": "application/json"}
         if self.settings.ai_api_key:
             headers["Authorization"] = f"Bearer {self.settings.ai_api_key}"
@@ -70,7 +111,10 @@ class AIClient:
 
         if resp.status_code >= 400:
             detail = resp.text[:500]
-            raise AIError(f"AI provider returned HTTP {resp.status_code} ({url}): {detail}")
+            raise AIError(
+                f"AI provider returned HTTP {resp.status_code} ({url}): {detail}",
+                status_code=resp.status_code,
+            )
 
         try:
             raw = resp.json()
@@ -80,11 +124,20 @@ class AIClient:
             raise AIError("AI provider response is not a JSON object")
 
         try:
-            content = raw["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
+            choice = raw["choices"][0]
+            message = choice["message"]
+            content = message.get("content")
+        except (KeyError, IndexError, TypeError, AttributeError) as exc:
             raise AIError("AI provider response missing choices[0].message.content") from exc
+        tool_calls = _parse_tool_calls(message.get("tool_calls"))
+        if content is None and tool_calls:
+            content = ""
         if not isinstance(content, str):
             raise AIError("AI provider response content is not a string")
+        content, reasoning = split_reasoning(content)
+        extra = message.get("reasoning_content") or message.get("reasoning")
+        if isinstance(extra, str) and extra.strip():
+            reasoning = "\n".join(p for p in (extra.strip(), reasoning) if p)
 
         usage = raw.get("usage")
         model_returned = raw.get("model")
@@ -95,4 +148,36 @@ class AIClient:
             params=params,
             usage=usage if isinstance(usage, dict) else None,
             raw=raw,
+            tool_calls=tool_calls,
+            reasoning=reasoning,
+            finish_reason=choice.get("finish_reason")
+            if isinstance(choice.get("finish_reason"), str)
+            else None,
         )
+
+
+def _parse_tool_calls(value: Any) -> list[ToolCall]:
+    calls: list[ToolCall] = []
+    for n, item in enumerate(value if isinstance(value, list) else []):
+        fn = item.get("function") if isinstance(item, dict) else None
+        if not isinstance(fn, dict) or not isinstance(fn.get("name"), str):
+            continue
+        raw_args = fn.get("arguments")
+        args: dict[str, Any] | None
+        if isinstance(raw_args, dict):
+            args, raw_args = raw_args, json.dumps(raw_args)
+        else:
+            try:
+                parsed = json.loads(raw_args or "{}")
+            except (TypeError, ValueError):
+                parsed = None
+            args = parsed if isinstance(parsed, dict) else None
+        calls.append(
+            ToolCall(
+                id=str(item.get("id") or f"call_{n}"),
+                name=fn["name"],
+                arguments=args,
+                raw_arguments=str(raw_args or ""),
+            )
+        )
+    return calls

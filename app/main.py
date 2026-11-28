@@ -30,6 +30,7 @@ ROUTER_MODULES = (
     "app.api.evidence",
     "app.api.runs",
     "app.api.notes",
+    "app.api.cases",
     "app.api.hooks",
     "app.api.audit",
     "app.api.artifacts",
@@ -37,6 +38,10 @@ ROUTER_MODULES = (
     "app.api.system",
     "app.api.ai",
     "app.web.pages",
+    "app.web.cases_pages",
+    "app.web.recommendations_pages",
+    "app.web.agent_pages",
+    "app.web.settings_pages",
 )
 
 
@@ -98,6 +103,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
         )
         with SessionLocal() as session:
             recover_interrupted_runs(session)
+            from app.ai.agent import recover_tasks
+
+            recover_tasks(session, resume=start_worker)
         worker = get_worker() if start_worker else None
         scheduler = backup.get_scheduler() if start_worker else None
         if worker is not None:

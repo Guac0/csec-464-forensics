@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Run {{ run.id }}{% endblock %}
-{% block crumbs %}<a href="/">Evidence</a> / <a href="/evidence/{{ run.evidence_id }}" class="mono">{{ run.evidence.rel_path }}</a> / Run {{ run.id }}{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a> / {% if active_case %}<a href="/cases/{{ active_case.id }}">Case {{ active_case.name }}</a> / {% endif %}<a href="/evidence/{{ run.evidence_id }}{{ case_q if active_case else '' }}" class="mono">{{ run.evidence.rel_path }}</a> / Run {{ run.id }}{% endblock %}
 {% block content %}
 <section class="panel">
   <div class="panel-head">
@@ -29,7 +29,7 @@
     <dt>Tool</dt><dd class="mono">{{ run.tool }} {{ run.tool_version or "" }}</dd>
     <dt>Args</dt><dd class="mono">{{ run.args | args or "—" }}</dd>
     <dt>Exact argv</dt><dd><pre>{{ run.argv | argv }}</pre></dd>
-    <dt>Origin</dt><dd>{{ run.origin.value }}{% if run.parent_run_id %} — queued by hook <span class="mono">{{ run.triggered_by_hook }}</span> after <a href="/runs/{{ run.parent_run_id }}">run {{ run.parent_run_id }}</a> (chain depth {{ run.chain_depth }}){% endif %}{% if run.rerun_of_id %} — re-run of <a href="/runs/{{ run.rerun_of_id }}">run {{ run.rerun_of_id }}</a>{% endif %}</dd>
+    <dt>Origin</dt><dd>{{ run.origin.value }}{% if run.parent_run_id %} — queued by hook <span class="mono">{{ run.triggered_by_hook }}</span> after <a href="/runs/{{ run.parent_run_id }}">run {{ run.parent_run_id }}</a> (chain depth {{ run.chain_depth }}){% endif %}{% if run.rerun_of_id %} — re-run of <a href="/runs/{{ run.rerun_of_id }}">run {{ run.rerun_of_id }}</a>{% endif %}{% if run.ai_task_id %}{% set areq = ai_run_request(run) %} — <span class="badge ai-badge">queued by AI</span> <a href="/evidence/{{ run.evidence_id }}#ai-task-{{ run.ai_task_id }}">AI task {{ run.ai_task_id }}</a>{% if areq %}{% if areq.status == "auto" %} (auto-approved: yes to all){% elif areq.status == "edited" %} (options edited and approved by {{ areq.decided_by }}){% else %} (approved by {{ areq.decided_by }}){% endif %}{% if areq.reason %}: <span class="small-text">{{ areq.reason }}</span>{% endif %}{% endif %}{% endif %}{% if run.ai_message_id %} — suggested by <a href="/evidence/{{ run.evidence_id }}#ai-msg-{{ run.ai_message_id }}">AI answer {{ run.ai_message_id }}</a>{% endif %}</dd>
     <dt>Evidence at run time</dt><dd class="mono small-text">{% if run.evidence_sha256 %}SHA-256 {{ run.evidence_sha256 }} · {{ run.evidence_size_bytes }} bytes{% if run.evidence_sha256 != run.evidence.sha256 %} <span class="badge status-failed" title="the image's current hash differs">differs from current hash</span>{% endif %}{% else %}—{% endif %}</dd>
     {% if run.integrity_warning %}<dt>Integrity warning</dt><dd><span class="flash warn">{{ run.integrity_warning }}</span></dd>{% endif %}
     <dt>Stdout SHA-256</dt><dd class="mono">{{ run.stdout_sha256 or "—" }}</dd>
@@ -95,10 +95,12 @@
   {% if run.findings %}
   <div class="small-label">Findings (automated, verify against the cited rows)</div>
   <ul class="findings">
+    {% set sc = share_ctx(run.evidence_id, active_case_id) %}
     {% for f in run.findings %}
     <li class="finding sev-{{ f.severity }}">
       <span class="badge sev-{{ f.severity }}">{{ f.severity }}</span>
       <strong>{{ f.title }}</strong>
+      {% set share_key = "F" ~ run.id ~ ":" ~ f.hook ~ "/" ~ f.title %}{% set share_attrs = {"kind": "finding", "run-id": run.id, "finding-index": loop.index0, "what": "Finding: " ~ f.title} %}{% include "_share_button.html" %}
       {% if f.detail %}<div class="finding-detail">{{ f.detail }}</div>{% endif %}
       {% if f.rows %}<div class="small-text">Rows:
         {% for idx in f.rows[:50] %}<a class="mono" href="/runs/{{ run.id }}?row={{ idx }}#row-{{ run.id }}-{{ idx }}">R{{ run.id }}:{{ idx }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if f.rows | length > 50 %} … ({{ f.rows | length }} total){% endif %}
@@ -183,6 +185,7 @@
   <form id="view-form" method="get" action="/runs/{{ run.id }}"
         hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML" hx-push-url="true"
         hx-trigger="submit, change from:.view-control, input changed delay:400ms from:#view-q, search from:#view-q">
+    {% if active_case %}<input type="hidden" name="case" value="{{ active_case.id }}">{% endif %}
     <div class="panel-head">
       <h2>Results</h2>
       <div class="filter">
@@ -203,4 +206,6 @@
   {% include "_export_dialog.html" %}
 </section>
 {% endif %}
+{% set sc = share_ctx(run.evidence_id, active_case_id) %}{% include "_share_dialog.html" %}
+<dialog id="indicator-dialog" class="export-dialog"><div id="indicator-dialog-body"></div></dialog>
 {% endblock %}

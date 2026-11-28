@@ -1,0 +1,42 @@
+{# One share dialog per page. Buttons call openShare(this) with data-kind and the source ids.
+   `sc` = share_ctx(evidence_id, active_case_id): the cases a share can go to. #}
+{% if sc and sc.cases %}
+<dialog id="share-dialog" class="export-dialog">
+  <form method="post" action="/ui/share">
+    <h3>Share with the other images of a case</h3>
+    <p class="small-text" id="share-what"></p>
+    <input type="hidden" name="kind"><input type="hidden" name="run_id"><input type="hidden" name="row_idx">
+    <input type="hidden" name="finding_index"><input type="hidden" name="note_id"><input type="hidden" name="ai_message_id">
+    <input type="hidden" name="next">
+    {% if sc.active %}
+    <input type="hidden" name="case_id" value="{{ sc.active[0] }}">
+    <p>Case: <strong>{{ sc.active[1] }}</strong>{% if sc.label %} <span class="muted">(this image: {{ sc.label }})</span>{% endif %}</p>
+    {% else %}
+    <label for="share-case">Case</label>
+    <select id="share-case" name="case_id" required>
+      {% for cid, cname, clabel in sc.cases %}<option value="{{ cid }}">{{ cname }}{% if clabel %} (this image: {{ clabel }}){% endif %}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <label for="share-comment">Comment (optional)</label>
+    <textarea id="share-comment" name="comment" rows="2" placeholder="e.g. likely the dropper; check the other machines"></textarea>
+    <p class="muted small-text">The other images in the case will see a pointer to this item (shown as it is now, with this image named as its source). Nothing is copied into their runs, notes or AI context.</p>
+    <div class="dialog-buttons">
+      <button type="submit">Share</button>
+      <button type="button" class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
+<script>
+function openShare(btn) {
+  const d = document.getElementById("share-dialog");
+  const f = d.querySelector("form");
+  for (const k of ["kind", "run_id", "row_idx", "finding_index", "note_id", "ai_message_id"]) {
+    f.elements[k].value = btn.dataset[k.replace(/_(.)/g, (_, c) => c.toUpperCase())] || "";
+  }
+  f.elements["next"].value = location.pathname + location.search + location.hash;
+  d.querySelector("#share-what").textContent = btn.dataset.what || "";
+  f.elements["comment"].value = "";
+  d.showModal();
+}
+</script>
+{% endif %}

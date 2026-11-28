@@ -44,6 +44,11 @@ class PluginSpec:
     timeout_seconds: int | None = None
     # True if the plugin always writes files (e.g. windows.dumpfiles.DumpFiles), whatever args.
     writes_files: bool = False
+    # Comparison view (app/services/compare.py): the columns that identify "the same" row in two
+    # images (e.g. process name + path), and extra columns to ignore when deciding whether a
+    # row changed. Defaults when empty: all non-volatile columns identify a row.
+    compare_keys: tuple[str, ...] = ()
+    compare_ignore: tuple[str, ...] = ()
 
     @property
     def may_write_files(self) -> bool:
@@ -79,6 +84,38 @@ class ExecutionResult:
     stop_reason: str | None = None
 
 
+# Conditions a NEXT step can have (see app/tools/volatility/guide.py and docs there).
+WHEN_SUCCEEDED = "succeeded"  # the source run succeeded (default)
+WHEN_HAS_ROWS = "has_rows"  # ... and returned at least one row
+WHEN_HAS_FLAGS = "has_flags"  # ... and a post-run hook flagged at least one row
+WHEN_TAG_PREFIX = "tag:"  # "tag:<name>": ... and a hook flagged a row with that tag
+WHEN_CONDITIONS = (WHEN_SUCCEEDED, WHEN_HAS_ROWS, WHEN_HAS_FLAGS)
+
+
+@dataclass(frozen=True)
+class GuideStep:
+    """One recommendation in a tool's investigation guide.
+
+    ``args`` use the ArgSpec names of the plugin (validated like manual input). ``when`` only
+    applies to NEXT steps; ``priority`` ranks NEXT steps (higher first; baseline keeps its order).
+    """
+
+    plugin: str
+    reason: str
+    args: dict[str, Any] = field(default_factory=dict)
+    when: str = WHEN_SUCCEEDED
+    priority: int = 0
+
+
+@dataclass(frozen=True)
+class InvestigationGuide:
+    """Baseline steps (in order) and plugin -> follow-up relationships. Content, not code: the
+    volatility guide lives in app/tools/volatility/guide.py."""
+
+    baseline: tuple[GuideStep, ...] = ()
+    next: dict[str, tuple[GuideStep, ...]] = field(default_factory=dict)
+
+
 class ToolRunner(ABC):
     name: str
 
@@ -89,6 +126,10 @@ class ToolRunner(ABC):
     def catalog_problems(self) -> dict[str, list[str]]:
         """{plugin name: [problem, ...]} for catalog entries that were skipped as invalid."""
         return {}
+
+    def guide(self) -> InvestigationGuide:
+        """The tool's investigation guide (recommended next plugins). Empty by default."""
+        return InvestigationGuide()
 
     def get_plugin(self, name: str) -> PluginSpec:
         for p in self.plugins():

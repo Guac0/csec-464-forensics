@@ -7,14 +7,14 @@
     {% if total %}Rows {{ offset + 1 }}–{{ [offset + limit, total] | min }} of {{ total }}{% else %}No rows{% endif %}{% if q %} matching “{{ q }}”{% endif %}{% if tag == "*" %} with any annotation{% elif tag %} tagged “{{ tag }}”{% endif %}{% if view.filters %} · {{ view.filters | length }} column filter{{ "s" if view.filters | length != 1 }}{% endif %}{% if view.sort %} · sorted by {{ view.sort }} {{ "↓" if view.desc else "↑" }}{% endif %}
     {% if view.active %}<a class="small-text" href="/runs/{{ run.id }}" hx-get="/ui/runs/{{ run.id }}/rows" hx-target="#rows" hx-swap="outerHTML" hx-push-url="/runs/{{ run.id }}">Clear</a>{% endif %}
     {% if prev_offset is not none %}
-      <a href="{{ page_url(run.id, view, offset=prev_offset or None, limit=limit) }}"
-         hx-get="{{ page_url(run.id, view, fragment=True, offset=prev_offset or None, limit=limit) }}"
-         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, offset=prev_offset or None, limit=limit) }}">&larr; Prev</a>
+      <a href="{{ page_url(run.id, view, case=active_case_id, offset=prev_offset or None, limit=limit) }}"
+         hx-get="{{ page_url(run.id, view, case=active_case_id, fragment=True, offset=prev_offset or None, limit=limit) }}"
+         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, case=active_case_id, offset=prev_offset or None, limit=limit) }}">&larr; Prev</a>
     {% endif %}
     {% if next_offset is not none %}
-      <a href="{{ page_url(run.id, view, offset=next_offset, limit=limit) }}"
-         hx-get="{{ page_url(run.id, view, fragment=True, offset=next_offset, limit=limit) }}"
-         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, offset=next_offset, limit=limit) }}">Next &rarr;</a>
+      <a href="{{ page_url(run.id, view, case=active_case_id, offset=next_offset, limit=limit) }}"
+         hx-get="{{ page_url(run.id, view, case=active_case_id, fragment=True, offset=next_offset, limit=limit) }}"
+         hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, case=active_case_id, offset=next_offset, limit=limit) }}">Next &rarr;</a>
     {% endif %}
     {% if run.search_indexed %}<span class="muted small-text" title="search uses the full-text index (3+ characters)">indexed</span>{% endif %}
   </div>
@@ -26,9 +26,9 @@
       {% for c in columns %}
         {% set is_sorted = view.sort == c %}
         {% set next_desc = 1 if is_sorted and not view.desc else None %}
-        <th title="{{ column_types.get(c, '') }}"><a class="sort" href="{{ page_url(run.id, view, sort=c, desc=next_desc) }}"
-               hx-get="{{ page_url(run.id, view, fragment=True, sort=c, desc=next_desc) }}"
-               hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, sort=c, desc=next_desc) }}">{{ c }}{% if is_sorted %} {{ "↓" if view.desc else "↑" }}{% endif %}</a></th>
+        <th title="{{ column_types.get(c, '') }}"><a class="sort" href="{{ page_url(run.id, view, case=active_case_id, sort=c, desc=next_desc) }}"
+               hx-get="{{ page_url(run.id, view, case=active_case_id, fragment=True, sort=c, desc=next_desc) }}"
+               hx-target="#rows" hx-swap="outerHTML" hx-push-url="{{ page_url(run.id, view, case=active_case_id, sort=c, desc=next_desc) }}">{{ c }}{% if is_sorted %} {{ "↓" if view.desc else "↑" }}{% endif %}</a></th>
       {% endfor %}</tr>
       <tr class="filter-row"><th></th>{% if row_artifacts %}<th></th>{% endif %}{% if has_annotations %}<th></th>{% endif %}
       {% for c in columns %}
@@ -39,11 +39,18 @@
       {% endfor %}</tr>
     </thead>
     <tbody>
+    {% set sc = share_ctx(run.evidence_id, active_case_id) %}
+    {% set iocs = ioc_rows(sc.active[0] if sc.active else none, run.id) %}
     {% for r in rows %}
       {% set sev = r.annotations | max_severity %}
       {% set cls = ["highlight" if highlight is not none and r.row_idx == highlight else "", ("annotated sev-" ~ sev) if sev else ""] | select | join(" ") %}
       <tr id="row-{{ run.id }}-{{ r.row_idx }}"{% if cls %} class="{{ cls }}"{% endif %}>
-        <td class="mono cite-key"><a href="/runs/{{ run.id }}?row={{ r.row_idx }}#row-{{ run.id }}-{{ r.row_idx }}">R{{ run.id }}:{{ r.row_idx }}</a></td>
+        <td class="mono cite-key"><a href="/runs/{{ run.id }}?{{ case_amp }}row={{ r.row_idx }}#row-{{ run.id }}-{{ r.row_idx }}">R{{ run.id }}:{{ r.row_idx }}</a>
+          {% set share_key = "R" ~ run.id ~ ":" ~ r.row_idx %}{% set share_attrs = {"kind": "row", "run-id": run.id, "row-idx": r.row_idx, "what": "Row R" ~ run.id ~ ":" ~ r.row_idx ~ " of " ~ run.plugin} %}{% include "_share_button.html" %}
+          {% if sc.cases %}<button type="button" class="small share-btn" title="Add a value of this row to a case's indicator watchlist"
+            hx-get="/ui/indicators/from-row?run_id={{ run.id }}&row_idx={{ r.row_idx }}" hx-target="#indicator-dialog-body"
+            hx-on::after-request="document.getElementById('indicator-dialog').showModal()">+IOC</button>{% endif %}
+          {% if r.row_idx in iocs %}<span class="badge sev-high" title="matches indicator(s): {{ iocs[r.row_idx] | join(', ') }}">IOC</span>{% endif %}</td>
         {% if row_artifacts %}<td>{% for a in row_artifacts.get(r.row_idx, []) %}<a class="badge" href="#artifact-{{ a.id }}" title="{{ a.filename }} ({{ a.file_type }})">file</a> {% endfor %}</td>{% endif %}
         {% if has_annotations %}<td class="flags">{% for a in r.annotations or [] %}<span class="badge sev-{{ a.severity }}" title="{{ a.note }} ({{ a.hook }})">{{ a.tag }}</span> {% endfor %}</td>{% endif %}
         {% for c in columns %}

@@ -6,11 +6,20 @@
 {% else %}
 {% set ev_id = msg.evidence_id or evidence_id %}
 <div class="ai-message" id="ai-msg-{{ msg.id }}">
-  <div class="ai-label">AI-generated lead — not evidence <span class="muted">{{ msg.created_at | dt }}</span></div>
-  {% if msg.error %}<p class="flash error">AI error: {{ msg.error }}</p>{% endif %}
-  {% if msg.content %}<div class="ai-content">{{ msg.content | ai_content(msg.citations) }}</div>{% endif %}
+  <div class="ai-label">AI-generated lead — not evidence <span class="muted">{{ msg.created_at | dt }}</span>
+    {% if msg.content and not msg.error and ev_id %}{% set sc = share_ctx(ev_id, active_case_id) %}{% set share_key = "A" ~ msg.id %}{% set share_attrs = {"kind": "ai_answer", "ai-message-id": msg.id, "what": "AI answer " ~ msg.id ~ " (shared as an AI lead, not evidence)"} %}{% include "_share_button.html" %}{% endif %}</div>
+  {% if msg.error %}<p class="flash error">AI error: {{ msg.error }}</p>
+  {% elif msg.content %}{% if msg.truncated %}<p class="flash warn small-text">This answer was cut off by the token limit and may be incomplete. Raise <span class="mono">FT_AI_MAX_TOKENS</span> (reasoning models spend part of it on their reasoning).</p>{% endif %}
+  <div class="ai-content">{{ msg.content | ai_content(msg.citations) }}</div>
+  {% for c in msg.citations or [] if c.valid and c.support == "unsupported" %}
+  {% if loop.first %}<p class="flash warn small-text cite-support-note">Cited row doesn't support this:{% endif %}
+    <span class="mono">{{ c.key }}</span> ({{ c.unsupported_values | join(", ") }} not in row){% if not loop.last %};{% endif %}
+  {% if loop.last %}</p>{% endif %}
+  {% endfor %}
+  {% endif %}
 
   {% if msg.suggestions %}
+  {% set sruns = suggestion_runs(ev_id) %}
   <div class="suggestions">
     <div class="small-label">Suggested queries</div>
     {% for s in msg.suggestions %}
@@ -18,13 +27,16 @@
       <div><span class="mono">{{ s.plugin }}</span> <span class="mono small-text">{{ s.get("normalized_args", s.args) | args }}</span></div>
       {% if s.reason %}<div class="prewrap small-text">{{ s.reason }}</div>{% endif %}
       {% if s.valid and ev_id %}
+      {% set srun = sruns.get(suggestion_key(s)) %}
+      {% if srun %}<span class="small-text muted">{{ srun.status }}: <a href="/runs/{{ srun.id }}">run {{ srun.id }}</a></span>{% endif %}
       <form class="inline" method="post" action="/ui/evidence/{{ ev_id }}/runs"
             {% if runs_panel %}hx-post="/ui/evidence/{{ ev_id }}/runs" hx-target="#runs" hx-swap="outerHTML"{% endif %}>
         <input type="hidden" name="plugin" value="{{ s.plugin }}">
         <input type="hidden" name="tool" value="{{ s.tool or 'volatility3' }}">
         <input type="hidden" name="origin" value="ai">
+        <input type="hidden" name="ai_message_id" value="{{ msg.id }}">
         <input type="hidden" name="args_json" value='{{ s.get("normalized_args", s.args) | tojson }}'>
-        <button type="submit" class="small">Run</button>
+        <button type="submit" class="small{% if srun %} secondary{% endif %}">{% if srun %}Run again{% else %}Run{% endif %}</button>
       </form>
       {% else %}
       <button type="button" class="small" disabled>Run</button>
@@ -44,8 +56,10 @@
       <dt>Created</dt><dd class="mono">{{ msg.created_at | dt }}</dd>
       <dt>Params</dt><dd><pre>{{ msg.params | pretty }}</pre></dd>
       <dt>Usage</dt><dd><pre>{{ msg.usage | pretty }}</pre></dd>
+      {% if msg.finish_reason %}<dt>Stopped because</dt><dd class="mono">{{ msg.finish_reason }}{% if msg.truncated %} (cut off by the token limit){% endif %}</dd>{% endif %}
       <dt>Context refs</dt><dd><pre>{{ msg.context_refs | pretty }}</pre></dd>
       <dt>Citations</dt><dd><pre>{{ msg.citations | pretty }}</pre></dd>
+      {% if msg.reasoning %}<dt>Model reasoning</dt><dd><small class="muted">The model's own reasoning (e.g. &lt;think&gt; text), hidden from the answer. Not evidence.</small><pre>{{ msg.reasoning }}</pre></dd>{% endif %}
     </dl>
     <div class="small-label">Exact request messages</div>
     <pre class="request-messages">{{ msg.request_messages | pretty }}</pre>

@@ -23,8 +23,15 @@ is printed. Exit codes: 0 ok, 1 regression (with `--fail-on-regression`), 2 no m
 3 every attempt failed with a provider error.
 
 **GitHub:** the manual "AI evaluation" workflow (Actions tab > AI evaluation > Run workflow) runs
-the same command with the provider from repository secrets and attaches the report. It never runs
-on pull requests. Normal CI only unit-tests the scoring code (`tests/test_evals.py`).
+the same command with the provider from repository secrets. It first checks the provider
+(`python -m app.ai.probe`, fails fast if unreachable), then runs the cases you pick (e.g. `agent`,
+`recommend`, or all), puts the summary table on the run page and attaches the reports. Options:
+model, cases, repeats, agent tool protocol, AI judge, fail on regression, and "save baseline"
+(the new baseline is attached as an artifact: commit it to `evals/baselines/` in a PR). It never
+runs on pull requests. Setup: secrets `FT_AI_BASE_URL`, `FT_AI_API_KEY`; variables `FT_AI_MODEL`,
+optional `FT_AI_MAX_TOKENS` (default 8000 there) and `EVAL_RUNNER` (a self-hosted runner label
+if the provider is only reachable from your network). Normal CI only unit-tests the scoring code
+(`tests/test_evals.py`).
 
 ## What is measured
 
@@ -34,13 +41,16 @@ Deterministic checks (always), per attempt:
 |---|---|
 | `pass` | every check below passed |
 | `citation_validity` | cited row keys that exist / all citations (invented rows = 0) |
+| `citation_support` | checked citations whose row(s) contain the values stated in the same sentence (PIDs, names, paths, IPs, ...) / checked citations |
 | `expected_row_recall` | expected rows cited / expected rows |
 | `cited_sentence_ratio` | sentences carrying a citation / sentences (rough: claims should be cited) |
 | `mention_recall` | required terms present / required terms |
 | `suggestion_validity` | suggested queries that pass the plugin allowlist / suggestions |
+| `expected_query_recall` | expected queries (plugin + options) suggested / expected queries (`suggest_queries`) |
 | `latency_s`, `total_tokens` | cost |
 
-Checks that fail a case: an invented citation, an expected row not cited, too few citations, a
+Checks that fail a case: an invented citation, a cited row that doesn't contain a value stated
+next to it (see `app/ai/citations.py`), an expected row not cited, too few citations, a
 required term missing, a forbidden term present, no valid suggestion of an expected plugin, any
 invalid suggestion.
 
@@ -89,11 +99,15 @@ runs:                              # recorded tool output, in order (run index 0
     fixture: tests/fixtures/real/win10_pslist.jsonl
     args: {}
 question: Which processes have a parent that is not in the list?   # or: summarize_run: 0
+                                   # or: recommend: true / recommend: "<focus>" ("what next?")
+                                   # or: goal: "<goal>" (AI agent; see "Agent cases" below)
 expect:
   cite_rows: ["0:5"]               # "<run index>:<row index>" that must be cited
   must_mention: ["explorer.exe"]   # case-insensitive substrings
   must_not_mention: ["mimikatz"]   # e.g. things NOT in the data (would be invented)
   suggest_plugins: ["windows.pstree.PsTree"]   # optional: a valid suggestion must use one
+  suggest_queries:                 # optional: each must be suggested (given args must match)
+    - {plugin: windows.cmdline.CmdLine, args: {pid: [2000]}}
   min_citations: 1
 judge:
   rubric: What a good answer contains and must not claim (used only with --judge).
@@ -104,3 +118,26 @@ fixture: open the fixture in the app or count rows depth-first through `__childr
 
 Good cases are small and specific: one clear question, the rows that prove the answer, and terms
 that would only appear if the model invented something.
+
+## Agent cases (`goal:`)
+
+A `goal:` case runs the AI agent with "yes to all". When the agent queues a plugin run, the
+harness completes it at once from the case's recorded output in `available_runs` (matched by
+plugin, and by the fixture's `args` if it gives any); a plugin not listed there fails with
+"not available in this evaluation case". Extra keys:
+
+```yaml
+goal: Find out how explorer.exe (the process whose parent is missing) was started.
+agent: {max_steps: 8, max_runs: 2, max_seconds: 600}   # optional limits
+available_runs:                    # recorded output the agent may get by queuing a run
+  - plugin: windows.cmdline.CmdLine
+    fixture: tests/fixtures/real/win10_cmdline.jsonl
+expect:
+  queue_plugins: [windows.cmdline.CmdLine]   # must be queued
+  forbid_plugins: [windows.pslist.PsList]    # must not be queued (e.g. already ran)
+  max_queued: 2
+  must_mention: ["explorer.exe"]             # plus the usual answer checks
+```
+
+Agent metrics: `expected_run_recall` (quality) and `runs_queued`, `agent_steps` (cost). The
+JSON report also lists `queued_runs` per attempt. See `cases/agent_goal_example.yaml`.

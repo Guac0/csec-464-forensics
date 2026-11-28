@@ -25,6 +25,26 @@ class AskRequest(BaseModel):
     row_refs: list[str] | None = None
 
 
+class TaskRequest(BaseModel):
+    evidence_id: int
+    goal: str = Field(max_length=2000)
+    max_steps: int | None = None
+    max_seconds: int | None = None
+    max_runs: int | None = None
+    approve_all: bool = False  # "yes to all": the AI's run requests are approved automatically
+
+
+class DecisionRequest(BaseModel):
+    action: str = Field(pattern="^(approve|edit|deny)$")
+    args: dict[str, Any] | None = None  # for "edit"
+    note: str = Field(default="", max_length=500)  # for "deny"
+
+
+class RecommendRequest(BaseModel):
+    evidence_id: int
+    focus: str = Field(default="", max_length=300)
+
+
 class AIMessageOut(BaseModel):
     id: int
     evidence_id: int | None
@@ -80,6 +100,17 @@ def ask(body: AskRequest, session: Session = Depends(get_session)) -> AIMessageO
     return message_out(msg)
 
 
+@router.post("/recommend", response_model=AIMessageOut)
+def recommend(body: RecommendRequest, session: Session = Depends(get_session)) -> AIMessageOut:  # noqa: B008
+    """ "What should I run next?": suggestions from the investigation state (runs, hook
+    findings, flagged rows, the guide's static recommendations). Stored in the chat history."""
+    try:
+        msg = service.recommend_next(session, body.evidence_id, body.focus)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return message_out(msg)
+
+
 @router.post("/summarize/{run_id}", response_model=AIMessageOut)
 def summarize(run_id: int, session: Session = Depends(get_session)) -> AIMessageOut:  # noqa: B008
     try:
@@ -95,3 +126,94 @@ def messages(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> list[AIMessageOut]:
     return [message_out(m) for m in service.get_messages(session, evidence_id)]
+
+
+# --------------------------------------------------------------------------- AI agent tasks
+
+
+@router.post("/tasks", status_code=201)
+def start_task(body: TaskRequest, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    """Give the AI agent a goal for one image (read-only tools; runs in the background).
+    Poll GET /api/ai/tasks/{id} for status, steps and the answer message id."""
+    from app.ai import agent
+
+    try:
+        task = agent.start_task(
+            session,
+            body.evidence_id,
+            body.goal,
+            body.max_steps,
+            body.max_seconds,
+            body.max_runs,
+            body.approve_all,
+        )
+    except agent.AgentError as exc:
+        status = 404 if "not found" in str(exc) else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    session.refresh(task)
+    return agent.view(task, session).as_dict()
+
+
+@router.get("/tasks")
+def list_tasks(evidence_id: int, session: Session = Depends(get_session)) -> list[dict[str, Any]]:  # noqa: B008
+    from app.ai import agent
+
+    return [agent.view(t, session).as_dict() for t in agent.list_tasks(session, evidence_id)]
+
+
+@router.get("/tasks/{task_id}")
+def get_task(task_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    from app.ai import agent
+
+    try:
+        return agent.view(agent.get_task(session, task_id), session).as_dict()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/cancel")
+def cancel_task(task_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    from app.ai import agent
+
+    try:
+        return agent.view(agent.cancel_task(session, task_id), session).as_dict()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/approve-all")
+def approve_all(task_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:  # noqa: B008
+    """Switch the task to "yes to all" and approve its pending run requests."""
+    from app.ai import agent
+
+    try:
+        return agent.view(agent.approve_all_remaining(session, task_id), session).as_dict()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except agent.ApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/run-requests/{request_id}")
+def decide(
+    request_id: int,
+    body: DecisionRequest,
+    session: Session = Depends(get_session),  # noqa: B008
+) -> dict[str, Any]:
+    """Approve, edit (approve with other options) or deny an AI task's run request."""
+    from app.ai import agent
+
+    try:
+        req = agent.decide(session, request_id, body.action, body.args, body.note)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except agent.ApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "id": req.id,
+        "task_id": req.task_id,
+        "status": req.status,
+        "final_args": req.final_args,
+        "run_id": req.run_id,
+        "note": req.note,
+    }

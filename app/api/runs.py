@@ -62,6 +62,8 @@ class RunOut(BaseModel):
     deleted_at: datetime | None = None
     delete_reason: str | None = None
     chain_depth: int
+    ai_message_id: int | None = None
+    ai_task_id: int | None = None
 
 
 class RunCreate(BaseModel):
@@ -70,6 +72,8 @@ class RunCreate(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     origin: RunOrigin = RunOrigin.MANUAL
     tool: str = "volatility3"
+    # The AI answer whose suggestion this is (origin "ai" only).
+    ai_message_id: int | None = None
 
 
 class RowOut(BaseModel):
@@ -104,6 +108,8 @@ def list_runs(session: SessionDep, evidence_id: int | None = None) -> list[Run]:
 def create_run(body: RunCreate, session: SessionDep) -> Run:
     if body.origin == RunOrigin.HOOK:
         raise HTTPException(422, "origin 'hook' is reserved for runs queued by post-run hooks")
+    if body.origin == RunOrigin.AI_AGENT:
+        raise HTTPException(422, "origin 'agent' is reserved for runs queued by AI agent tasks")
     try:
         return runs_service.create_run(
             session,
@@ -111,6 +117,7 @@ def create_run(body: RunCreate, session: SessionDep) -> Run:
             ToolRequest(plugin=body.plugin, args=body.args),
             origin=body.origin,
             tool=body.tool,
+            ai_message_id=body.ai_message_id,
         )
     except ArgValidationError as exc:
         raise HTTPException(422, str(exc)) from exc

@@ -1,7 +1,10 @@
-<div id="ai-history" class="ai-history">
+<div id="ai-history" class="ai-history"{% if evidence_id %} hx-get="/ui/evidence/{{ evidence_id }}/ai" hx-trigger="ai-history-changed from:body" hx-swap="outerHTML"{% endif %}>
   {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+  {% set task_by_msg = task_by_msg or {} %}{% set task_answers = task_answers or {} %}
   {% for msg in messages %}
-    {% include "_ai_message.html" %}
+    {% if msg.id in task_answers %}{# shown inside its AI task card #}
+    {% elif msg.id in task_by_msg %}{% set tv = task_by_msg[msg.id] %}{% set answer = task_answers.get(tv.task.answer_message_id) %}{% include "_ai_task.html" %}
+    {% else %}{% include "_ai_message.html" %}{% endif %}
   {% else %}
     <p class="muted">No questions asked yet.</p>
   {% endfor %}

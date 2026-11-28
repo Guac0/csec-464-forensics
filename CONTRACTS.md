@@ -61,6 +61,26 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/tools/registry.py`: `get_runner(name: str = "volatility3") -> ToolRunner`, `available_tools() -> list[str]`
 - `app/tools/volatility/runner.py`: `VolatilityRunner(ToolRunner)`
 - `app/tools/volatility/plugins.py`: `PLUGINS: list[PluginSpec]` — **TODO(forensics)**; only example entries
+- `app/tools/volatility/guide.py`: `BASELINE: list[Step]`, `NEXT: dict[plugin, list[Step]]` —
+  **TODO(forensics)**; EXAMPLE content. `Step` = `app.tools.base.GuideStep(plugin, reason,
+  args={}, when="succeeded"|"has_rows"|"has_flags"|"tag:<tag>", priority=0)`.
+
+### Investigation guide and recommendations
+- `ToolRunner.guide() -> InvestigationGuide(baseline, next)` (default empty).
+- `app/tools/guide.py`: `check_guide(runner) -> (valid guide with normalised args, [GuideProblem])`
+  (invalid steps skipped), `to_markdown(runner)`, `main()` (CLI `python -m
+  app.tools.volatility.guide`, exit 1 on problems), `describe_when`, `args_key`.
+- `app/services/recommendations.py`: `recommend(session, evidence_id) -> Recommendations`
+  (`items` best first, `dismissed`, `baseline_total/done`, `identified`, `guide_problems`;
+  `as_dict()`), `dismiss` / `restore` (table `dismissed_recommendations`, migration 0012),
+  `run_recommendation` (origin `RunOrigin.RECOMMENDED`), `run_baseline`, `step_key`.
+  A step is done while a queued/running/succeeded run has the same plugin + normalised args.
+- API `GET /api/evidence/{id}/recommendations`. UI: panel `#recommendations` on the image page
+  (`/ui/evidence/{id}/recommendations[?all=1]`, POST `.../run|baseline|dismiss|restore`), page
+  `/guide`. HTMX events: `runs-changed` (panel queued runs -> runs list reloads),
+  `recommendations-changed` (runs queued from the query form -> panel reloads).
+- Audit: `recommendation.dismiss|restore`, `evidence.run_baseline`, plus the usual `run.create`.
+- System page check `guide`.
 
 ### Run recovery, limits and health
 - `RunStatus.INTERRUPTED`: the app stopped during the run (startup recovery or graceful
@@ -178,7 +198,39 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
   `artifact_zip_password` when dumped files are included), `record_export(...)` (audit
   `case.export`, KEY_READ, includes the report SHA-256).
 - `app/api/export.py`: `GET /api/export?evidence_id=&format=md|zip&include_dumped=` ; UI `/ui/export`.
-- `evidence_id=None` exports the whole investigation (all evidence + global notes).
+- `evidence_id=None` exports the whole investigation (all evidence + every case section);
+  `case_id=` exports one case (`build_report/build_bundle(..., case_id=)`). Per-image reports add
+  a labelled "Leads from linked evidence" section when the image is in a case.
+
+### Cases and sharing
+- Models `Case`, `CaseEvidence` (case_id, evidence_id, label; many-to-many), `SharedItem`
+  (case_id, kind row|finding|note|ai_answer, source_evidence_id, source_key "R12:3"/"F12:hook/
+  title"/"N7"/"A9", comment, source_sha256 at share time). `Note.case_id` (a note has exactly one
+  of evidence_id / case_id), `NoteVersion.case_id`. Migration `0009_cases` moves global notes
+  into a "General" case.
+- `app/services/cases.py`: create/update/delete (empty only)/list, add_evidence, set_label,
+  remove_evidence (un-shares its items), cases_for_evidence, member_evidence, labels.
+- `app/services/sharing.py`: `share(session, case_id, kind, ...)`, `unshare`, `list_items`,
+  `resolve(item) -> Resolved` (latest state: ok | changed | gone), `resolved_for_case`,
+  `shared_keys`. Shared items are never part of AI context, hooks or another image's data.
+- API `/api/cases` (CRUD, `/{id}/evidence`, `/{id}/shared`); notes API takes `case_id`.
+- Indicators (migration `0010_indicators`): `Indicator` (case_id, type process|path|ip|domain|
+  hash|registry|text, value, normalized, match_mode exact|contains, column, comment, source_key,
+  checked_at) and `IndicatorHit` (indicator_id, run_id, evidence_id, row_idx, column, cell).
+  `app/services/indicators.py`: `normalize`, `validate`, `guess_type`, `Matcher` (add new match
+  modes/types here), `add_indicator`, `remove_indicator`, `match_run` (worker, after rows are
+  stored), `check_case` / `start_case_check` (on demand, background), `hits`, `hit_counts`,
+  `row_hits`. API `/api/cases/{id}/indicators` (GET/POST, DELETE `/{ind}`, POST `/check`,
+  GET `/hits`). Hits are removed with their run's data, indicator or case membership; they never
+  enter AI context or hooks.
+- Comparison: `PluginSpec.compare_keys` / `compare_ignore` (catalog). `app/services/compare.py`:
+  `default_settings`, `compare(session, run_a, run_b, keys=None, ignore=None) -> Comparison`
+  (only_a, only_b, changed [(a, b, columns)], same, warnings), `to_csv`, `save` /
+  `list_saved` / `delete_saved` / `recompute` (`SavedComparison`, migration `0011_comparisons`).
+  UI `/cases/{id}/compare` (+ `.csv`); API `POST /api/cases/{id}/compare`,
+  `/api/cases/{id}/comparisons` (GET/POST/DELETE). Both images must be in the case.
+- UI: `/cases/{id}`; image and run pages take `?case=<id>` (active case; HTMX fragments read it
+  from HX-Current-URL via `pages.request_case_id`); `/ui/share`, `/ui/shared/{id}/remove`.
 
 ### Post-run hooks
 - `app/tools/hooks.py` (engine, frozen interface): `@post_run(*plugins, tool, name, version)`,
@@ -195,10 +247,82 @@ HTML anchor for a row: `id="row-{run_id}-{row_idx}"`; link: `/runs/{run_id}?row=
 - `app/ai/context.py`: `build_context(session, evidence_id, run_ids=None, row_refs=None) -> tuple[str, dict]`
 - `app/ai/prompts.py`: system prompt templates — **TODO(forensics)** refine
 - `app/ai/citations.py`: `extract_citations(text) -> list[str]`, `validate_citations(session, text) -> list[dict]`
+  - Each citation dict (stored in `AIMessage.citations`): `key`, `run_id`, `row_idx`, `url`,
+    `valid` (row exists), `support` (`supported` | `unsupported` | `unchecked` | `not_found`),
+    `checked` and `unsupported_values` (typed values from the same sentence, see
+    `extract_values`). Answers stored before this field have no `support`:
+    `citation_status(c)` returns `not_checked` for them. Audit `ai.*.response` details include
+    `unsupported_citations`; evals metric `citation_support`.
 - `app/ai/suggestions.py`: `parse_suggestions(text) -> list[dict]`, `validate_suggestions(list) -> list[dict]`
 - `app/ai/service.py`: `ask(session, evidence_id, question, run_ids=None, row_refs=None) -> AIMessage`,
-  `summarize_run(session, run_id) -> AIMessage`
-- `app/api/ai.py`: `/api/ai/...`
+  `summarize_run(session, run_id) -> AIMessage`,
+  `recommend_next(session, evidence_id, focus="") -> AIMessage` ("what should I run next?";
+  context `build_state_context`: runs, hook tags/findings, the guide's static and dismissed
+  recommendations, up to 30 flagged rows; `context_refs["kind"] == "recommend"`; audit
+  `ai.recommend.request|response`), `latest_recommendation(session, evidence_id)`.
+- `Run.ai_message_id` (migration `0013_run_ai_message`): the AI answer whose suggestion started the
+  run; only with origin `ai`, same evidence, assistant message (`runs.create_run(...,
+  ai_message_id=)`, UI form field `ai_message_id`, API `RunCreate.ai_message_id`).
+- `app/api/ai.py`: `/api/ai/...` (incl. `POST /api/ai/recommend {evidence_id, focus}`,
+  `POST /api/ai/tasks {evidence_id, goal, max_steps?, max_seconds?}`, `GET /api/ai/tasks?evidence_id=`,
+  `GET /api/ai/tasks/{id}`, `POST /api/ai/tasks/{id}/cancel`)
+- `AIClient.chat(messages, tools=None)`: `AIResult.tool_calls` ([`ToolCall(id, name, arguments,
+  raw_arguments)`]), `AIResult.reasoning` (`<think>` / `reasoning_content`, stripped from
+  `content`), `AIError.status_code`.
+
+### AI agent (goal tasks)
+- `app/ai/agent.py`: `start_task(session, evidence_id, goal, max_steps=None, max_seconds=None,
+  max_runs=None, approve_all=False) -> AITask` (background daemon thread,
+  `FT_AGENT_MAX_CONCURRENT` at once; the slot is released while waiting), `run_task(task_id,
+  client=None, slot=None)`, `cancel_task` (also cancels the task's queued/running runs and
+  expires pending requests), `recover_tasks` (startup: active -> interrupted), `decide(session,
+  request_id, "approve"|"edit"|"deny", args=None, note="")`, `approve_all_remaining`,
+  `expire_requests`, `estimate_run_seconds(session, run) -> (seconds | None, samples)`,
+  `run_requests_view`, `view(task, session=None) -> TaskView` (elapsed, paused, at-most-left,
+  runs, `pending`, `polling`, `as_dict()`), `get_task`, `list_tasks`, `describe_call`,
+  `QUEUE_RUN` tool spec. Protocol `FT_AI_TOOL_MODE` auto|native|text.
+- Statuses: queued, running, awaiting_approval (clock paused), waiting_for_runs, done, failed,
+  cancelled, interrupted. Limits `{"max_steps", "max_seconds", "max_runs"}`
+  (`FT_AGENT_MAX_RUNS`=5; 0 = no queue_run tool).
+- `queue_run` -> `AIRunRequest` (status pending | approved | edited | auto | denied | expired |
+  failed; `final_args`, `note`, `decided_by`, `run_id`). Redundant runs (same plugin +
+  normalised args queued/running/succeeded on the image) and over-limit requests are refused
+  (not stored). Runs: `RunOrigin.AI_AGENT` ("agent", reserved: `POST /api/runs` refuses it) +
+  `Run.ai_task_id` (`runs.create_run(..., ai_task_id=)`).
+- `app/ai/agent_tools.py`: read-only `TOOLS` (`list_runs`, `search_rows`, `get_rows`,
+  `get_findings`), `run_tool`, `describe_tools_for_text_protocol(extra)`.
+- Models `AITask` / `AITaskStep` (0014), `AIRunRequest` + `AITask.approve_all` /
+  `paused_seconds` + `Run.ai_task_id` + `AIMessage.reasoning` (0015).
+- Audit: `ai.agent.start|tool (key_read)|approval|approve_all|answer|cancel|finish|interrupted`,
+  plus `run.create` with `ai_task_id`.
+- UI: chat form `mode=goal` (+ `max_steps`, `max_minutes`, `max_runs`, `approve_all`); card
+  `/ui/ai/tasks/{id}` (polls every 2 s while active, not while showing approval forms),
+  `POST /ui/ai/tasks/{id}/cancel`, `POST /ui/ai/tasks/{id}/approve-all`,
+  `POST /ui/ai/run-requests/{id}/decide` (`action`, `note`, `arg_<name>` for edit). API:
+  `POST /api/ai/tasks/{id}/approve-all`, `POST /api/ai/run-requests/{id} {action, args, note}`.
+- `AIMessage.reasoning`: the model's `<think>` / reasoning text, saved for every AI answer,
+  shown under Provenance and in the case export.
+- `AIMessage.finish_reason` (migration `0017_ai_message_finish_reason`) / `AIResult.finish_reason`;
+  `.truncated` = "length" (cut off by `FT_AI_MAX_TOKENS`): warning on the answer, in the export,
+  as an agent step, and in `python -m app.ai.probe` reports.
+- Restart: `AITask.state` checkpoint (messages, counters, the step in progress with its run
+  requests) saved at each step; `recover_tasks(session, resume=True)` at startup re-queues
+  active tasks and relaunches them (`resumed_count`, audit `ai.agent.resumed`);
+  `create_app(start_worker=False)` uses `resume=False` (interrupted, requests expire).
+- `app/ai/probe.py`: `python -m app.ai.probe` (provider check: plain answer, native tool call +
+  round trip, text protocol, reasoning; JSON report, API key never printed), `python -m
+  app.ai.probe task <id> [--with-reasoning]` (task summary).
+
+### App settings
+- `app/services/app_settings.py`: `EDITABLE` (`agent_max_steps`, `agent_max_seconds` (UI in
+  minutes), `agent_max_runs`, `agent_max_concurrent`, `ai_tool_mode`), `get_value(key,
+  session=None)` (database override else `get_settings()`), `list_settings`, `update(session,
+  {key: ui_value})` (validates all first; audit `settings.update`), `reset` (audit
+  `settings.reset`). Table `app_settings` (migration `0016_app_settings_task_state`).
+- UI `/settings` (+ `POST /settings`, `POST /settings/{key}/reset`); API
+  `GET/PUT /api/system/settings`, `DELETE /api/system/settings/{key}`.
+- Evals: `goal:` cases (`agent`, `available_runs`; expectations `queue_plugins`,
+  `forbid_plugins`, `max_queued`; metrics `expected_run_recall`, `runs_queued`, `agent_steps`).
 
 ### Web UI (temporary)
 - `app/web/pages.py`: `router` (HTML pages, HTMX fragments), templates in `app/web/templates`,

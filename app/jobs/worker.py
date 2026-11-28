@@ -67,6 +67,20 @@ def execute(
     )
 
 
+def match_indicators(
+    session: Session, run_id: int, on_progress: Callable[[], None] | None = None
+) -> None:
+    """Check a new run against the indicator watchlists of its image's cases. Never fails the
+    run: errors are logged."""
+    from app.services import indicators
+
+    try:
+        indicators.match_run(session, run_id, on_progress=on_progress)
+    except Exception:
+        session.rollback()
+        logger.exception("indicator matching failed for run %s", run_id)
+
+
 def run_post_hooks(
     session: Session, run_id: int, on_progress: Callable[[], None] | None = None
 ) -> None:
@@ -695,6 +709,7 @@ class Worker:
             return
         logger.info("run %s: succeeded with %d rows", run_id, count)
         self.touch(run_id)
+        match_indicators(s, run_id, on_progress=lambda: self.touch(run_id))
         run_post_hooks(s, run_id, on_progress=lambda: self.touch(run_id))
         s.execute(
             update(Run).where(Run.id == run_id, Run.phase == "post-processing").values(phase=None)

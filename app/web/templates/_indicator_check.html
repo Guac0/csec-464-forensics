@@ -1,0 +1,7 @@
+<div id="indicator-check"{% if job.running %} hx-get="/ui/cases/{{ case_id }}/indicators/check-status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if job.busy %}<p class="flash warn small-text">A check of this case is already running.</p>{% endif %}
+  {% if job.running %}<p class="small-text"><span class="spinner">Checking runs…</span> {{ job.done or 0 }} / {{ job.total or "?" }}</p>
+  {% elif job.error %}<p class="flash error small-text">Check failed: {{ job.error }}</p>
+  {% elif job.hits is defined %}<p class="flash small-text">Checked {{ job.total }} run(s): {{ job.hits }} hit(s). <a href="">Reload</a> to see them.</p>
+  {% endif %}
+</div>

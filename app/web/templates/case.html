@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Case {{ case.name }}{% endblock %}
+{% block crumbs %}<a href="/">Evidence</a> / Case <strong>{{ case.name }}</strong>{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Case: {{ case.name }}</h2>
+    <div class="actions">
+      <button type="button" class="small secondary" onclick="document.getElementById('case-export-dialog').showModal()">Export case…</button>
+    </div>
+  </div>
+  {% set export_case = case %}{% include "_case_export_dialog.html" %}
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+  {% if case.description %}<p class="prewrap">{{ case.description }}</p>{% endif %}
+  <p class="muted small-text">Images in a case stay separate: each keeps its own runs, notes and AI history. Only what an analyst shares (below) is visible across them, always labelled with the image it came from.</p>
+  <details>
+    <summary class="small-text">Edit name / description, delete</summary>
+    <form method="post" action="/ui/cases/{{ case.id }}/edit" class="stack">
+      <label>Name <input name="name" value="{{ case.name }}" required></label>
+      <label>Description <textarea name="description" rows="2">{{ case.description }}</textarea></label>
+      <button type="submit" class="small">Save</button>
+    </form>
+    <form method="post" action="/ui/cases/{{ case.id }}/delete" class="inline">
+      <button type="submit" class="small danger" title="Only an empty case (no images, notes or shared items) can be deleted">Delete case</button>
+    </form>
+  </details>
+</section>
+
+<div class="columns">
+  <div class="col-main">
+    <section class="panel" id="images">
+      <h2>Images</h2>
+      {% if members %}
+      <table class="data">
+        <thead><tr><th>Image</th><th>Label in this case</th><th>Integrity</th><th></th></tr></thead>
+        <tbody>
+        {% for ev, label in members %}
+          <tr>
+            <td><a class="mono" href="/evidence/{{ ev.id }}?case={{ case.id }}">{{ ev.rel_path }}</a></td>
+            <td>
+              <form method="post" action="/ui/cases/{{ case.id }}/members/{{ ev.id }}/label" class="inline">
+                <input name="label" value="{{ label }}" placeholder="e.g. before, after, laptop-2" size="18">
+                <button type="submit" class="small secondary">Save</button>
+              </form>
+            </td>
+            <td>{% include "_integrity_badge.html" %}</td>
+            <td>
+              <form method="post" action="/ui/cases/{{ case.id }}/members/{{ ev.id }}/remove" class="inline"
+                    onsubmit="return confirm('Remove this image from the case? Items it shared in this case are un-shared. Its own data is not touched.')">
+                <button type="submit" class="small danger">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No images in this case yet.</p>
+      {% endif %}
+      {% if other_evidence %}
+      <form method="post" action="/ui/cases/{{ case.id }}/members" class="inline add-member">
+        <select name="evidence_id" required>
+          <option value="">— add an image —</option>
+          {% for ev in other_evidence %}<option value="{{ ev.id }}">{{ ev.rel_path }}</option>{% endfor %}
+        </select>
+        <input name="label" placeholder="label (optional)" size="16">
+        <button type="submit" class="small">Add to case</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="panel" id="comparisons">
+      <div class="panel-head">
+        <h2>Comparisons</h2>
+        {% if members | length >= 2 %}
+        <form method="get" action="/cases/{{ case.id }}/compare" class="inline add-member">
+          <select name="a">{% for ev, label in members %}<option value="{{ ev.id }}">{{ label or ev.rel_path }}</option>{% endfor %}</select>
+          <span>vs</span>
+          <select name="b">{% for ev, label in members %}<option value="{{ ev.id }}"{% if loop.index == 2 %} selected{% endif %}>{{ label or ev.rel_path }}</option>{% endfor %}</select>
+          <button type="submit" class="small">Compare…</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if comparisons %}
+      <table class="data small-text">
+        <thead><tr><th>Saved comparison</th><th>When saved</th><th></th></tr></thead>
+        <tbody>
+        {% for s, url in comparisons %}
+          <tr><td><a href="{{ url }}">{{ s.title }}</a>{% if s.comment %}<div class="muted">{{ s.comment }}</div>{% endif %}</td>
+            <td>only A {{ s.counts.only_a }} · only B {{ s.counts.only_b }} · changed {{ s.counts.changed }} · same {{ s.counts.same }}<div class="muted">{{ s.created_at | dt }}</div></td>
+            <td><form method="post" action="/ui/comparisons/{{ s.id }}/delete" class="inline"><button type="submit" class="small danger">Delete</button></form></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% elif members | length < 2 %}
+      <p class="muted">Add at least two images to compare them.</p>
+      {% else %}
+      <p class="muted">Compare the same plugin's results on two images (e.g. before vs after). Saved comparisons appear here and in the case report.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel" id="indicators">
+      <div class="panel-head">
+        <h2>Indicators ({{ indicators | length }})</h2>
+        <form method="post" action="/ui/cases/{{ case.id }}/indicators/check" class="inline"
+              hx-post="/ui/cases/{{ case.id }}/indicators/check" hx-target="#indicator-check" hx-swap="outerHTML">
+          <button type="submit" class="small" title="Re-check every run of every image in this case (can take a while on big runs)">Check all images</button>
+        </form>
+      </div>
+      <p class="muted small-text">The case's watchlist. Each image's own results are searched for these values; a hit always points to a row of that image. New runs are checked automatically; press "Check all images" after adding indicators or images.</p>
+      {% set job = check_job %}{% set case_id = case.id %}{% include "_indicator_check.html" %}
+      {% if unchecked and indicators %}<p class="flash warn small-text">{{ unchecked }} indicator(s) not yet checked against existing runs (added after those runs, or images were added since). Press "Check all images".</p>{% endif %}
+      {% if indicators %}
+      <table class="data small-text">
+        <thead><tr><th>Type</th><th>Indicator</th><th>Hits</th><th></th></tr></thead>
+        <tbody>
+        {% for ind in indicators %}
+          {% set counts = hit_counts.get(ind.id, {}) %}
+          <tr>
+            <td>{{ ind.type.value }}</td>
+            <td><span class="mono">{{ ind.value }}</span>
+              {% if ind.match_mode.value == "contains" %} <span class="badge">contains</span>{% endif %}
+              {% if ind.column %} <span class="badge" title="only in this column">{{ ind.column }}</span>{% endif %}
+              {% if ind.comment %}<div class="muted">{{ ind.comment }}</div>{% endif %}
+              {% if ind.source_key %}<div class="muted">from {{ ind.source_key }}</div>{% endif %}</td>
+            <td>{% for ev, label in members %}{% set n = counts.get(ev.id, 0) %}
+              <a class="badge {{ 'sev-high' if n else '' }}" href="/evidence/{{ ev.id }}?case={{ case.id }}#indicator-hits" title="{{ ev.rel_path }}">{{ label or ev.rel_path }}: {{ n }}</a>
+              {% endfor %}
+              {% if not ind.checked_at %}<div class="muted">existing runs not checked yet</div>{% endif %}</td>
+            <td><form method="post" action="/ui/indicators/{{ ind.id }}/remove" class="inline"><button type="submit" class="small danger">Remove</button></form></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <details{% if not indicators %} open{% endif %}>
+        <summary class="small-text">Add an indicator</summary>
+        <form method="post" action="/ui/indicators" class="add-member">
+          <input type="hidden" name="case_id" value="{{ case.id }}">
+          <select name="type">{% for t in indicator_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select>
+          <input name="value" required placeholder="e.g. updater.exe, 203.0.113.45, C:\Users\Public\x.dll" size="34">
+          <select name="match_mode"><option value="exact">exact</option><option value="contains">contains</option></select>
+          <input name="column" placeholder="only in column (optional)" size="18">
+          <input type="hidden" name="only_column" value="1">
+          <input name="comment" placeholder="comment (optional)" size="18">
+          <button type="submit" class="small">Add</button>
+        </form>
+      </details>
+    </section>
+
+    <section class="panel" id="shared">
+      <h2>Shared in this case ({{ shared | length }})</h2>
+      {% set items = shared %}{% set unshare_next = "/cases/" ~ case.id ~ "#shared" %}
+      {% set empty_text = "Nothing shared yet. Open an image in this case and use Share on a row, hook finding, note or AI answer." %}
+      {% include "_shared_list.html" %}
+    </section>
+  </div>
+  <div class="col-side">
+    <section class="panel" id="notes-section">
+      <h2>Case notes</h2>
+      {% include "_notes.html" %}
+    </section>
+  </div>
+</div>
+{% endblock %}

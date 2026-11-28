@@ -12,7 +12,7 @@ project wraps it in a local web app so an analyst can:
 
 - pick a RAM image and run volatility plugins from a guided form instead of the CLI,
 - browse, filter and keep every result, with the exact command, tool version and hashes recorded,
-- keep investigation notes next to the evidence,
+- keep notes next to the evidence, and group related images into cases,
 - ask an AI assistant questions about the results, where every claim cites the specific result
   rows it relies on and the full prompt/model/parameters are recorded,
 - run the follow-up queries the AI suggests with one click, after they pass the same argument
@@ -123,6 +123,23 @@ separated by spaces or commas.
 - **Status:** TODO
 - _TODO: describe the hardcoded suggested queries and when to use them._
 
+### Recommended next (investigation guide)
+- **Status:** infrastructure done, guide content EXAMPLE (forensics team)
+- The image page's "Recommended next" panel suggests what to run: first the remaining
+  **baseline** steps in order (the standard first pass: processes, network, ...), then
+  follow-ups of the image's succeeded runs ("pslist found processes -> run pstree"), some only
+  when a hook flagged rows. Each step has a reason; Run it, Edit its options first, Dismiss it
+  for this image, or "Run remaining baseline". No AI involved.
+- **Ask AI what to run next** (button on the same panel, optional focus such as "suspect
+  credential theft"): the AI sees the investigation state (runs so far, hook findings, flagged
+  rows, the guide's recommendations) and suggests 1-5 plugins with specific options and a short
+  rationale. The answer appears in the AI chat; the panel shows its runnable suggestions. Runs
+  started from any AI suggestion link back to the answer ("suggested by AI answer N"), and
+  suggestions show when they already ran.
+- The guide is data in `app/tools/volatility/guide.py`; `/guide` shows it, and
+  `python -m app.tools.volatility.guide` prints it with any problems. How to extend it:
+  [app/tools/volatility/README.md](app/tools/volatility/README.md#investigation-guide).
+
 ### Auto-enumeration
 - **Status:** infrastructure done, plugin set TODO
 - _TODO: list what runs when "Auto-enumerate" is clicked and why._
@@ -156,10 +173,61 @@ separated by spaces or commas.
 - _TODO: list the hooks and what each one flags._
 
 ### AI analysis
-- **Status:** infrastructure done, prompts TODO
+- **Status:** infrastructure done, prompts TODO (forensics team)
 - Ask questions, summarise a run, cited claims with clickable row links, provenance dropdown,
   validated one-click query suggestions.
-- _TODO: describe the analysis approach, what context is sent, and known limitations._
+- **Give the AI a goal** (switch in the AI chat form, e.g. "find processes named xyz"): the AI
+  agent works step by step on this image only. It searches existing results (list runs, search
+  rows with text/column filters, read rows, read hook findings) and can ask to **run plugins**
+  (`queue_run`, at most `FT_AGENT_MAX_RUNS`=5 per task). Each run request waits for your
+  decision in the task card: **Approve**, **Deny** (optional note to the AI), **Edit options
+  first**, or **Approve all remaining**; or tick **Yes to all** when giving the goal (nothing is
+  excluded). The time limit is paused while waiting for you. Approved runs are queued as origin
+  `agent` with an "AI task N" badge on the run list and run page (who approved it); the task
+  waits for them, then reads their results. A run that already exists with the same options is
+  refused and the AI is pointed to it. Cancelling a task also cancels its queued/running runs;
+  pending requests expire when the task ends.
+- The task card shows live status: current action, steps with the rows the AI looked at, step
+  and run counts, elapsed time (and time paused for approval), the most time left, and per run
+  its status and an estimate from earlier runs of the same plugin scaled by image size. Limits
+  per task (steps, time, runs) default to `FT_AGENT_MAX_STEPS` / `FT_AGENT_MAX_SECONDS` /
+  `FT_AGENT_MAX_RUNS`. Tool calls use native function calling or a text protocol for models
+  without it (`FT_AI_TOOL_MODE=auto|native|text`).
+- Reasoning models' `<think>` text is hidden from answers but saved: see "Model reasoning"
+  under Provenance and in the case export.
+- **Restarts:** AI tasks continue after an app restart from their last checkpoint: a task
+  waiting for your approval keeps waiting (its requests stay valid), one waiting for runs waits
+  for them, one interrupted during an AI call redoes that step. The card notes "resumed".
+- **Checking a provider:** `python -m app.ai.probe` (in Docker: `docker compose exec app python
+  -m app.ai.probe`) tests plain answers, native tool calls, the text protocol and reasoning
+  output with tiny evidence-free requests and prints a JSON report; `python -m app.ai.probe task
+  <id>` summarises a finished task (status, timing, steps, run decisions, citation checks).
+- **Approach:** the AI never sees the memory image. It reads data the app already stored
+  (parsed volatility rows, hook findings, notes) and answers as a *lead*, not evidence: every
+  answer is labelled "AI-generated lead — not evidence" and must cite rows as `[R<run>:<row>]`,
+  which become links to the row.
+- **What is sent** (built in `app/ai/context.py`, for one image only, never across images or
+  cases): image metadata (file name, size, SHA-256, integrity status, detected OS), that image's
+  own notes (not case notes), rows the analyst selected, then each run with its hook findings and
+  up to 50 rows (200 for "Summarise run"), capped at about 60,000 characters (`[truncated]`
+  marks a cut; rows are never cut in half). The last 6 successful question/answer turns are
+  included as chat history. The exact messages are stored with each answer (Provenance).
+- **Citation checks:** a citation is checked at answer time in two steps: (1) the row exists;
+  (2) typed values stated in the same sentence (IPs, paths, file names, hex addresses,
+  quoted/backticked text and labelled numbers such as `PID 1234`) appear in the cited row(s),
+  or in their direct parent/child for tree plugins. A cited row that doesn't contain such a
+  value is flagged "cited row doesn't support this" in the answer, the case export and the
+  evals. Answers saved before this check show as "not checked".
+- **Suggestions:** suggested follow-up queries are validated against the plugin allowlist
+  before they get a Run button.
+- **Provider:** any OpenAI-compatible API (`FT_AI_BASE_URL`, `FT_AI_MODEL`, `FT_AI_API_KEY`).
+  Context is sent to that provider: use a local model (e.g. Ollama) when evidence must not
+  leave the machine. Each answer records the model, parameters and `PROMPT_VERSION`.
+- **Known limitations:** the prompts are placeholders until the forensics team writes them;
+  row selection is "first N rows per run" (no per-plugin selection yet), so large runs are only
+  partly seen; the support check matches values, not meaning (it can't tell whether a claim
+  about a row is *true*, bare numbers like counts are not checked, and a value mentioned only
+  for contrast can be flagged); one image per conversation (no multi-image AI by design).
 
 ### AI evaluation (developers)
 - `python -m evals.run` replays fixed questions against recorded tool output and scores the AI's
@@ -167,10 +235,48 @@ separated by spaces or commas.
   optional AI-judge grade), compared with a committed baseline. See
   [evals/README.md](evals/README.md).
 
+### Cases (several images)
+- **Status:** done (cases, sharing, indicators, comparison view)
+- A **case** groups images investigated together, e.g. before/after snapshots of one machine,
+  or several machines hit by the same actor. Create one on the home page and add images with an
+  optional label ("before", "after", "laptop-2"). An image can be in several cases; cases are
+  optional and images outside any case work as before.
+- Images in a case stay **separate**: each keeps its own runs, rows, notes, hooks and AI
+  history. Open an image *from its case* (case chips on the home page, or the case page) to work
+  in that case: the breadcrumb shows the case, and a **Shared in case** panel lists what the
+  other images shared.
+- **Share** (on a result row, hook finding, image note or AI answer) points the other images of
+  the active case to that item, with an optional comment. Shared items are pointers, shown as
+  their source is *now* ("changed since shared" / "source gone" when it was edited or deleted),
+  always naming the image they came from. AI answers are shared as labelled AI leads. Nothing
+  shared is ever added to another image's runs, notes, hook input or AI context. Click
+  "shared ✕" to un-share; removing an image from a case un-shares what it shared there.
+- **Indicators:** each case has a watchlist (process names, file paths, IPs, domains, hashes,
+  registry keys, other text). Add them on the case page or with **+IOC** on any result row (the
+  type is guessed). Every image's own rows are searched; a hit always points to a row of that
+  image, listed on the case page (hits per image), on the image page and as an **IOC** mark on
+  the row. Matching is **exact** by default (case-insensitive, `\` and `/` alike for paths,
+  canonical IPs; a process name also matches a path ending in it); **contains** and "only in
+  column X" are per-indicator options. New runs are checked automatically as they finish;
+  **Check all images** re-checks existing runs (on demand: it reads every row of every run).
+- **Compare** two images of a case (case page → Compare…): pick a plugin with finished runs on
+  both, and the rows are paired by the columns that identify "the same thing" (the catalog's
+  `compare_keys`, e.g. process name; otherwise every non-volatile column). Results: **only in
+  A**, **only in B**, **changed** (with the columns that differ, A → B) and a count of identical
+  rows. PIDs, offsets, times and thread/handle counts are ignored by default; tick other columns
+  to change that. Download everything as CSV, or **Save to case** to list it on the case page
+  and in the case report (re-opened with current data).
+- Each case has its own **case notes** (they replace the old investigation-wide notes; existing
+  ones were moved into a "General" case containing every image).
+- Exports: **Export case…** gives a case report (images and labels, case notes, everything
+  shared, then each image's section). A single image's report gets a separate, labelled
+  "Leads from linked evidence" section listing what other images in its cases shared.
+
 ### Notes and export
 - **Status:** done
-- Every note edit is kept; "history" on a note shows all versions, even after deletion.
-- **Export…** on an evidence page (or **Export investigation…** on the home page) downloads a case
+- Notes belong to one image or one case. Every note edit is kept; "history" on a note shows all
+  versions, even after deletion.
+- **Export…** on an evidence page (or **Export investigation…** on the home page) downloads a
   report: a Markdown file with hashes and integrity history, notes, every run with its exact
   command and findings, AI answers (labelled as leads, with model/prompt provenance) and the
   activity log. The ZIP option adds each run's rows as CSV, the raw tool output and a
@@ -241,6 +347,10 @@ separated by spaces or commas.
   `vol -h` and checks every catalog plugin exists in the installed version; **Test AI** sends one
   tiny request to the provider. Start here when something does not work on a new machine.
   JSON: `GET /api/system/health` (`/health` stays a simple liveness check).
+- **Settings** in the top bar: AI agent defaults (max steps, time limit, max plugin runs, tasks
+  at once) and the AI tool-calling protocol can be changed in the app. A saved value overrides
+  the `FT_*` environment value until **Reset**; every change is in the activity log. JSON:
+  `GET/PUT /api/system/settings`, `DELETE /api/system/settings/{key}`.
 
 ## Limitations
 

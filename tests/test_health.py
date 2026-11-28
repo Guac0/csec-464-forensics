@@ -29,7 +29,7 @@ def test_quick_checks_on_a_fresh_install(session: Session, settings: Settings) -
     checks = _by_key(health.quick_checks(session))
     assert set(checks) == {
         "disk", "folders", "symbols", "worker", "database", "audit", "hooks", "ai_config",
-        "catalog", "backups",
+        "catalog", "guide", "backups",
     }  # fmt: skip
     assert checks["catalog"].status == "ok"
     assert checks["backups"].status == "warn" and "No backup yet" in checks["backups"].summary

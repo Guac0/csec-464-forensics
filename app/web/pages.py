@@ -7,6 +7,7 @@ HTML fragment for HTMX requests (``HX-Request: true``) and a 303 redirect back o
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shlex
 from datetime import UTC, datetime
@@ -41,6 +42,8 @@ from app.tools.base import ArgValidationError, PluginSpec, ToolRequest
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(include_in_schema=False)
 
 PAGE_SIZE = 100
@@ -49,7 +52,15 @@ STDERR_TAIL_BYTES = 4096
 ACTIVE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING)
 SEVERITIES = hooks_mod.SEVERITIES
 ANY_TAG = "*"  # tag filter value meaning "any annotated row"
-UI_ORIGINS = {"manual": RunOrigin.MANUAL, "preset": RunOrigin.PRESET, "ai": RunOrigin.AI_SUGGESTED}
+UI_ORIGINS = {
+    "manual": RunOrigin.MANUAL,
+    "preset": RunOrigin.PRESET,
+    "ai": RunOrigin.AI_SUGGESTED,
+    "recommended": RunOrigin.RECOMMENDED,
+}
+# HTMX events: the runs list and the recommendations panel refresh each other.
+RUNS_CHANGED = "runs-changed"  # recommendations panel queued runs -> runs list reloads
+RECOMMENDATIONS_CHANGED = "recommendations-changed"  # runs queued elsewhere -> panel reloads
 
 
 # --------------------------------------------------------------------------- template helpers
@@ -122,10 +133,12 @@ def render_ai_content(content: str | None, citations: list[dict[str, Any]] | Non
 
     Never renders markdown/HTML: evidence strings quoted by the model may contain markup.
     """
-    invalid = {
-        str(c.get("key"))
-        for c in (citations or [])
-        if isinstance(c, dict) and c.get("valid") is False
+    cits = [c for c in (citations or []) if isinstance(c, dict)]
+    invalid = {str(c.get("key")) for c in cits if c.get("valid") is False}
+    unsupported = {
+        str(c.get("key")): ", ".join(str(v) for v in c.get("unsupported_values") or [])
+        for c in cits
+        if c.get("valid") and c.get("support") == "unsupported"
     }
     escaped = str(escape(content or ""))
     deleted = _deleted_run_ids({int(m.group(1)) for m in _CITE_KEY_RE.finditer(escaped)})
@@ -141,6 +154,10 @@ def render_ai_content(content: str | None, citations: list[dict[str, Any]] | Non
                 f'title="run {run_id} was deleted; this row no longer exists">{key}</a>'
             )
         href = f"/runs/{run_id}?row={row_idx}#row-{run_id}-{row_idx}"
+        if key in unsupported:
+            # Values come from the model's text: escape them for the attribute.
+            title = escape(f"cited row doesn't support this: {unsupported[key]} not found in row")
+            return f'<a class="cite cite-unsupported" href="{href}" title="{title}">{key}</a>'
         return f'<a class="cite" href="{href}">{key}</a>'
 
     def _bracket(m: re.Match[str]) -> str:
@@ -180,6 +197,8 @@ templates.env.filters.update(
     max_severity=max_severity,
     integrity_status=lambda ev: integrity_svc.status(ev),
     integrity_problem=lambda ev: integrity_svc.describe_problem(ev),
+    secs=lambda v: fmt_secs(v),
+    row_url=lambda k: row_url(k),
 )
 
 
@@ -213,7 +232,22 @@ SessionDep = Annotated[Session, Depends(get_session)]
 FormDep = Annotated[dict[str, str], Depends(form_data)]
 
 
+def request_case_id(request: Request) -> int | None:
+    """The active case: ``?case=<id>`` on the page, or (for HTMX fragment requests) on the page
+    that made the request (HX-Current-URL). Membership is checked where it matters."""
+    from urllib.parse import parse_qs, urlparse
+
+    raw = request.query_params.get("case")
+    if not raw and request.headers.get("HX-Current-URL"):
+        raw = (parse_qs(urlparse(request.headers["HX-Current-URL"]).query).get("case") or [""])[0]
+    return int(raw) if raw and raw.isdigit() else None
+
+
 def render(request: Request, name: str, status_code: int = 200, **context: Any) -> HTMLResponse:
+    # Case context travels in the URL (?case=<id>) so links keep it.
+    case_id = context.setdefault("active_case_id", request_case_id(request))
+    context.setdefault("case_q", f"?case={case_id}" if case_id else "")
+    context.setdefault("case_amp", f"case={case_id}&" if case_id else "")
     return templates.TemplateResponse(request, name, context, status_code=status_code)
 
 
@@ -266,14 +300,36 @@ def parse_plugin_args(spec: PluginSpec, form: dict[str, str]) -> dict[str, Any]:
     return args
 
 
+def form_values(spec: PluginSpec | None, args: dict[str, Any]) -> dict[str, Any]:
+    """Inverse of parse_plugin_args: typed args -> values for the run form (Edit before run)."""
+    values: dict[str, Any] = {}
+    for a in spec.args if spec else ():
+        if a.name not in args:
+            continue
+        value = args[a.name]
+        if a.type == "int_list" and isinstance(value, list):
+            values[a.name] = ", ".join(str(v) for v in value)
+        elif a.type == "bool":
+            values[a.name] = bool(value)
+        else:
+            values[a.name] = str(value)
+    return values
+
+
 def list_runs(session: Session, evidence_id: int) -> list[Run]:
     stmt = select(Run).where(Run.evidence_id == evidence_id).order_by(Run.id.desc())
     return list(session.scalars(stmt))
 
 
-def list_scoped_notes(session: Session, evidence_id: int | None) -> list[Note]:
+def list_scoped_notes(
+    session: Session, evidence_id: int | None, case_id: int | None = None
+) -> list[Note]:
+    """Notes of one image, or of one case."""
+    if case_id is not None:
+        return [n for n in notes_svc.list_notes(session, case_id=case_id) if n.case_id == case_id]
+    if evidence_id is None:
+        return []
     notes = notes_svc.list_notes(session, evidence_id=evidence_id)
-    # Robust to list_notes(None) meaning either "global only" or "all notes".
     return [n for n in notes if n.evidence_id == evidence_id]
 
 
@@ -283,6 +339,60 @@ def ai_history(session: Session, evidence_id: int) -> list[AIMessage]:
         return list(getter(session, evidence_id))
     stmt = select(AIMessage).where(AIMessage.evidence_id == evidence_id).order_by(AIMessage.id)
     return list(session.scalars(stmt))
+
+
+def _agent_defaults(session: Session) -> dict[str, Any]:
+    from app.services.app_settings import get_value
+
+    return {
+        "max_steps": get_value("agent_max_steps", session),
+        "max_minutes": round(get_value("agent_max_seconds", session) / 60, 1),
+        "max_runs": get_value("agent_max_runs", session),
+    }
+
+
+def ai_panel_context(session: Session, evidence_id: int) -> dict[str, Any]:
+    """Chat history plus AI agent tasks: a task's card replaces its goal message, and its
+    answer is shown inside the card (not again in the history)."""
+    from app.ai import agent
+
+    messages = ai_history(session, evidence_id)
+    try:
+        tasks = agent.list_tasks(session, evidence_id)
+    except Exception:  # e.g. a stubbed service in tests
+        tasks = []
+    by_id = {m.id: m for m in messages}
+    return {
+        "messages": messages,
+        "task_by_msg": {
+            t.user_message_id: agent.view(t, session) for t in tasks if t.user_message_id
+        },
+        "task_answers": {
+            t.answer_message_id: by_id.get(t.answer_message_id)
+            for t in tasks
+            if t.answer_message_id
+        },
+    }
+
+
+def fmt_secs(value: Any) -> str:
+    """Seconds -> '1:05' (or '1:02:03')."""
+    try:
+        total = max(0, int(value))
+    except (TypeError, ValueError):
+        return "—"
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def row_url(key: str) -> str:
+    """'R12:3' -> the row's link (see CONTRACTS.md)."""
+    m = _CITE_KEY_RE.fullmatch(key or "")
+    if not m:
+        return "#"
+    run_id, row_idx = m.group(1), m.group(2)
+    return f"/runs/{run_id}?row={row_idx}#row-{run_id}-{row_idx}"
 
 
 def stderr_tail(run: Run) -> str | None:
@@ -306,7 +416,14 @@ def evidence_list_response(request: Request, session: Session, **extra: Any) -> 
     counts = dict(
         session.execute(select(Run.evidence_id, func.count(Run.id)).group_by(Run.evidence_id)).all()
     )
-    return render(request, "_evidence_list.html", evidence=evidence, run_counts=counts, **extra)
+    return render(
+        request,
+        "_evidence_list.html",
+        evidence=evidence,
+        run_counts=counts,
+        evidence_cases=_evidence_cases(session),
+        **extra,
+    )
 
 
 def runs_response(
@@ -323,9 +440,13 @@ def runs_response(
     )
 
 
-def notes_response(request: Request, session: Session, evidence_id: int | None) -> HTMLResponse:
-    notes = list_scoped_notes(session, evidence_id)
-    return render(request, "_notes.html", notes=notes, evidence_id=evidence_id)
+def notes_response(
+    request: Request, session: Session, evidence_id: int | None, case_id: int | None = None
+) -> HTMLResponse:
+    notes = list_scoped_notes(session, evidence_id, case_id)
+    return render(
+        request, "_notes.html", notes=notes, evidence_id=evidence_id, note_case_id=case_id
+    )
 
 
 def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) -> dict[str, Any]:
@@ -338,7 +459,7 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "notes": list_scoped_notes(session, ev.id),
         "runs": runs,
         "polling": any(r.status in ACTIVE_STATUSES for r in runs),
-        "messages": ai_history(session, ev.id),
+        **ai_panel_context(session, ev.id),
         "runs_panel": True,
         "values": {},
         "integrity_status": integrity_svc.status(ev),
@@ -346,9 +467,51 @@ def evidence_context(session: Session, ev: Evidence, plugin: str | None = None) 
         "integrity_checks": integrity_svc.list_checks(session, ev.id)[:20],
         "integrity_mode": get_settings().integrity_mode,
         "verify_on_run": get_settings().verify_on_run,
+        "agent_defaults": _agent_defaults(session),
         "hashing": evidence_svc.is_hashing(ev.id),
         "cleanup": _cleanup_summary(session, ev.id),
+        **recommendations_context(session, ev.id),
     }
+
+
+def recommendations_context(
+    session: Session, evidence_id: int, show_all: bool = False
+) -> dict[str, Any]:
+    """The "Recommended next" panel (app/services/recommendations.py). Never breaks the page."""
+    from app.services import recommendations as recs_svc
+
+    try:
+        recs = recs_svc.recommend(session, evidence_id)
+    except Exception:  # a broken guide must not take the image page down
+        logger.exception("recommendations failed for evidence %s", evidence_id)
+        recs = None
+    runs = list_runs(session, evidence_id)
+    return {
+        "recs": recs,
+        "recs_all": show_all,
+        "recs_shown": recs_svc.DEFAULT_SHOWN,
+        "recs_polling": any(r.status in ACTIVE_STATUSES for r in runs),
+        **_ai_recommendation_context(session, evidence_id, runs),
+    }
+
+
+def _ai_recommendation_context(
+    session: Session, evidence_id: int, runs: list[Run]
+) -> dict[str, Any]:
+    """Latest "what should I run next?" AI answer for the panel, and how many runs were
+    queued after it (its advice may be out of date)."""
+    latest = getattr(ai_svc, "latest_recommendation", lambda *_: None)(session, evidence_id)
+    newer = 0
+    if latest is not None and latest.created_at is not None:
+        asked = latest.created_at.replace(tzinfo=None)
+        newer = sum(
+            1
+            for r in runs
+            if r.created_at is not None
+            and r.created_at.replace(tzinfo=None) > asked
+            and r.ai_message_id != latest.id
+        )
+    return {"ai_rec": latest, "ai_rec_newer_runs": newer}
 
 
 def _cleanup_summary(session: Session, evidence_id: int) -> dict[str, Any]:
@@ -428,10 +591,16 @@ def _row_artifacts(run: Run) -> dict[int, list[Any]]:
 
 
 def page_url(
-    run_id: int, view: results_svc.RowView, fragment: bool = False, **overrides: Any
+    run_id: int,
+    view: results_svc.RowView,
+    fragment: bool = False,
+    case: int | None = None,
+    **overrides: Any,
 ) -> str:
     """URL of the run page (or the rows fragment) for a view, e.g. with another offset/sort."""
     params = view.to_params(**overrides)
+    if case:
+        params = {"case": case, **params}
     if params.get("limit") == PAGE_SIZE:
         params.pop("limit")
     base = f"/ui/runs/{run_id}/rows" if fragment else f"/runs/{run_id}"
@@ -439,6 +608,86 @@ def page_url(
 
 
 templates.env.globals.update(page_url=page_url)
+
+
+def share_ctx(evidence_id: int | None, case_id: int | None) -> dict[str, Any]:
+    """Sharing context for templates: the active case (if the image is in it), the cases a
+    "Share" can go to, and which items of this image are already shared in the active case."""
+    from app.db import SessionLocal
+    from app.services import cases as cases_svc
+    from app.services import sharing
+
+    empty: dict[str, Any] = {"active": None, "label": "", "cases": [], "shared": {}}
+    if not evidence_id:
+        return empty
+    try:
+        with SessionLocal() as s:
+            mine = [
+                (c.id, c.name, label) for c, label in cases_svc.cases_for_evidence(s, evidence_id)
+            ]
+            active = next((m for m in mine if m[0] == case_id), None)
+            return {
+                "active": active,
+                "label": active[2] if active else "",
+                "cases": [active] if active else mine,
+                "shared": sharing.shared_keys(s, active[0], evidence_id) if active else {},
+            }
+    except Exception:
+        return empty
+
+
+templates.env.globals.update(share_ctx=share_ctx)
+
+
+def ioc_rows(case_id: int | None, run_id: int) -> dict[int, list[str]]:
+    """{row_idx: [indicator, ...]} of the ACTIVE case's indicator hits on a run (other cases'
+    watchlists are not shown, to keep investigations apart)."""
+    if not case_id:
+        return {}
+    from app.db import SessionLocal
+    from app.services import indicators
+
+    try:
+        with SessionLocal() as s:
+            return indicators.row_hits(s, case_id, run_id)
+    except Exception:
+        return {}
+
+
+templates.env.globals.update(ioc_rows=ioc_rows)
+
+
+def suggestion_runs(evidence_id: int | None) -> dict[str, dict[str, Any]]:
+    """{step key: {"id", "status"}} of the newest run per plugin + args on an image, so AI
+    suggestions can show "queued / ran (run N)". Keys: recommendations.step_key."""
+    from app.db import SessionLocal
+    from app.services.recommendations import step_key
+
+    if not evidence_id:
+        return {}
+    try:
+        with SessionLocal() as s:
+            runs = s.scalars(
+                select(Run)
+                .where(Run.evidence_id == evidence_id, Run.deleted_at.is_(None))
+                .order_by(Run.id)
+            )
+            return {
+                step_key(r.tool, r.plugin, r.args or {}): {"id": r.id, "status": r.status.value}
+                for r in runs
+            }
+    except Exception:
+        return {}
+
+
+def suggestion_key(s: dict[str, Any]) -> str:
+    from app.services.recommendations import step_key
+
+    args = s.get("normalized_args", s.get("args")) or {}
+    return step_key(s.get("tool") or "volatility3", str(s.get("plugin")), args)
+
+
+templates.env.globals.update(suggestion_runs=suggestion_runs, suggestion_key=suggestion_key)
 templates.env.globals.update(zip_password=lambda: get_settings().artifact_zip_password)
 
 
@@ -451,14 +700,31 @@ def index(request: Request, session: SessionDep) -> HTMLResponse:
     counts = dict(
         session.execute(select(Run.evidence_id, func.count(Run.id)).group_by(Run.evidence_id)).all()
     )
+    from app.services import cases as cases_svc
+
     return render(
         request,
         "index.html",
         evidence=evidence,
         run_counts=counts,
-        notes=list_scoped_notes(session, None),
+        cases=cases_svc.list_cases(session),
+        evidence_cases=_evidence_cases(session),
         evidence_id=None,
     )
+
+
+def _evidence_cases(session: Session) -> dict[int, list[Any]]:
+    """{evidence_id: [(case, label), ...]} for the evidence list's case chips."""
+    from app.models import Case, CaseEvidence
+
+    out: dict[int, list[Any]] = {}
+    for ev_id, case, label in session.execute(
+        select(CaseEvidence.evidence_id, Case, CaseEvidence.label)
+        .join(Case, Case.id == CaseEvidence.case_id)
+        .order_by(Case.name)
+    ):
+        out.setdefault(ev_id, []).append((case, label))
+    return out
 
 
 @router.get("/evidence/{evidence_id}", response_class=HTMLResponse)
@@ -467,9 +733,57 @@ def evidence_page(
     session: SessionDep,
     evidence_id: int,
     plugin: str | None = None,
+    case: int | None = None,
+    args: str | None = None,
 ) -> HTMLResponse:
     ev = get_evidence_or_404(session, evidence_id)
-    return render(request, "evidence.html", **evidence_context(session, ev, plugin))
+    ctx = {**evidence_context(session, ev, plugin), **case_context(session, ev, case)}
+    if args and ctx["selected_plugin"]:  # "Edit" on a recommendation: prefill the run form
+        try:
+            parsed = json.loads(args)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            ctx["values"] = form_values(ctx["selected_plugin"], parsed)
+    return render(request, "evidence.html", **ctx)
+
+
+def case_context(session: Session, ev: Evidence, case_id: int | None) -> dict[str, Any]:
+    """Case panel of an image page: its cases, and (with an active case) what OTHER images
+    shared in it plus what this image shared."""
+    from app.services import cases as cases_svc
+    from app.services import sharing
+
+    image_cases = cases_svc.cases_for_evidence(session, ev.id)
+    active = next(((c, label) for c, label in image_cases if c.id == case_id), None)
+    ctx: dict[str, Any] = {
+        "image_cases": image_cases,
+        "active_case": active[0] if active else None,
+        "active_label": active[1] if active else "",
+        "case_warning": None,
+        "shared_in_case": [],
+        "shared_from_here": [],
+        "indicator_hits": [],
+    }
+    if case_id and active is None:
+        ctx["case_warning"] = f"This image is not in case {case_id}; showing it without a case."
+        ctx["active_case_id"] = None
+        ctx["case_q"] = ""
+        ctx["case_amp"] = ""
+        return ctx
+    if active:
+        ctx["shared_in_case"] = sharing.resolved_for_case(
+            session, case_id, exclude_evidence_id=ev.id
+        )
+        ctx["shared_from_here"] = [
+            sharing.resolve(session, i, case_id)
+            for i in sharing.list_items(session, case_id, only_evidence_id=ev.id)
+        ]
+        ctx["case_labels"] = cases_svc.labels(session, case_id)
+        from app.services import indicators
+
+        ctx["indicator_hits"] = indicators.hits(session, case_id, evidence_id=ev.id)
+    return ctx
 
 
 @router.get("/runs/{run_id}", response_class=HTMLResponse)
@@ -485,6 +799,16 @@ def run_page(
     run = get_run_or_404(session, run_id)
     view = results_svc.RowView.from_params(request.query_params)
     return _render_run_page(request, session, run, offset, limit, row, view=view)
+
+
+def _active_case(session: Session, request: Request, evidence_id: int) -> Any:
+    """The active case object if the request names one this image belongs to."""
+    from app.services import cases as cases_svc
+
+    case_id = request_case_id(request)
+    if case_id and cases_svc.membership(session, case_id, evidence_id):
+        return session.get(cases_svc.Case, case_id)
+    return None
 
 
 def _delete_preview(session: Session, run: Run) -> Any:
@@ -536,6 +860,7 @@ def _render_run_page(
         follow_ups=follow_ups,
         message=message,
         zip_password=get_settings().artifact_zip_password,
+        active_case=_active_case(session, request, run.evidence_id),
         **ctx,
     )
 
@@ -568,15 +893,24 @@ def ui_hash(request: Request, evidence_id: int, session: SessionDep) -> Response
 
 
 @router.get("/ui/notes", response_class=HTMLResponse)
-def ui_notes(request: Request, session: SessionDep, evidence_id: int | None = None) -> HTMLResponse:
-    return notes_response(request, session, evidence_id)
+def ui_notes(
+    request: Request,
+    session: SessionDep,
+    evidence_id: int | None = None,
+    case_id: int | None = None,
+) -> HTMLResponse:
+    return notes_response(request, session, evidence_id, case_id)
 
 
-def _notes_done(request: Request, session: Session, evidence_id: int | None) -> Response:
+def _notes_done(
+    request: Request, session: Session, evidence_id: int | None, case_id: int | None = None
+) -> Response:
     session.commit()
     if not is_htmx(request):
-        return redirect(f"/evidence/{evidence_id}#notes" if evidence_id else "/#notes")
-    return notes_response(request, session, evidence_id)
+        if case_id:
+            return redirect(f"/cases/{case_id}#notes")
+        return redirect(f"/evidence/{evidence_id}#notes" if evidence_id else "/")
+    return notes_response(request, session, evidence_id, case_id)
 
 
 @router.post("/ui/notes", dependencies=[Depends(same_origin_post)])
@@ -587,12 +921,19 @@ def ui_note_create(
 ) -> Response:
     raw_ev = (form.get("evidence_id") or "").strip()
     evidence_id = int(raw_ev) if raw_ev.isdigit() else None
+    raw_case = (form.get("case_id") or "").strip()
+    case_id = int(raw_case) if raw_case.isdigit() and evidence_id is None else None
     if evidence_id is not None:
         get_evidence_or_404(session, evidence_id)
+    if evidence_id is None and case_id is None:
+        raise HTTPException(422, "a note belongs to an image or a case")
     body = (form.get("body") or "").strip()
     if body:
-        notes_svc.create_note(session, body, evidence_id=evidence_id)
-    return _notes_done(request, session, evidence_id)
+        try:
+            notes_svc.create_note(session, body, evidence_id=evidence_id, case_id=case_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+    return _notes_done(request, session, evidence_id, case_id)
 
 
 @router.post("/ui/notes/{note_id}/edit", dependencies=[Depends(same_origin_post)])
@@ -605,11 +946,11 @@ def ui_note_edit(
     note = session.get(Note, note_id)
     if note is None:
         raise HTTPException(404, "note not found")
-    evidence_id = note.evidence_id
+    evidence_id, case_id = note.evidence_id, note.case_id
     body = (form.get("body") or "").strip()
     if body:
         notes_svc.update_note(session, note_id, body)
-    return _notes_done(request, session, evidence_id)
+    return _notes_done(request, session, evidence_id, case_id)
 
 
 @router.post("/ui/notes/{note_id}/delete", dependencies=[Depends(same_origin_post)])
@@ -617,9 +958,9 @@ def ui_note_delete(request: Request, note_id: int, session: SessionDep) -> Respo
     note = session.get(Note, note_id)
     if note is None:
         raise HTTPException(404, "note not found")
-    evidence_id = note.evidence_id
+    evidence_id, case_id = note.evidence_id, note.case_id
     notes_svc.delete_note(session, note_id)
-    return _notes_done(request, session, evidence_id)
+    return _notes_done(request, session, evidence_id, case_id)
 
 
 @router.get("/ui/evidence/{evidence_id}/plugin-form", response_class=HTMLResponse)
@@ -662,6 +1003,8 @@ def ui_create_run(
     origin = UI_ORIGINS.get(form.get("origin") or "manual", RunOrigin.MANUAL)
     error: str | None = None
     try:
+        raw_msg_id = (form.get("ai_message_id") or "").strip()
+        ai_message_id = int(raw_msg_id) if raw_msg_id and origin == RunOrigin.AI_SUGGESTED else None
         if not plugin_name:
             raise ArgValidationError("choose a plugin")
         if "args_json" in form:  # presets and AI suggestions carry their args as JSON
@@ -677,6 +1020,7 @@ def ui_create_run(
             ToolRequest(plugin=plugin_name, args=args),
             origin=origin,
             tool=tool,
+            **({"ai_message_id": ai_message_id} if ai_message_id is not None else {}),
         )
         session.commit()
     except (ValueError, KeyError) as exc:  # ArgValidationError and JSON errors are ValueErrors
@@ -693,7 +1037,9 @@ def ui_create_run(
             resp.headers["HX-Retarget"] = "#run-form-errors"
             resp.headers["HX-Reswap"] = "innerHTML"
             return resp
-        return runs_response(request, session, evidence_id, clear_errors=True)
+        resp = runs_response(request, session, evidence_id, clear_errors=True)
+        resp.headers["HX-Trigger"] = RECOMMENDATIONS_CHANGED
+        return resp
     if error:
         ctx = evidence_context(session, ev, plugin_name)
         values = {k.removeprefix("arg_"): v for k, v in form.items() if k.startswith("arg_")}
@@ -716,9 +1062,11 @@ def ui_auto(request: Request, evidence_id: int, session: SessionDep) -> Response
     session.commit()
     if not is_htmx(request):
         return redirect(f"/evidence/{evidence_id}#runs")
-    return runs_response(
+    resp = runs_response(
         request, session, evidence_id, message=f"Queued {len(runs)} auto-enumeration run(s)."
     )
+    resp.headers["HX-Trigger"] = RECOMMENDATIONS_CHANGED
+    return resp
 
 
 @router.post("/ui/runs/{run_id}/cancel", dependencies=[Depends(same_origin_post)])
@@ -814,7 +1162,7 @@ def ui_ai_history(request: Request, evidence_id: int, session: SessionDep) -> Re
     return render(
         request,
         "_ai_history.html",
-        messages=ai_history(session, evidence_id),
+        **ai_panel_context(session, evidence_id),
         evidence_id=evidence_id,
         runs_panel=True,
     )
@@ -832,10 +1180,28 @@ def ui_ai_ask(
     form: FormDep,
     session: SessionDep,
 ) -> Response:
+    """Ask a question, or (mode=goal) give the AI agent a goal (app/ai/agent.py)."""
+    from app.ai import agent
+
     get_evidence_or_404(session, evidence_id)
     question = (form.get("question") or "").strip()
     error = None
-    if question:
+    if form.get("mode") == "goal":
+        try:
+            minutes = (form.get("max_minutes") or "").strip()
+            agent.start_task(
+                session,
+                evidence_id,
+                question,
+                max_steps=form.get("max_steps") or None,
+                max_seconds=int(float(minutes) * 60) if minutes else None,
+                max_runs=form.get("max_runs") or None,
+                approve_all=form.get("approve_all") in ("on", "true", "1"),
+            )
+        except (agent.AgentError, ValueError) as exc:
+            session.rollback()
+            error = str(exc)
+    elif question:
         ai_svc.ask(session, evidence_id, question, run_ids=_parse_int_list(form.get("run_ids")))
         session.commit()
     else:
@@ -845,7 +1211,7 @@ def ui_ai_ask(
     return render(
         request,
         "_ai_history.html",
-        messages=ai_history(session, evidence_id),
+        **ai_panel_context(session, evidence_id),
         evidence_id=evidence_id,
         runs_panel=True,
         error=error,
@@ -1016,14 +1382,17 @@ def ui_case_export(
     evidence_id: str | None = None,
     format: str = "md",  # noqa: A002
     include_dumped: bool = False,
+    case_id: str | None = None,
 ) -> Response:
-    """Target of the export dialogs on the home and evidence pages."""
+    """Target of the export dialogs on the home, case and evidence pages."""
     from app.api.export import export_response
 
     ev_id = _int_or_none(evidence_id)
     if ev_id is not None:
         get_evidence_or_404(session, ev_id)
-    return export_response(session, ev_id, format, include_dumped and format == "zip")
+    return export_response(
+        session, ev_id, format, include_dumped and format == "zip", _int_or_none(case_id)
+    )
 
 
 # --------------------------------------------------------------------------- system / health

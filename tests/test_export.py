@@ -24,7 +24,8 @@ from app.ai import service as ai_service
 from app.ai.client import AIClient
 from app.config import Settings, get_settings
 from app.models import AuditEvent, DerivedArtifact, Evidence, Run, RunStatus
-from app.services import audit, export, integrity, results
+from app.services import audit, export, integrity, results, sharing
+from app.services import cases as cases_service
 from app.services import evidence as evidence_service
 from app.services import notes as notes_service
 from app.tools.base import ParsedRow
@@ -63,8 +64,12 @@ def case(session: Session, settings: Settings) -> dict:
     evidence_service.hash_evidence(session, ev.id)
     integrity.set_expected_hashes(session, ev.id, md5="0" * 32)
     notes_service.create_note(session, f"Analyst note {EVIL}", evidence_id=ev.id)
-    notes_service.create_note(session, "Global note", evidence_id=None)
-    notes_service.create_note(session, "Note on the other image", evidence_id=other.id)
+    other_note = notes_service.create_note(session, "Note on the other image", evidence_id=other.id)
+    kase = cases_service.create_case(session, "Intrusion", "Two laptops")
+    cases_service.add_evidence(session, kase.id, ev.id, "before")
+    cases_service.add_evidence(session, kase.id, other.id, f"after {EVIL}")
+    notes_service.create_note(session, "Case note", case_id=kase.id)
+    sharing.share(session, kase.id, "note", note_id=other_note.id, comment=f"see {EVIL}")
 
     run = Run(
         evidence_id=ev.id,
@@ -114,7 +119,8 @@ def case(session: Session, settings: Settings) -> dict:
         f"What stands out? {EVIL}",
         client=_ai_client(f"PID 666 [R{run.id}:1] and [R{run.id}:99]. {EVIL}"),
     )
-    return {"ev": ev, "other": other, "run": run, "dumped": dumped, "raw": raw}
+    sharing.share(session, kase.id, "row", run_id=run.id, row_idx=1, comment="the odd process")
+    return {"ev": ev, "other": other, "run": run, "dumped": dumped, "raw": raw, "kase": kase}
 
 
 def _render(markdown: str) -> str:
@@ -157,10 +163,15 @@ def test_evidence_report_content_and_scope(session: Session, case: dict) -> None
     assert "**high** Odd" in report and f"rows R{run.id}:1" in report
     assert "`pid.4.dmp`" in report and hashlib.sha256(case["dumped"]).hexdigest() in report
     assert export.AI_LABEL.split(" — ")[0].replace("-", "\\-") in report
-    assert "2 (1 invalid: R" in report and "`placeholder-1`" in report
+    assert "2 (1 invalid: R" in report and "`placeholder-4`" in report
     assert "Analyst note" in report
-    # Scope: other evidence's notes and the global note are not in a per-evidence export.
-    assert "Note on the other image" not in report and "Global note" not in report
+    # Scope: other images' data and case notes are not in a per-evidence export, except what
+    # was explicitly shared to its case, in its own labelled section.
+    own, leads = report.split("## Leads from linked evidence", 1)
+    assert "Note on the other image" not in own and "Case note" not in report
+    leads = leads.split("## Activity log")[0]
+    assert "Note on the other image" in leads and "From | other\\.raw (after" in leads
+    assert "the odd process" not in leads  # shared FROM this image: not a lead for itself
     assert "verified" in report.split("| Audit log |")[1].split("\n")[0]
     # Activity log: changes only, this evidence only.
     assert "`note.create`" in report and "http.request" not in report
@@ -171,8 +182,22 @@ def test_investigation_report_includes_everything(session: Session, case: dict) 
     assert report.startswith("# Investigation export")
     assert f"## Evidence {case['ev'].id}: sample\\.raw" in report
     assert f"## Evidence {case['other'].id}: other\\.raw" in report
-    assert "## Investigation notes" in report and "Global note" in report
-    assert "Note on the other image" in report
+    assert "## Case 1: Intrusion" in report and "Case note" in report
+    assert "Note on the other image" in report and "the odd process" in report
+
+
+def test_case_report(session: Session, case: dict) -> None:
+    report = export.build_report(session, case_id=case["kase"].id, generated_at=WHEN)
+    assert report.startswith("# Case export: Intrusion")
+    assert "| Scope | case Intrusion |" in report
+    assert "### Images in this case" in report and "| before |" in report
+    assert "### Shared in this case" in report and "Case note" in report
+    assert "#### Note: Note" in report and "#### Result row:" in report
+    assert "the odd process" in report and "| State | current |" in report
+    assert f"## Evidence {case['other'].id}: other\\.raw" in report
+    assert "`case.add_evidence`" in report and "`share.create`" in report
+    html = _render(report)
+    assert "<script>" not in html
 
 
 def test_report_is_deterministic(session: Session, case: dict) -> None:
@@ -308,3 +333,26 @@ def test_scope_lookup_error(session: Session) -> None:
         export.get_scope(session, 12345)
     assert isinstance(export.get_scope(session, None).evidence, list)
     _ = Evidence  # model import used for typing in fixtures
+
+
+def test_citations_summary_support_states() -> None:
+    _citations_summary = export._citations_summary  # noqa: SLF001
+    assert _citations_summary([]) == "0"
+    ok = {"key": "R1:1", "valid": True, "support": "supported"}
+    assert _citations_summary([ok]) == "1"
+    out = _citations_summary(
+        [
+            ok,
+            {"key": "R1:2", "valid": False, "support": "not_found"},
+            {
+                "key": "R1:3",
+                "valid": True,
+                "support": "unsupported",
+                "unsupported_values": ["PID/port 9"],
+            },
+            {"key": "R1:4", "valid": True},  # stored before support checking existed
+        ]
+    )
+    assert out.startswith("4 (1 invalid: R1:2; 1 cited row(s) don't support the stated values: ")
+    assert "R1:3" in out and "PID/port 9" in out
+    assert "value support not checked (older answer)" in out

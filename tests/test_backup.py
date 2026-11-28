@@ -63,7 +63,7 @@ def test_create_list_verify(session: Session, settings: Settings, evidence: Evid
         "dumped_bytes": 400,
         "active_runs": [active.id],
     }
-    assert manifest["audit_chain"]["ok"] and manifest["schema"].startswith("0008")
+    assert manifest["audit_chain"]["ok"] and manifest["schema"] == _head_revision()
 
     report = backup.verify_backup(info.name)
     assert report.ok, report.problems
@@ -237,3 +237,9 @@ def test_dispose_engine_closes_replaced_engines(settings: Settings) -> None:
     assert old.pool.checkedin() == 1 and new.pool.checkedin() == 1
     db.dispose_engine()
     assert old.pool.checkedin() == 0 and new.pool.checkedin() == 0
+
+
+def _head_revision() -> str:
+    from alembic.script import ScriptDirectory
+
+    return ScriptDirectory.from_config(db.alembic_config()).get_current_head()

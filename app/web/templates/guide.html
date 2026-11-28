@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Investigation guide{% endblock %}
+{% block crumbs %}<a href="/system">System</a> / Investigation guide{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2>Investigation guide <span class="muted small-text mono">{{ tool }}</span></h2>
+  <p class="small-text muted">What the "Recommended next" panel on an image page suggests. First the
+    <b>baseline</b> steps that have not run yet, in order; then <b>next</b> steps from the image's succeeded
+    runs, ranked by priority. Steps that already ran (or are queued) and steps dismissed for that image are
+    not shown. Developers: edit <span class="mono">app/tools/volatility/guide.py</span> and check it with
+    <span class="mono">python -m app.tools.volatility.guide</span>.</p>
+</section>
+
+<section class="panel">
+  <h2>Problems ({{ problems | length }})</h2>
+  {% if problems %}
+  <p class="flash error small-text">These steps are skipped (never recommended) until they are fixed.</p>
+  <ul>{% for p in problems %}<li><span class="mono">{{ p.where }}</span> (<span class="mono">{{ p.plugin }}</span>): {{ p.problem }}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">None: every step is valid.</p>{% endif %}
+</section>
+
+<section class="panel">
+  <h2>Baseline ({{ guide.baseline | length }} steps, in order)</h2>
+  <table class="results">
+    <thead><tr><th>#</th><th>Plugin</th><th>Args</th><th>Why</th></tr></thead>
+    <tbody>
+    {% for s in guide.baseline %}
+    <tr><td>{{ loop.index }}</td><td class="mono">{{ s.plugin }}</td><td class="mono">{{ s.args | args }}</td><td>{{ s.reason }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No baseline steps.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>Next steps</h2>
+  <table class="results">
+    <thead><tr><th>After a run of</th><th>When it</th><th>Suggest</th><th>Args</th><th>Priority</th><th>Why</th></tr></thead>
+    <tbody>
+    {% for source, steps in guide.next | dictsort %}{% for s in steps %}
+    <tr><td class="mono">{{ source }}</td><td>{{ describe_when(s.when) }}</td><td class="mono">{{ s.plugin }}</td>
+        <td class="mono">{{ s.args | args }}</td><td>{{ s.priority }}</td><td>{{ s.reason }}</td></tr>
+    {% endfor %}{% else %}<tr><td colspan="6" class="muted">No next steps.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -10,7 +10,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.citations import parse_key
@@ -174,7 +174,9 @@ def build_context(
     notes = (
         session.execute(
             select(Note)
-            .where(or_(Note.evidence_id == evidence_id, Note.evidence_id.is_(None)))
+            # Only this image's notes: case notes span several images and are not mixed into
+            # one image's AI context.
+            .where(Note.evidence_id == evidence_id)
             .order_by(Note.created_at, Note.id)
         )
         .scalars()
@@ -266,4 +268,104 @@ def build_context(
     }
     if missing_refs:
         refs["row_refs_missing"] = missing_refs
+    return b.text(), refs
+
+
+MAX_FLAGGED_ROWS = 30
+
+
+def _notes_block(session: Session, evidence_id: int) -> list[str]:
+    notes = session.scalars(
+        select(Note).where(Note.evidence_id == evidence_id).order_by(Note.created_at, Note.id)
+    ).all()
+    return ["\n## Analyst notes", *(f"- (note {n.id}) {n.body}" for n in notes)] if notes else []
+
+
+def build_state_context(
+    session: Session,
+    evidence_id: int,
+    max_flagged_rows: int = MAX_FLAGGED_ROWS,
+    max_chars: int = 30000,
+) -> tuple[str, dict[str, Any]]:
+    """Context for "what should I run next?": the investigation STATE, not bulk rows.
+
+    Order: evidence info, notes, every run (plugin, args, status, row count, hook tags and
+    findings), the guide's static recommendations, recommendations the analyst dismissed, then
+    up to ``max_flagged_rows`` hook-flagged rows (newest runs first) so the model can choose
+    specific options (e.g. a PID).
+    """
+    from app.services import recommendations as recs_svc
+    from app.services import runs as runs_svc
+
+    ev = session.get(Evidence, evidence_id)
+    if ev is None:
+        raise NotFoundError(f"evidence {evidence_id} not found")
+    b = _Builder(max_chars)
+    b.add(_evidence_block(ev))
+    for line in _notes_block(session, evidence_id):
+        b.add(line)
+
+    runs = list(
+        session.scalars(
+            select(Run)
+            .where(Run.evidence_id == evidence_id, Run.deleted_at.is_(None))
+            .order_by(Run.id)
+        )
+    )
+    b.add("\n## Runs so far (oldest first)")
+    if not runs:
+        b.add("(none yet)")
+    for run in runs:
+        line = f"- R{run.id} {run.plugin} args {_json(run.args or {})}: {run.status.value}"
+        if run.status == RunStatus.SUCCEEDED:
+            line += f", {run.row_count or 0} rows"
+            tags = runs_svc.annotation_tags(session, run.id)
+            if tags:
+                line += "; flagged rows by tag: " + ", ".join(f"{t} ({n})" for t, n in tags)
+        elif run.error:
+            line += f" ({run.error.splitlines()[0][:200]})"
+        b.add(line)
+        for finding in _findings_block(run):
+            b.add("  " + finding)
+
+    recs = recs_svc.recommend(session, evidence_id)
+    if recs.items:
+        b.add(
+            "\n## Static recommendations not yet run (from the team's investigation guide; "
+            "you may agree, reorder or suggest something better)"
+        )
+        for r in recs.items:
+            kind = f"baseline {r.baseline_pos}/{recs.baseline_total}" if r.baseline_pos else "next"
+            b.add(f"- {r.plugin} args {_json(r.args)} ({kind}): {' / '.join(r.reasons)}")
+    if recs.dismissed:
+        b.add("\n## Dismissed by the analyst for this image (do not suggest these again)")
+        for r in recs.dismissed:
+            b.add(f"- {r.plugin} args {_json(r.args)}")
+
+    run_ids = [r.id for r in runs if r.status == RunStatus.SUCCEEDED]
+    flagged = list(
+        session.scalars(
+            select(ResultRow)
+            .where(ResultRow.run_id.in_(run_ids), ResultRow.annotations.is_not(None))
+            .order_by(ResultRow.run_id.desc(), ResultRow.row_idx)
+            .limit(max_flagged_rows + 1)
+        )
+    )
+    if flagged:
+        more = len(flagged) > max_flagged_rows
+        b.add(
+            f"\n## Rows flagged by post-run hooks (first {max_flagged_rows}"
+            f"{', more exist' if more else ''}; heuristics, not conclusions)"
+        )
+        for row in flagged[:max_flagged_rows]:
+            if not b.add(format_row(row), row_key=row.citation):
+                break
+    refs: dict[str, Any] = {
+        "kind": "recommend",
+        "evidence_id": evidence_id,
+        "run_ids": [r.id for r in runs],
+        "row_refs_included": b.row_keys,
+        "static_recommendations": [r.key for r in recs.items],
+        "truncated": b.truncated,
+    }
     return b.text(), refs

@@ -1,8 +1,9 @@
 {# Case export dialog. Set `export_evidence` to an Evidence to export one image; omit for all. #}
 <dialog id="case-export-dialog" class="export-dialog">
   <form method="get" action="/ui/export" onsubmit="setTimeout(() => this.closest('dialog').close(), 0)">
-    {% if export_evidence %}<input type="hidden" name="evidence_id" value="{{ export_evidence.id }}">{% endif %}
-    <h3>Export {% if export_evidence %}{{ export_evidence.rel_path }}{% else %}the whole investigation{% endif %}</h3>
+    {% if export_case %}<input type="hidden" name="case_id" value="{{ export_case.id }}">
+    {% elif export_evidence %}<input type="hidden" name="evidence_id" value="{{ export_evidence.id }}">{% endif %}
+    <h3>Export {% if export_case %}case {{ export_case.name }}{% elif export_evidence %}{{ export_evidence.rel_path }}{% else %}the whole investigation{% endif %}</h3>
     <fieldset>
       <label><input type="radio" name="format" value="md" checked> Markdown report
         <span class="muted small-text">(evidence and integrity, notes, runs with exact commands, findings, AI answers with provenance, activity log)</span></label>

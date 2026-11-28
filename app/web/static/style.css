@@ -68,7 +68,7 @@ table.data th { background: #eef1f5; position: sticky; top: 0; }
 table.results td { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 .table-wrap { overflow: auto; max-height: 75vh; }
 tr.highlight td, tr:target td { background: var(--hl); }
-.cite-key { white-space: nowrap; }
+.cite-key, table.results td.cite-key { white-space: nowrap; }
 .tree { color: var(--muted); }
 .hash { word-break: break-all; }
 
@@ -184,3 +184,59 @@ table.kv td { padding: .1rem 0; word-break: break-all; }
 #test-volatility, #test-ai { margin-bottom: .8rem; }
 .badge.status-deleted { background: #e4e7ec; color: #475467; text-decoration: line-through; }
 a.cite-deleted { text-decoration: line-through; color: #667085; }
+a.cite-unsupported { color: #b54708; text-decoration: underline wavy #f79009; }
+
+/* Cases and sharing */
+.badge.case-chip { background: #e0eaff; color: #2d31a6; font-weight: 500; text-decoration: none; }
+.badge.case-chip.active { background: #2d31a6; color: #fff; }
+.case-bar { margin: .3rem 0 0; }
+.shared-list { list-style: none; padding: 0; margin: .3rem 0; }
+.shared-item { border-left: 3px solid #a4bcfd; padding: .35rem .6rem; margin-bottom: .5rem; background: #f8f9fc; }
+.shared-item.shared-changed { border-left-color: #f79009; }
+.shared-item.shared-gone { border-left-color: #98a2b3; opacity: .8; }
+.shared-head { display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+.shared-text { font-size: 13px; margin-top: .2rem; max-height: 10em; overflow: auto; }
+.shared-comment { font-style: italic; font-size: 13px; }
+.badge.ai-badge { background: #fef0c7; color: #93370d; }
+button.share-btn, button.shared-badge { padding: 0 .4rem; font-size: 11px; margin-left: .3rem; }
+button.shared-badge { background: #d1fadf; color: #05603a; }
+form.stack { display: flex; flex-direction: column; gap: .4rem; max-width: 40rem; }
+.add-member { margin-top: .6rem; display: flex; gap: .4rem; flex-wrap: wrap; }
+.hit-list { list-style: none; padding: 0; margin: .3rem 0; }
+.hit-list li { padding: .2rem 0; border-bottom: 1px solid #eef0f3; }
+label.inline-check { display: flex; gap: .4rem; align-items: center; }
+dialog.export-dialog label.inline-check { display: flex; flex-direction: row; gap: .4rem; align-items: center; }
+dialog.export-dialog label.inline-check input { width: auto; margin: 0; }
+dd.checks { display: flex; flex-wrap: wrap; gap: .2rem .8rem; }
+dd.checks label { font-size: 13px; }
+.compare-counts { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+
+/* Recommended next (investigation guide) */
+ul.recs { list-style: none; padding: 0; margin: .4rem 0; }
+li.rec { padding: .4rem 0; border-bottom: 1px solid #eaecf0; }
+li.rec:last-child { border-bottom: none; }
+.rec-actions { margin-top: .25rem; display: flex; gap: .4rem; align-items: center; }
+a.button.small { font-size: 12px; }
+.ai-recs { border: 1px dashed #d0d5dd; border-radius: 4px; padding: .4rem .6rem; margin: .4rem 0; }
+.ai-recommend { display: flex; gap: .4rem; align-items: center; }
+.ai-recommend input[type=text] { flex: 1; }
+.ai-rec-block { margin-top: .4rem; }
+
+/* AI agent tasks */
+.ai-task-body { background: var(--ai-bg); border: 1px dashed var(--ai-border); border-radius: 6px; padding: .5rem; margin: .5rem 0; }
+.ai-task-now { display: flex; gap: .6rem; align-items: center; margin: .3rem 0; }
+.ai-steps ol { margin: .3rem 0; padding-left: 1.4rem; }
+.ai-step-error { color: var(--danger); }
+.ask-mode { display: flex; gap: 1rem; margin-bottom: .3rem; }
+.ask:has(input[value=goal]:checked) .ask-question-only { display: none; }
+.ask:not(:has(input[value=goal]:checked)) .ask-goal-only { display: none; }
+.ask-mode label { display: inline-flex; gap: .3rem; align-items: center; }
+.ask-mode input[type=radio] { width: auto; margin: 0; }
+.ai-approvals { border: 1px solid #f79009; border-radius: 6px; padding: .4rem .6rem; margin: .4rem 0; background: #fffcf5; }
+.approval { padding: .4rem 0; border-bottom: 1px solid #eaecf0; }
+.deny-form input[type=text] { width: 16rem; }
+.ai-badge { background: #ede9fe; color: #5b3aa6; text-decoration: none; }
+/* Settings page */
+table.settings-table { width: 100%; border-collapse: collapse; margin: .5rem 0; }
+table.settings-table th, table.settings-table td { text-align: left; vertical-align: top; padding: .5rem .4rem; border-bottom: 1px solid #eaecf0; }
+table.settings-table td.settings-value { white-space: nowrap; }

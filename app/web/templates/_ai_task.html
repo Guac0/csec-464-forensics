@@ -1,0 +1,136 @@
+{% set t = tv.task %}
+<div class="ai-task" id="ai-task-{{ t.id }}"{% if tv.polling %} hx-get="/ui/ai/tasks/{{ t.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <div class="chat-user">
+    <div class="chat-label">Analyst goal for the AI <span class="muted">{{ t.created_at | dt }}</span></div>
+    <div class="prewrap">Goal: {{ t.goal }}</div>
+  </div>
+  <div class="ai-task-body">
+    <div class="ai-label">AI task {{ t.id }} — AI-generated lead, not evidence
+      <span class="badge status-{{ {'done': 'succeeded', 'queued': 'queued', 'running': 'running', 'awaiting_approval': 'queued', 'waiting_for_runs': 'running', 'cancelled': 'cancelled', 'interrupted': 'interrupted'}.get(t.status.value, 'failed') }}">{{ t.status.value | replace("_", " ") }}</span>
+      <span class="muted small-text">{% if t.approve_all %}yes to all{% elif (t.limits.max_runs or 0) == 0 %}read-only{% else %}runs need your approval{% endif %}{% if t.tool_mode %} · {{ t.tool_mode }} tool calls{% endif %}</span>
+    </div>
+    <p class="small-text muted ai-task-progress">
+      Step {{ t.steps_used }} of max {{ tv.max_steps }} · {{ tv.elapsed_s | secs }} elapsed{% if tv.paused_s %} ({{ tv.paused_s | secs }} paused for approval){% endif %}{% if tv.left_s is not none %} · at most ~{{ tv.left_s | secs }} left{% endif %} · time limit {{ tv.max_seconds | secs }}{% if t.limits.max_runs %} · runs {{ tv.runs | selectattr("status", "in", ["approved", "edited", "auto", "pending"]) | list | length }} of max {{ t.limits.max_runs }}{% endif %}
+    </p>
+    {% if task_error %}<p class="flash error small-text">{{ task_error }}</p>{% endif %}
+    {% if tv.pending %}
+    <div class="ai-approvals">
+      <p class="flash warn small-text"><b>Waiting for your approval:</b> the AI wants to run {{ tv.pending | length }} plugin(s). The time limit is paused until you decide.</p>
+      {% for req in tv.pending %}
+      {% set spec = plugin_spec(req.plugin) %}
+      {% set writes = spec and (spec.writes_files or (spec.args | selectattr("writes_files") | selectattr("name", "in", req.args.keys() | list) | list)) %}
+      <div class="approval">
+        <div><span class="badge">AI request</span> <span class="mono">{{ req.plugin }}</span>{% if req.args %} <span class="mono small-text">{{ req.args | args }}</span>{% endif %}
+          {% if writes %}<span class="badge sev-medium" title="Writes files extracted from the image (possible malware).">writes files</span>{% endif %}</div>
+        {% if req.reason %}<div class="small-text prewrap">Why: {{ req.reason }}</div>{% endif %}
+        <div class="rec-actions">
+          <form class="inline" method="post" action="/ui/ai/run-requests/{{ req.id }}/decide"
+                hx-post="/ui/ai/run-requests/{{ req.id }}/decide" hx-target="#ai-task-{{ t.id }}" hx-swap="outerHTML">
+            <input type="hidden" name="action" value="approve">
+            <button type="submit" class="small">Approve</button>
+          </form>
+          <form class="inline deny-form" method="post" action="/ui/ai/run-requests/{{ req.id }}/decide"
+                hx-post="/ui/ai/run-requests/{{ req.id }}/decide" hx-target="#ai-task-{{ t.id }}" hx-swap="outerHTML">
+            <input type="hidden" name="action" value="deny">
+            <input type="text" name="note" maxlength="500" placeholder="Optional note for the AI">
+            <button type="submit" class="small secondary">Deny</button>
+          </form>
+        </div>
+        {% if spec and spec.args %}
+        <details class="small-text">
+          <summary>Edit options first</summary>
+          {% set values = form_values(spec, req.args) %}
+          <form method="post" action="/ui/ai/run-requests/{{ req.id }}/decide"
+                hx-post="/ui/ai/run-requests/{{ req.id }}/decide" hx-target="#ai-task-{{ t.id }}" hx-swap="outerHTML">
+            <input type="hidden" name="action" value="edit">
+            {% for a in spec.args %}
+            <div class="field">
+              {% if a.type == "bool" %}
+              <label><input type="checkbox" name="arg_{{ a.name }}" {% if values.get(a.name) %}checked{% endif %}> <span class="mono">{{ a.flag }}</span>{% if a.writes_files %} <span class="badge sev-medium">writes files</span>{% endif %}</label>
+              {% else %}
+              <label><span class="mono">{{ a.flag }}</span>{% if a.required %} <span class="req">*</span>{% endif %}
+                <input name="arg_{{ a.name }}" value="{{ values.get(a.name, '') }}" {% if a.type == "int" %}type="number" step="1"{% else %}type="text"{% endif %}{% if a.type == "int_list" %} placeholder="1, 2, 3"{% endif %}{% if a.required %} required{% endif %}>
+              </label>
+              {% endif %}
+              {% if a.help %}<small class="muted">{{ a.help }}</small>{% endif %}
+            </div>
+            {% endfor %}
+            <button type="submit" class="small">Run with these options</button>
+          </form>
+        </details>
+        {% endif %}
+      </div>
+      {% endfor %}
+      <form class="inline" method="post" action="/ui/ai/tasks/{{ t.id }}/approve-all"
+            hx-post="/ui/ai/tasks/{{ t.id }}/approve-all" hx-target="#ai-task-{{ t.id }}" hx-swap="outerHTML">
+        <button type="submit" class="small" title="Approve these and every later run request of this task">Approve all remaining</button>
+      </form>
+    </div>
+    {% endif %}
+    {% set decided = tv.runs | rejectattr("status", "equalto", "pending") | list %}
+    {% if decided %}
+    <div class="ai-task-runs small-text">
+      <div class="small-label">Plugin runs requested by the AI</div>
+      <ul class="recs">
+        {% for r in decided %}
+        <li class="rec">
+          <span class="mono">{{ r.plugin }}</span>{% if r.final_args or r.args %} <span class="mono">{{ (r.final_args or r.args) | args }}</span>{% endif %}
+          —
+          {% if r.status == "auto" %}auto-approved (yes to all)
+          {% elif r.status == "approved" %}approved by {{ r.decided_by }}
+          {% elif r.status == "edited" %}options edited and approved by {{ r.decided_by }} (asked: <span class="mono">{{ r.args | args or "no options" }}</span>)
+          {% elif r.status == "denied" %}<span class="error-text">denied</span>{% if r.note %}: {{ r.note }}{% endif %}
+          {% elif r.status == "expired" %}<span class="muted">expired ({{ r.note }})</span>
+          {% else %}<span class="error-text">not queued{% if r.note %}: {{ r.note }}{% endif %}</span>{% endif %}
+          {% if r.run_id %}
+          · <a href="/runs/{{ r.run_id }}">run {{ r.run_id }}</a> <span class="badge status-{{ r.run_status }}">{{ r.run_status }}</span>
+          {% if r.run_elapsed_s is not none %}{{ r.run_elapsed_s | secs }}{% endif %}
+          {% if r.run_status in ("queued", "running") %}
+            {% if r.estimate_s is not none %}· ≈ {{ r.estimate_s | secs }} expected (from {{ r.estimate_samples }} earlier run{{ "s" if r.estimate_samples != 1 }}), ~{{ r.left_s | secs }} left{% else %}· no estimate yet (first run of this plugin){% endif %}
+          {% endif %}
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if tv.active %}
+    <div class="ai-task-now">
+      <span class="spinner">{% if t.status.value == "queued" %}Waiting for a free AI slot...{% else %}{{ t.current_action or "Working..." }}{% endif %}</span>
+      {% if not t.cancel_requested %}
+      <form class="inline" method="post" action="/ui/ai/tasks/{{ t.id }}/cancel"
+            hx-post="/ui/ai/tasks/{{ t.id }}/cancel" hx-target="#ai-task-{{ t.id }}" hx-swap="outerHTML">
+        <button type="submit" class="small secondary">Cancel</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if t.steps %}
+    <details class="ai-steps"{% if tv.active %} open{% endif %}>
+      <summary class="small-text">What the AI looked at ({{ t.steps | length }} step{{ "s" if t.steps | length != 1 }})</summary>
+      <ol class="small-text">
+        {% for s in t.steps %}
+        <li class="ai-step ai-step-{{ s.kind }}">
+          {% if s.tool %}<span>{{ describe_call(s.tool, s.args) }}</span> → {% endif %}{{ s.summary }}
+          {% if s.row_keys %}<span class="muted">(rows {% for k in s.row_keys[:5] %}<a class="cite" href="{{ k | row_url }}">{{ k }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if s.row_keys | length > 5 %}, +{{ s.row_keys | length - 5 }} more{% endif %})</span>{% endif %}
+          {% if s.duration_ms is not none %}<span class="muted">{{ s.duration_ms }} ms</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </details>
+    {% endif %}
+    {% if t.error %}<p class="flash error small-text">{{ t.error }}</p>{% endif %}
+    {% if t.status.value in ("failed", "cancelled", "interrupted") %}
+    <form class="inline" method="post" action="/ui/evidence/{{ t.evidence_id }}/ai/ask"
+          hx-post="/ui/evidence/{{ t.evidence_id }}/ai/ask" hx-target="#ai-history" hx-swap="outerHTML">
+      <input type="hidden" name="mode" value="goal">
+      <input type="hidden" name="question" value="{{ t.goal }}">
+      <input type="hidden" name="max_steps" value="{{ tv.max_steps }}">
+      <input type="hidden" name="max_minutes" value="{{ tv.max_seconds / 60 }}">
+      <input type="hidden" name="max_runs" value="{{ t.limits.max_runs or 0 }}">
+      <button type="submit" class="small">Start again</button>
+    </form>
+    {% endif %}
+    {% if answer %}{% set msg = answer %}{% include "_ai_message.html" %}{% endif %}
+  </div>
+</div>

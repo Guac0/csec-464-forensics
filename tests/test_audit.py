@@ -330,7 +330,8 @@ def test_background_hash_keeps_request_origin(client: TestClient, session: Sessi
 
 
 def test_note_versions_and_history(client: TestClient, session: Session) -> None:
-    note_id = client.post("/api/notes", json={"body": "v1"}).json()["id"]
+    case_id = client.post("/api/cases", json={"name": "c"}).json()["id"]
+    note_id = client.post("/api/notes", json={"body": "v1", "case_id": case_id}).json()["id"]
     client.patch(f"/api/notes/{note_id}", json={"body": "v2 <b>bold</b>"})
     client.delete(f"/api/notes/{note_id}")
 
@@ -377,7 +378,8 @@ def test_existing_notes_get_a_first_version_on_upgrade(settings: Settings) -> No
 
 
 def test_audit_api_and_activity_page(client: TestClient, session: Session) -> None:
-    client.post("/api/notes", json={"body": "hello"})
+    case_id = client.post("/api/cases", json={"name": "c"}).json()["id"]
+    client.post("/api/notes", json={"body": "hello", "case_id": case_id})
     page = client.get("/api/audit", params={"action": "note.", "limit": 5}).json()
     assert page["total"] == 1 and page["events"][0]["action"] == "note.create"
     assert client.get("/api/audit", params={"category": "change"}).json()["total"] >= 2
@@ -400,7 +402,8 @@ def test_audit_api_and_activity_page(client: TestClient, session: Session) -> No
 def test_activity_page_reports_broken_chain(
     client: TestClient, session: Session, settings: Settings
 ) -> None:
-    client.post("/api/notes", json={"body": "hello"})
+    case_id = client.post("/api/cases", json={"name": "c"}).json()["id"]
+    client.post("/api/notes", json={"body": "hello", "case_id": case_id})
     _tamper(settings, "UPDATE audit_events SET summary = 'x' WHERE seq = 1")
     html = client.post("/ui/audit/verify").text
     assert "Integrity check FAILED at event #1" in html

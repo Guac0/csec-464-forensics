@@ -76,6 +76,8 @@ class RunOrigin(enum.StrEnum):
     AUTO = "auto"  # queued by auto-enumeration
     AI_SUGGESTED = "ai"  # user clicked a validated AI suggestion
     HOOK = "hook"  # queued by a post-run hook as a follow-up (see app/tools/hooks.py)
+    RECOMMENDED = "recommended"  # user clicked a recommendation from the investigation guide
+    AI_AGENT = "agent"  # queued by an AI agent task (approved by the analyst or "yes to all")
 
 
 class Run(Base):
@@ -134,6 +136,18 @@ class Run(Base):
         index=True,
     )
     triggered_by_hook: Mapped[str | None] = mapped_column(String, default=None)
+    # Set when an AI agent task queued the run (origin "agent"); see AIRunRequest.
+    ai_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_tasks.id", ondelete="SET NULL", name="fk_runs_ai_task_id"),
+        default=None,
+        index=True,
+    )
+    # Set when the run was started from a suggestion in this AI answer (origin "ai").
+    ai_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_messages.id", ondelete="SET NULL", name="fk_runs_ai_message_id"),
+        default=None,
+        index=True,
+    )
     # 0 for user/auto runs; parent's depth + 1 for hook follow-ups (loop guard).
     chain_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Set when the run was created with "Re-run" from another run.
@@ -186,12 +200,15 @@ class ResultRow(Base):
 
 
 class Note(Base):
-    """Free-form analyst notes. evidence_id None = global/investigation-level note."""
+    """Free-form analyst notes, attached to exactly one evidence item OR one case."""
 
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     evidence_id: Mapped[int | None] = mapped_column(ForeignKey("evidence.id"), default=None)
+    case_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cases.id", name="fk_notes_case_id"), default=None, index=True
+    )
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -217,7 +234,16 @@ class AIMessage(Base):
     suggestions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
     usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # The model's reasoning (<think> text / reasoning_content): hidden from the answer, kept
+    # for provenance (shown under "Provenance" and in exports). None if the model gave none.
+    reasoning: Mapped[str | None] = mapped_column(Text, default=None)
+    # Why the model stopped ("stop", "length" = cut off by max_tokens, ...), if reported.
+    finish_reason: Mapped[str | None] = mapped_column(String, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def truncated(self) -> bool:
+        return self.finish_reason == "length"
 
 
 class NoteVersion(Base):
@@ -235,6 +261,7 @@ class NoteVersion(Base):
     action: Mapped[str] = mapped_column(String)  # "create" | "edit" | "delete"
     body: Mapped[str] = mapped_column(Text)  # text after the action (last text for "delete")
     evidence_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    case_id: Mapped[int | None] = mapped_column(Integer, default=None)
     actor: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -322,3 +349,305 @@ class DerivedArtifact(Base):
     # Result row that names this file (e.g. pslist's "File output" column), if any.
     source_row_idx: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Case(Base):
+    """A group of evidence items investigated together (e.g. before/after snapshots of one
+    machine, or several machines hit by the same actor). Membership is the only link between
+    images: things are shared between images only by explicitly sharing them to a case."""
+
+    __tablename__ = "cases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    members: Mapped[list[CaseEvidence]] = relationship(
+        back_populates="case", cascade="all, delete-orphan", order_by="CaseEvidence.added_at"
+    )
+
+
+class CaseEvidence(Base):
+    """An evidence item in a case. An image can be in several cases."""
+
+    __tablename__ = "case_evidence"
+
+    case_id: Mapped[int] = mapped_column(
+        ForeignKey("cases.id", ondelete="CASCADE"), primary_key=True
+    )
+    evidence_id: Mapped[int] = mapped_column(
+        ForeignKey("evidence.id"), primary_key=True, index=True
+    )
+    # Optional role of the image in this case, e.g. "before", "after", "laptop-2".
+    label: Mapped[str] = mapped_column(String, default="")
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    case: Mapped[Case] = relationship(back_populates="members")
+    evidence: Mapped[Evidence] = relationship()
+
+
+class SharedKind(enum.StrEnum):
+    ROW = "row"  # a result row (run_id, row_idx)
+    FINDING = "finding"  # a hook finding on a run (run_id, finding title + hook)
+    NOTE = "note"  # an evidence note (note_id)
+    AI_ANSWER = "ai_answer"  # an AI answer (ai_message_id), shared as an AI lead
+
+
+class SharedItem(Base):
+    """Something from one image deliberately shared with the other images of a case.
+
+    It is a pointer: the UI and reports show the source's LATEST state (app/services/sharing.py),
+    plus whether it changed since it was shared (``source_sha256``) or no longer exists. It is
+    never copied into the other images' runs, rows, hooks or AI context.
+    """
+
+    __tablename__ = "shared_items"
+    __table_args__ = (UniqueConstraint("case_id", "kind", "source_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[SharedKind] = mapped_column(Enum(SharedKind))
+    # The image it came from (must be a member of the case when shared).
+    source_evidence_id: Mapped[int] = mapped_column(ForeignKey("evidence.id"), index=True)
+    # Stable identity of the source within its kind, e.g. "R12:34", "F12:hook/title", "N7", "A9".
+    source_key: Mapped[str] = mapped_column(String)
+    run_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    row_idx: Mapped[int | None] = mapped_column(Integer, default=None)
+    note_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    ai_message_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Short description of the source when shared (shown if the source is gone).
+    title: Mapped[str] = mapped_column(Text, default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    # SHA-256 of the source's content when shared, to flag "changed since shared".
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    shared_by: Mapped[str] = mapped_column(String, default="")
+    shared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class IndicatorType(enum.StrEnum):
+    PROCESS = (
+        "process"  # process / executable name, e.g. updater.exe (also matches a path ending in it)
+    )
+    PATH = "path"  # file path (case-insensitive, / and \\ treated alike)
+    IP = "ip"  # IPv4 / IPv6 address
+    DOMAIN = "domain"  # host or domain name
+    HASH = "hash"  # MD5 / SHA-1 / SHA-256 (hex)
+    REGISTRY = "registry"  # registry key or value path
+    TEXT = "text"  # anything else (mutex, service name, user name...), case-insensitive
+
+
+class MatchMode(enum.StrEnum):
+    EXACT = "exact"  # whole cell equals the indicator (after normalising for its type)
+    CONTAINS = "contains"  # indicator appears anywhere in the cell (slower, more false positives)
+
+
+class Indicator(Base):
+    """An indicator on a case's watchlist, checked against the rows of the case's images."""
+
+    __tablename__ = "indicators"
+    __table_args__ = (UniqueConstraint("case_id", "type", "normalized", "match_mode", "column"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    type: Mapped[IndicatorType] = mapped_column(Enum(IndicatorType))
+    value: Mapped[str] = mapped_column(Text)  # as entered
+    normalized: Mapped[str] = mapped_column(Text)  # what is compared
+    match_mode: Mapped[MatchMode] = mapped_column(Enum(MatchMode), default=MatchMode.EXACT)
+    # Only look in this result column ("" = any column).
+    column: Mapped[str] = mapped_column(String, default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    # Where it was taken from, if made from a result row ("R12:3"), else "".
+    source_key: Mapped[str] = mapped_column(String, default="")
+    created_by: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Last time every run of the case's images was checked for it (None = only new runs so far).
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class IndicatorHit(Base):
+    """A result row (of one image's run) that matches an indicator."""
+
+    __tablename__ = "indicator_hits"
+    __table_args__ = (UniqueConstraint("indicator_id", "run_id", "row_idx", "column"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    indicator_id: Mapped[int] = mapped_column(
+        ForeignKey("indicators.id", ondelete="CASCADE"), index=True
+    )
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    evidence_id: Mapped[int] = mapped_column(Integer, index=True)
+    row_idx: Mapped[int] = mapped_column(Integer)
+    column: Mapped[str] = mapped_column(String)
+    cell: Mapped[str] = mapped_column(Text)  # the matching cell value (truncated)
+    found_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SavedComparison(Base):
+    """A before/after comparison saved to a case. Stores the settings and the counts when it was
+    saved; opening it recomputes the diff from the (pinned) runs' current rows."""
+
+    __tablename__ = "saved_comparisons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String)
+    plugin: Mapped[str] = mapped_column(String)
+    evidence_a_id: Mapped[int] = mapped_column(Integer)
+    evidence_b_id: Mapped[int] = mapped_column(Integer)
+    run_a_id: Mapped[int] = mapped_column(Integer)
+    run_b_id: Mapped[int] = mapped_column(Integer)
+    keys: Mapped[list[str]] = mapped_column(JSON)
+    ignore: Mapped[list[str]] = mapped_column(JSON)
+    # {"only_a": n, "only_b": n, "changed": n, "same": n} when saved.
+    counts: Mapped[dict[str, int]] = mapped_column(JSON)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DismissedRecommendation(Base):
+    """A guide recommendation the analyst hid for one image ("not relevant here").
+
+    ``key`` identifies the recommendation: tool, plugin and normalised args (see
+    app/services/recommendations.py ``step_key``).
+    """
+
+    __tablename__ = "dismissed_recommendations"
+    __table_args__ = (UniqueConstraint("evidence_id", "key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    evidence_id: Mapped[int] = mapped_column(
+        ForeignKey("evidence.id", ondelete="CASCADE"), index=True
+    )
+    key: Mapped[str] = mapped_column(String)
+    tool: Mapped[str] = mapped_column(String)
+    plugin: Mapped[str] = mapped_column(String)
+    args: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_by: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AITaskStatus(enum.StrEnum):
+    QUEUED = "queued"  # waiting for a free agent slot
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"  # the AI asked to run plugins; the analyst decides
+    WAITING_FOR_RUNS = "waiting_for_runs"  # approved runs are queued/running
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"  # the app stopped while the task ran
+
+
+class AITask(Base):
+    """A goal the analyst gave the AI agent for one image (see app/ai/agent.py).
+
+    The agent works in steps: each step is one model call plus the tool calls it asked for
+    (read-only: list runs, search rows, read rows, read findings). The analyst's goal and the
+    final answer are AIMessages, so the task also appears in the AI chat history.
+    """
+
+    __tablename__ = "ai_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    evidence_id: Mapped[int] = mapped_column(ForeignKey("evidence.id"), index=True)
+    goal: Mapped[str] = mapped_column(Text)
+    status: Mapped[AITaskStatus] = mapped_column(Enum(AITaskStatus), default=AITaskStatus.QUEUED)
+    # {"max_steps": int, "max_seconds": int, "max_runs": int}
+    limits: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # "Yes to all": the AI's run requests are approved automatically (set at start, or later
+    # with "Approve all remaining").
+    approve_all: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Seconds spent waiting for the analyst's approval (not counted against max_seconds).
+    paused_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Checkpoint of the agent's conversation so the task can resume after an app restart
+    # (messages, counters, the step in progress). None before the first checkpoint.
+    state: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    resumed_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # "native" (function calling) or "text" (JSON action blocks): the protocol actually used.
+    tool_mode: Mapped[str | None] = mapped_column(String, default=None)
+    steps_used: Mapped[int] = mapped_column(Integer, default=0)
+    current_action: Mapped[str | None] = mapped_column(String, default=None)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    user_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_messages.id", ondelete="SET NULL"), default=None
+    )
+    answer_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_messages.id", ondelete="SET NULL"), default=None
+    )
+    created_by: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    steps: Mapped[list[AITaskStep]] = relationship(
+        back_populates="task", order_by="AITaskStep.idx", cascade="all, delete-orphan"
+    )
+    run_requests: Mapped[list[AIRunRequest]] = relationship(
+        back_populates="task", order_by="AIRunRequest.id", cascade="all, delete-orphan"
+    )
+
+
+class AITaskStep(Base):
+    """One thing an AI task did: a tool call (with a summary of its result), or a note."""
+
+    __tablename__ = "ai_task_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("ai_tasks.id", ondelete="CASCADE"), index=True)
+    idx: Mapped[int] = mapped_column(Integer)
+    turn: Mapped[int] = mapped_column(Integer)  # model call number (1-based)
+    kind: Mapped[str] = mapped_column(String)  # "tool" | "note" | "error"
+    tool: Mapped[str | None] = mapped_column(String, default=None)
+    args: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    summary: Mapped[str] = mapped_column(Text, default="")  # human-readable result summary
+    # Row keys the result contained (R<run>:<row>), for links.
+    row_keys: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    task: Mapped[AITask] = relationship(back_populates="steps")
+
+
+class AIRunRequest(Base):
+    """A plugin run an AI agent task asked for, and the analyst's decision on it.
+
+    status: "pending" (waiting for the analyst), "approved" (as asked), "edited" (approved with
+    changed options), "auto" (approved by "yes to all"), "denied", "expired" (the task ended
+    before a decision; requests never carry over to another task), "refused" (not allowed:
+    redundant run, runs limit, invalid options - never shown for approval).
+    """
+
+    __tablename__ = "ai_run_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("ai_tasks.id", ondelete="CASCADE"), index=True)
+    tool: Mapped[str] = mapped_column(String, default="volatility3")
+    plugin: Mapped[str] = mapped_column(String)
+    args: Mapped[dict[str, Any]] = mapped_column(JSON)  # as requested (normalised)
+    final_args: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)  # as run
+    reason: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String, default="pending")
+    note: Mapped[str | None] = mapped_column(Text, default=None)  # analyst's note / refusal
+    decided_by: Mapped[str | None] = mapped_column(String, default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), default=None, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    task: Mapped[AITask] = relationship(back_populates="run_requests")
+
+
+class AppSetting(Base):
+    """A setting changed in the app (Settings page). Overrides the FT_* environment value;
+    deleting the row ("Reset") returns to it. See app/services/app_settings.py."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[Any] = mapped_column(JSON)
+    updated_by: Mapped[str] = mapped_column(String, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

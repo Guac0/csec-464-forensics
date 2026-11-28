@@ -134,6 +134,9 @@ def _mark_deleted(
         session.execute(text(fts_delete), {"r": run.id})
     rows = session.scalar(select(func.count(ResultRow.id)).where(ResultRow.run_id == run.id)) or 0
     session.execute(delete(ResultRow).where(ResultRow.run_id == run.id))
+    from app.models import IndicatorHit
+
+    session.execute(delete(IndicatorHit).where(IndicatorHit.run_id == run.id))
     size = dir_bytes(run_dir(run.id))
     run.deleted_at = utcnow()
     run.delete_reason = reason

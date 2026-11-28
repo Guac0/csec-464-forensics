@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     ai_temperature: float = 0.2
     ai_max_tokens: int = 2000
     ai_timeout_seconds: int = 120
+    # How the AI agent ("give the AI a goal") calls its tools: "native" = OpenAI function
+    # calling, "text" = one fenced JSON action block per reply (any model), "auto" = native,
+    # falling back to text when the provider rejects tools or the model ignores them.
+    ai_tool_mode: Literal["auto", "native", "text"] = "auto"
+    # Default limits of an AI agent task (the analyst can lower/raise them per task).
+    agent_max_steps: int = 12  # model calls per task
+    agent_max_seconds: int = 600  # wall-clock time per task
+    agent_max_concurrent: int = 2  # tasks running at once (others wait)
+    agent_max_runs: int = 5  # plugin runs one task may queue
 
     @property
     def excluded_evidence_suffixes(self) -> frozenset[str]:
