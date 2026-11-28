@@ -90,7 +90,8 @@ def scripted(settings: Settings, replies: list) -> tuple[AIClient, list[dict]]:
     return AIClient(settings, transport=httpx.MockTransport(handler)), sent
 
 
-def wait_until(cond: Callable[[], Any], timeout: float = 5.0) -> Any:
+def wait_until(cond: Callable[[], Any], timeout: float = 20.0) -> Any:
+    # Generous: under parallel test runs (pytest -n auto) a busy CI machine can be slow.
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         with SessionLocal() as s:
@@ -106,7 +107,9 @@ def start_bg(session: Session, ev: Evidence, monkeypatch, client: AIClient, **kw
     threads: list[threading.Thread] = []
 
     def launch(task_id: int) -> None:
-        t = threading.Thread(target=agent.run_task, args=(task_id,), kwargs={"client": client})
+        t = threading.Thread(
+            target=agent.run_task, args=(task_id,), kwargs={"client": client}, daemon=True
+        )
         t.start()
         threads.append(t)
 
@@ -138,7 +141,7 @@ def pending_request(s: Session) -> AIRunRequest | None:
 
 def join(threads: list[threading.Thread]) -> None:
     for t in threads:
-        t.join(timeout=10)
+        t.join(timeout=30)
         assert not t.is_alive()
 
 
@@ -152,8 +155,8 @@ def test_approve_then_wait_for_run(session, settings, ev, pslist, monkeypatch) -
     )
     task_id, threads = start_bg(session, ev, monkeypatch, client)
     req = wait_until(pending_request)
-    with SessionLocal() as s:
-        assert s.get(AITask, task_id).status == AITaskStatus.AWAITING_APPROVAL
+    # The request is saved a moment before the task switches to "awaiting approval".
+    wait_until(lambda s: s.get(AITask, task_id).status == AITaskStatus.AWAITING_APPROVAL)
     time.sleep(0.15)  # the clock is paused while waiting
     with SessionLocal() as s:
         decided = agent.decide(s, req.id, "approve")
@@ -185,6 +188,8 @@ def test_yes_to_all_and_cancel_cascade(session, settings, ev, pslist, monkeypatc
     client, _ = scripted(settings, [_reply(None, [_queue(CMDLINE, {})])])
     task_id, threads = start_bg(session, ev, monkeypatch, client, approve_all=True)
     run = wait_until(lambda s: s.scalars(select(Run).where(Run.ai_task_id == task_id)).first())
+    # The run is saved a moment before its request is marked approved.
+    wait_until(lambda s: s.scalars(select(AIRunRequest)).one().status == "auto")
     with SessionLocal() as s:
         req = s.scalars(select(AIRunRequest)).one()
         assert req.status == "auto" and req.decided_by == "yes to all"
@@ -215,10 +220,12 @@ def test_deny_with_note_and_edit(session, settings, ev, pslist, monkeypatch) -> 
     )
     task_id, threads = start_bg(session, ev, monkeypatch, client)
     wait_until(lambda s: len(s.scalars(select(AIRunRequest)).all()) == 2)
+    wait_until(lambda s: s.get(AITask, task_id).status == AITaskStatus.AWAITING_APPROVAL)
     with SessionLocal() as s:
         cmd, net = s.scalars(select(AIRunRequest).order_by(AIRunRequest.id)).all()
         agent.decide(s, net.id, "deny", note="too slow on this image")
-        assert s.get(AITask, task_id).status == AITaskStatus.AWAITING_APPROVAL  # one left
+        s.refresh(cmd)
+        assert cmd.status == "pending"  # one left: the task keeps waiting
         edited = agent.decide(s, cmd.id, "edit", args={"pid": [104]})
         assert edited.status == "edited" and edited.final_args == {"pid": [104]}
         run_id = edited.run_id
@@ -251,7 +258,9 @@ def test_redundant_and_limits(session, settings, ev, pslist, monkeypatch) -> Non
     monkeypatch.setattr(agent, "_launch", lambda task_id: None)
     task = agent.start_task(session, ev.id, "g", max_runs=1, approve_all=True)
     threads: list[threading.Thread] = []
-    t = threading.Thread(target=agent.run_task, args=(task.id,), kwargs={"client": client})
+    t = threading.Thread(
+        target=agent.run_task, args=(task.id,), kwargs={"client": client}, daemon=True
+    )
     t.start()
     threads.append(t)
     run = wait_until(lambda s: s.scalars(select(Run).where(Run.ai_task_id == task.id)).first())

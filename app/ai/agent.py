@@ -987,18 +987,23 @@ class _Loop:
         task = self.task
         reqs = list(requests.values())
         started = time.monotonic()
+        # Write the task row only when what the analyst sees changes (not on every poll):
+        # fewer SQLite write transactions while the analyst decides or runs execute.
+        shown = None
         while True:
             for req in reqs:
                 self.s.refresh(req)
             pending = [r for r in reqs if r.status == "pending"]
             if not pending:
                 break
-            task.status = AITaskStatus.AWAITING_APPROVAL
-            self._set_action(f"Waiting for your approval ({len(pending)} run request(s))")
+            action = f"Waiting for your approval ({len(pending)} run request(s))"
+            if task.status != AITaskStatus.AWAITING_APPROVAL or action != shown:
+                task.status = AITaskStatus.AWAITING_APPROVAL
+                self._set_action(action)
+                shown = action
             self._check_cancel()
             self._sleep()
             self.paused = self._paused_before + (time.monotonic() - started)
-            task.paused_seconds = int(self.paused)
         self._paused_before = self.paused
         task.paused_seconds = int(self.paused)
         run_ids = [r.run_id for r in reqs if r.run_id]
@@ -1013,10 +1018,11 @@ class _Loop:
             if self._time_left() <= 0:
                 timed_out = True
                 break
-            task.status = AITaskStatus.WAITING_FOR_RUNS
-            self._set_action(
-                "Waiting for " + ", ".join(f"R{r.id} ({r.status.value})" for r in active)
-            )
+            action = "Waiting for " + ", ".join(f"R{r.id} ({r.status.value})" for r in active)
+            if task.status != AITaskStatus.WAITING_FOR_RUNS or action != shown:
+                task.status = AITaskStatus.WAITING_FOR_RUNS
+                self._set_action(action)
+                shown = action
             self._check_cancel()
             self._sleep()
         task.status = AITaskStatus.RUNNING

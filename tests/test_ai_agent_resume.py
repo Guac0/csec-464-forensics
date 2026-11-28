@@ -36,7 +36,7 @@ def _crashing_thread(task_id: int, client) -> threading.Thread:
         except _Crash:
             pass
 
-    t = threading.Thread(target=target)
+    t = threading.Thread(target=target, daemon=True)
     t.start()
     return t
 
@@ -46,7 +46,9 @@ def _restart(monkeypatch: pytest.MonkeyPatch, session, client) -> list[threading
     threads: list[threading.Thread] = []
 
     def launch(task_id: int) -> None:
-        t = threading.Thread(target=agent.run_task, args=(task_id,), kwargs={"client": client})
+        t = threading.Thread(
+            target=agent.run_task, args=(task_id,), kwargs={"client": client}, daemon=True
+        )
         t.start()
         threads.append(t)
 
